@@ -224,7 +224,7 @@ body.ready{transition:none}
 .fj-channels{width:100%;max-width:360px;display:flex;flex-direction:column;gap:10px;margin-bottom:24px}
 .fj-channel-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:13px 14px;display:flex;align-items:center;gap:12px;transition:border-color 0.2s}
 .fj-channel-card.joined{border-color:var(--green);background:rgba(34,197,94,0.06)}
-.fj-channel-icon{width:40px;height:40px;border-radius:10px;background:linear-gradient(135deg,#4f8ef7,#7c5cbf);display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0}
+.fj-channel-icon{width:44px;height:44px;border-radius:50%;background:linear-gradient(135deg,#4f8ef7,#7c5cbf);display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0;overflow:hidden;}
 .fj-channel-info{flex:1;text-align:left;min-width:0}
 .fj-channel-name{font-size:14px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .fj-channel-status{font-size:11px;margin-top:2px}
@@ -1893,21 +1893,31 @@ function _renderFjChannels() {
   var list = document.getElementById('fjChannelList');
   if (!list) return;
   list.innerHTML = _fjChannels.map(function(ch) {
-    return '<div class="fj-channel-card' + (ch.joined ? ' joined' : '') + '" id="fjCard_' + ch.id + '">' +
-      '<div class="fj-channel-icon">📢</div>' +
+    // Avatar: photo from API, else gradient initial
+    var initial = (ch.name || '?').charAt(0).toUpperCase();
+    var avatarHtml = ch.photoUrl
+      ? '<img src="' + _escFj(ch.photoUrl) + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;" onerror="this.parentNode.innerHTML=\'<span style=&quot;font-size:18px;font-weight:700;color:#fff&quot;>' + initial + '</span>\'">'
+      : '<span style="font-size:18px;font-weight:700;color:#fff">' + initial + '</span>';
+
+    // Join button — only for unjoined channels, using the link from API or env
+    var actionHtml;
+    if (ch.joined) {
+      actionHtml = '<div class="fj-join-btn done"><i class="ti ti-check"></i> Joined</div>';
+    } else if (ch.link) {
+      actionHtml = '<button class="fj-join-btn" onclick="fjOpenChannel(\'' + _escFj(ch.link) + '\')"><i class="ti ti-brand-telegram"></i> Join</button>';
+    } else {
+      actionHtml = '<div style="font-size:10px;color:var(--text3);text-align:center;line-height:1.3">No<br>link set</div>';
+    }
+
+    return '<div class="fj-channel-card' + (ch.joined ? ' joined' : '') + '" id="fjCard_' + _escFj(ch.id) + '">' +
+      '<div class="fj-channel-icon" style="border-radius:50%;overflow:hidden;">' + avatarHtml + '</div>' +
       '<div class="fj-channel-info">' +
         '<div class="fj-channel-name">' + _escFj(ch.name) + '</div>' +
         '<div class="fj-channel-status ' + (ch.joined ? 'ok' : 'pending') + '">' +
           (ch.joined ? '✅ Joined' : '⏳ Not joined yet') +
         '</div>' +
       '</div>' +
-      (ch.joined
-        ? '<div class="fj-join-btn done"><i class="ti ti-check"></i> Done</div>'
-        : (ch.link
-            ? '<button class="fj-join-btn" onclick="fjOpenChannel(\'' + _escFj(ch.link) + '\')"><i class="ti ti-brand-telegram"></i> Join</button>'
-            : '<div style="font-size:11px;color:var(--text3)">ID: ' + ch.id + '</div>'
-          )
-      ) +
+      actionHtml +
     '</div>';
   }).join('');
 }
