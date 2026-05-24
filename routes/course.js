@@ -471,6 +471,49 @@ router.get('/force-join/channels', (req, res) => {
   res.json({ channels, required: channels.length > 0 });
 });
 
+// In-memory cache for channel info (photo URL, username, title)
+// Avoids re-fetching on every /check call. Cache for 10 minutes.
+const _channelInfoCache = new Map(); // chatId -> { title, username, photoUrl, cachedAt }
+
+async function getChannelInfo(chatId, botToken) {
+  const now = Date.now();
+  const cached = _channelInfoCache.get(chatId);
+  if (cached && now - cached.cachedAt < 10 * 60 * 1000) return cached;
+
+  try {
+    // 1. getChat — title, username
+    const chatRes = await fetch(`https://api.telegram.org/bot${botToken}/getChat?chat_id=${encodeURIComponent(chatId)}`);
+    const chatData = await chatRes.json();
+    const chat = chatData.ok ? chatData.result : null;
+
+    const title    = chat ? (chat.title || chat.first_name || '') : '';
+    const username = chat ? (chat.username || '') : '';
+
+    // 2. getChat photo — small photo file_id
+    let photoUrl = null;
+    if (chat && chat.photo && chat.photo.small_file_id) {
+      try {
+        const fileRes = await fetch(`https://api.telegram.org/bot${botToken}/getFile?file_id=${encodeURIComponent(chat.photo.small_file_id)}`);
+        const fileData = await fileRes.json();
+        if (fileData.ok && fileData.result && fileData.result.file_path) {
+          photoUrl = `https://api.telegram.org/file/bot${botToken}/${fileData.result.file_path}`;
+        }
+      } catch (_) {}
+    }
+
+    // Build redirect link: prefer t.me/username, else use joinchat invite link if present
+    const redirectLink = username
+      ? `https://t.me/${username}`
+      : (chat && chat.invite_link ? chat.invite_link : null);
+
+    const info = { title, username, photoUrl, redirectLink, cachedAt: now };
+    _channelInfoCache.set(chatId, info);
+    return info;
+  } catch (e) {
+    return { title: '', username: '', photoUrl: null, redirectLink: null, cachedAt: now };
+  }
+}
+
 router.post('/force-join/check', async (req, res) => {
   const { userId } = req.body;
   if (!userId) return res.status(400).json({ error: 'userId required' });
@@ -482,17 +525,25 @@ router.post('/force-join/check', async (req, res) => {
   if (!BOT_TOKEN) return res.status(500).json({ error: 'BOT_TOKEN not set' });
 
   const results = await Promise.all(channels.map(async (ch) => {
-    try {
-      const url = `https://api.telegram.org/bot${BOT_TOKEN}/getChatMember?chat_id=${encodeURIComponent(ch.id)}&user_id=${encodeURIComponent(userId)}`;
-      const r = await fetch(url);
-      const data = await r.json();
-      const status = data.result && data.result.status;
-      const joined = ['member', 'administrator', 'creator'].includes(status);
-      return { ...ch, joined, status: status || 'not_member' };
-    } catch (e) {
-      // If check fails (bot not in channel etc), assume not joined
-      return { ...ch, joined: false, status: 'error' };
-    }
+    // Fetch channel info (title, photo, redirect link) in parallel with membership check
+    const [memberData, info] = await Promise.all([
+      fetch(`https://api.telegram.org/bot${BOT_TOKEN}/getChatMember?chat_id=${encodeURIComponent(ch.id)}&user_id=${encodeURIComponent(userId)}`)
+        .then(r => r.json()).catch(() => ({})),
+      getChannelInfo(ch.id, BOT_TOKEN),
+    ]);
+
+    const status = memberData.result && memberData.result.status;
+    const joined = ['member', 'administrator', 'creator'].includes(status);
+
+    // Use env-provided name/link as override, else fall back to API data
+    return {
+      id:          ch.id,
+      name:        ch.name !== ('Channel ' + (channels.indexOf(ch) + 1)) ? ch.name : (info.title || ch.name),
+      link:        ch.link || info.redirectLink || null,   // env override wins, then API username link
+      photoUrl:    info.photoUrl || null,
+      joined,
+      status:      status || 'not_member',
+    };
   }));
 
   const allJoined = results.every(c => c.joined);
