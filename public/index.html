@@ -1,1 +1,2334 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>EduBot</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<script src='//libtl.com/sdk.js' data-zone='11011844' data-sdk='show_11011844'></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@2.44.0/tabler-icons.min.css">
+<style>
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+:root{
+  --bg:#0a0e1a;--surface:#111827;--surface2:#1a2235;--surface3:#1e2d45;
+  --accent:#4f8ef7;--accent2:#7c5cbf;
+  --text:#e8eaf6;--text2:#8892a4;--text3:#4a5568;
+  --green:#22c55e;--red:#ef4444;--border:#1e2d45;
+  --radius:12px;--radius-sm:8px;
+  --topbar:#0d1224;
+}
+body.light-mode{
+  --bg:#f0f4ff;--surface:#ffffff;--surface2:#e8edf8;--surface3:#dce4f5;
+  --text:#1a1f36;--text2:#5a6380;--text3:#9aa3be;
+  --border:#d0d8ee;--topbar:#ffffff;
+}
+/* Theme toggle switch */
+.theme-toggle{display:flex;align-items:center;gap:6px;flex-shrink:0}
+.theme-toggle-label{font-size:11px;color:var(--text2);font-weight:500}
+.toggle-switch{position:relative;width:38px;height:22px;flex-shrink:0}
+.toggle-switch input{opacity:0;width:0;height:0;position:absolute}
+.toggle-slider{position:absolute;inset:0;background:var(--surface3);border-radius:22px;cursor:pointer;transition:background 0.25s;border:1px solid var(--border)}
 
+.manage-breadcrumb{display:flex;align-items:center;gap:4px;padding:8px 4px 12px;flex-wrap:wrap}
+.manage-bc-btn{background:none;border:none;color:var(--accent);font-size:13px;font-weight:600;cursor:pointer;padding:2px 4px}
+.manage-bc-sep{color:var(--text3);font-size:12px}
+.manage-back-btn{display:flex;align-items:center;gap:6px;background:var(--surface2);border:none;color:var(--text);font-size:13px;font-weight:500;padding:7px 12px;border-radius:var(--radius-sm);cursor:pointer;margin-bottom:10px}
+.edit-btn{background:none;border:none;color:var(--text3);cursor:pointer;padding:5px;display:flex;align-items:center;font-size:15px}
+.edit-btn:active{color:var(--accent)}
+.coming-soon-badge{display:inline-flex;align-items:center;gap:3px;font-size:10px;font-weight:700;color:#f59e0b;background:rgba(245,158,11,0.12);border:1px solid rgba(245,158,11,0.3);border-radius:20px;padding:2px 8px;margin-top:4px}
+
+.toggle-slider:before{content:'☀️';position:absolute;left:3px;top:50%;transform:translateY(-50%);font-size:11px;line-height:1;transition:left 0.25s}
+.toggle-switch input:checked + .toggle-slider{background:var(--accent)}
+.toggle-switch input:checked + .toggle-slider:before{content:'🌙';left:18px}
+html{position:fixed;inset:0;overflow:hidden}
+body{position:fixed;inset:0;overflow:hidden;background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,sans-serif;user-select:none}
+body.fadein{transition:none}
+body.ready{transition:none}
+
+.page{position:fixed;inset:0;background:var(--bg);display:flex;flex-direction:column;transform:translateX(100%);transition:transform 0.28s cubic-bezier(.4,0,.2,1);z-index:10;overflow:hidden;will-change:transform;backface-visibility:hidden;-webkit-backface-visibility:hidden}
+.page.active{transform:translateX(0);z-index:11}
+.page.prev{transform:translateX(-25%)}
+
+.topbar{display:flex;align-items:center;gap:10px;padding:12px 16px;background:var(--topbar);border-bottom:1px solid var(--border);flex-shrink:0;min-height:56px}
+.back-btn{width:36px;height:36px;border-radius:50%;background:var(--surface2);border:none;color:var(--text);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0}
+.topbar-title{font-size:16px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1}
+.topbar-sub{font-size:11px;color:var(--text2);margin-top:1px}
+.admin-btn{background:var(--surface2);border:1px solid var(--border);color:var(--text2);padding:6px 12px;border-radius:20px;font-size:12px;cursor:pointer;display:none;align-items:center;gap:5px;flex-shrink:0}
+.admin-btn.visible{display:flex}
+
+.page-body{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch}
+
+.search-wrap{padding:10px 16px;background:var(--topbar);border-bottom:1px solid var(--border);flex-shrink:0}
+.search-inner{position:relative}
+.search-input{width:100%;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:9px 12px 9px 36px;border-radius:var(--radius-sm);font-size:14px;outline:none}
+.search-input:focus{border-color:var(--accent)}
+.search-icon{position:absolute;left:11px;top:50%;transform:translateY(-50%);color:var(--text3);font-size:15px;pointer-events:none}
+
+/* Batch grid */
+.batch-grid{padding:16px;display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.batch-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;cursor:pointer;transition:border-color 0.2s,transform 0.15s}
+.batch-card:active{transform:scale(0.97);border-color:var(--accent)}
+.batch-img{width:100%;height:110px;object-fit:cover;background:var(--surface2);display:flex;align-items:center;justify-content:center;font-size:36px;color:var(--text3)}
+.batch-img img{width:100%;height:100%;object-fit:cover}
+.batch-body{padding:10px 12px}
+.batch-name{font-size:14px;font-weight:600;line-height:1.3}
+.batch-desc{font-size:11px;color:var(--text2);margin-top:3px}
+.batch-meta{font-size:11px;color:var(--accent);margin-top:5px;font-weight:500}
+.batch-private-badge{display:inline-flex;align-items:center;gap:3px;font-size:10px;font-weight:600;color:var(--text2);background:var(--surface2);border:1px solid var(--border);border-radius:20px;padding:2px 7px;margin-top:5px;letter-spacing:0.3px}
+.publish-btn{background:none;border:1px solid var(--border);color:var(--text2);cursor:pointer;padding:4px 8px;border-radius:6px;font-size:11px;font-weight:600;display:flex;align-items:center;gap:4px;transition:all 0.15s;flex-shrink:0}
+.publish-btn.public{border-color:var(--green);color:var(--green)}
+.publish-btn:active{opacity:0.7}
+
+/* List rows */
+.list{padding:0 16px 16px;display:flex;flex-direction:column;gap:8px}
+.row{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);display:flex;align-items:center;padding:13px 14px;gap:12px;cursor:pointer;transition:background 0.15s}
+.row:active{background:var(--surface2)}
+.row-icon{width:40px;height:40px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:19px;flex-shrink:0}
+.row-info{flex:1;min-width:0}
+.row-name{font-size:14px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.row-sub{font-size:12px;color:var(--text2);margin-top:2px}
+.row-arrow{color:var(--text3);font-size:17px;flex-shrink:0}
+
+/* Chapter row */
+.chap-row{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);display:flex;align-items:center;padding:13px 14px;gap:12px;cursor:pointer;transition:background 0.15s}
+.chap-row:active{background:var(--surface2)}
+.chap-num{width:36px;height:36px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;color:#fff;flex-shrink:0}
+.chap-info{flex:1;min-width:0}
+.chap-name{font-size:14px;font-weight:600}
+.chap-sub{font-size:12px;color:var(--text2);margin-top:2px}
+
+/* Unit row */
+.unit-row{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);display:flex;align-items:center;padding:12px 14px;gap:12px;cursor:pointer;transition:background 0.15s}
+.unit-row:active{background:var(--surface2)}
+.unit-icon{width:34px;height:34px;border-radius:8px;background:var(--accent2);display:flex;align-items:center;justify-content:center;font-size:15px;flex-shrink:0}
+
+/* Lecture row — see bottom of file for full redesign styles */
+.lec-row{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:12px 14px;transition:background 0.15s}
+
+/* Section label */
+.sec-label{padding:14px 16px 8px;font-size:11px;font-weight:600;color:var(--text2);letter-spacing:1.2px;text-transform:uppercase}
+
+/* Hero */
+.hero{margin:16px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden}
+.hero-img{width:100%;height:140px;object-fit:cover;background:var(--surface2);display:flex;align-items:center;justify-content:center;font-size:48px;color:var(--text3)}
+.hero-img img{width:100%;height:100%;object-fit:cover}
+.hero-body{padding:14px 16px}
+.hero-name{font-size:17px;font-weight:700}
+.hero-desc{font-size:13px;color:var(--text2);margin-top:4px}
+.hero-meta{display:flex;gap:12px;margin-top:10px}
+.hero-stat{font-size:12px;color:var(--text2);display:flex;align-items:center;gap:4px}
+.hero-stat i{color:var(--accent);font-size:14px}
+
+.loading{text-align:center;padding:50px 20px;color:var(--text2)}
+.loading i{font-size:32px;color:var(--accent);display:block;margin-bottom:10px;animation:spin 1s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.empty{text-align:center;padding:40px 20px;color:var(--text2);font-size:13px}
+.empty i{font-size:40px;color:var(--text3);display:block;margin-bottom:10px}
+
+/* Admin Modal */
+.modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:200;align-items:flex-end;justify-content:center}
+.modal-overlay.show{display:flex}
+.modal{background:var(--surface);border-radius:20px 20px 0 0;padding:20px 16px;width:100%;max-width:480px;max-height:90vh;overflow-y:auto;position:relative}
+.modal-handle{width:40px;height:4px;background:var(--border);border-radius:2px;margin:0 auto 16px}
+.modal-close{position:absolute;right:16px;top:16px;background:var(--surface2);border:none;color:var(--text2);width:32px;height:32px;border-radius:50%;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:16px}
+.modal-title{font-size:16px;font-weight:700;margin-bottom:14px;display:flex;align-items:center;gap:8px}
+.modal-title i{color:var(--accent)}
+.tabs{display:flex;gap:5px;margin-bottom:16px;overflow-x:auto;padding-bottom:2px;flex-wrap:nowrap}
+.tab-btn{padding:6px 12px;border-radius:20px;border:1px solid var(--border);background:transparent;color:var(--text2);font-size:11px;cursor:pointer;white-space:nowrap;flex-shrink:0}
+.tab-btn.active{background:var(--accent);color:#fff;border-color:var(--accent)}
+.tab-content{display:none}.tab-content.active{display:block}
+.form-group{margin-bottom:12px}
+.form-label{font-size:12px;color:var(--text2);margin-bottom:5px;display:block;font-weight:500}
+.form-input,.form-select{width:100%;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:10px 12px;border-radius:var(--radius-sm);font-size:14px;outline:none}
+.form-input:focus,.form-select:focus{border-color:var(--accent)}
+.form-select{appearance:none;cursor:pointer}
+.btn-add{width:100%;background:var(--accent);color:#fff;border:none;padding:12px;border-radius:var(--radius-sm);font-size:14px;font-weight:600;cursor:pointer;margin-top:4px;display:flex;align-items:center;justify-content:center;gap:6px}
+.btn-add:disabled{opacity:0.5}
+.img-preview{width:100%;height:120px;border-radius:var(--radius-sm);background:var(--surface2);border:2px dashed var(--border);display:flex;align-items:center;justify-content:center;cursor:pointer;overflow:hidden;margin-bottom:8px;position:relative}
+.img-preview img{width:100%;height:100%;object-fit:cover}
+.img-preview-label{color:var(--text3);font-size:13px;text-align:center}
+.manage-item{display:flex;align-items:center;gap:8px;padding:9px 12px;background:var(--surface2);border-radius:var(--radius-sm);margin-bottom:6px}
+.manage-item-icon{font-size:16px;flex-shrink:0}
+.manage-item-info{flex:1;min-width:0}
+.manage-item-name{font-size:13px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.manage-item-sub{font-size:11px;color:var(--text2);margin-top:1px}
+.del-btn{background:none;border:none;color:var(--text3);cursor:pointer;padding:5px;display:flex;align-items:center;font-size:16px}
+.del-btn:active{color:var(--red)}
+
+.bottom-nav{position:fixed;bottom:0;left:0;right:0;background:var(--topbar);border-top:1px solid var(--border);display:flex;z-index:50;max-width:480px;margin:0 auto}
+.nav-tab{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:10px 0 12px;cursor:pointer;color:var(--text3);font-size:10px;font-weight:500;gap:3px;transition:color 0.2s;border:none;background:none}
+.nav-tab i{font-size:22px}
+.nav-tab.active{color:var(--accent)}
+.nav-tab .access-dot{width:7px;height:7px;border-radius:50%;background:var(--green);position:absolute;top:8px;right:calc(50% - 14px)}
+.nav-tab .access-dot.locked{background:var(--red)}
+/* Add bottom padding to all pages */
+.page-body{padding-bottom:70px}
+
+/* Access Page */
+.access-page-wrap{padding:16px}
+.access-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden}
+.access-card-header{padding:20px;text-align:center;border-bottom:1px solid var(--border)}
+.access-card-header i{font-size:48px;display:block;margin-bottom:12px}
+.access-card-header h2{font-size:18px;font-weight:700;margin-bottom:6px}
+.access-card-header p{font-size:13px;color:var(--text2);line-height:1.5}
+.countdown-box{padding:20px;text-align:center;background:linear-gradient(135deg,#0f1a2e,#0a0e1a)}
+.countdown-time{font-size:42px;font-weight:700;color:var(--accent);font-variant-numeric:tabular-nums;letter-spacing:2px}
+.countdown-label{font-size:12px;color:var(--text2);margin-top:4px}
+.countdown-bar{height:4px;background:var(--surface3);border-radius:2px;margin:12px 20px 0;overflow:hidden}
+.countdown-bar-fill{height:100%;background:linear-gradient(90deg,var(--accent),var(--accent2));border-radius:2px;transition:width 1s linear}
+.access-action{padding:16px}
+.watch-ad-btn{background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff;border:none;padding:14px 20px;border-radius:var(--radius-sm);font-size:14px;font-weight:700;cursor:pointer;width:100%;display:flex;align-items:center;justify-content:center;gap:8px;transition:opacity 0.2s}
+.watch-ad-btn:active{opacity:0.85}
+.watch-ad-btn:disabled{opacity:0.5;cursor:not-allowed}
+.extend-btn{background:var(--surface2);color:var(--text);border:1px solid var(--border);padding:12px 20px;border-radius:var(--radius-sm);font-size:13px;font-weight:600;cursor:pointer;width:100%;display:flex;align-items:center;justify-content:center;gap:8px;margin-top:10px}
+.status-unlocked{color:var(--green)}
+.status-locked{color:var(--red)}
+
+.toast{position:fixed;top:16px;left:50%;transform:translateX(-50%) translateY(-70px);background:var(--surface);border:1px solid var(--border);color:var(--text);padding:10px 20px;border-radius:20px;font-size:13px;font-weight:500;z-index:999;transition:transform 0.3s;white-space:nowrap}
+.toast.show{transform:translateX(-50%) translateY(0)}
+.toast.success{border-color:var(--green);color:var(--green)}
+.toast.error{border-color:var(--red);color:var(--red)}
+
+/* Access Banner */
+.access-banner{margin:16px;border-radius:var(--radius);overflow:hidden;border:1px solid var(--border)}
+.access-locked{background:var(--surface);padding:24px 20px;text-align:center}
+.access-locked i{font-size:40px;color:var(--text3);display:block;margin-bottom:12px}
+.access-locked h3{font-size:16px;font-weight:700;margin-bottom:6px}
+.access-locked p{font-size:13px;color:var(--text2);margin-bottom:16px;line-height:1.5}
+.access-unlocked{background:linear-gradient(135deg,#1a2e1a,#1a2235);border-color:var(--green);padding:14px 16px;display:flex;align-items:center;gap:12px}
+.access-unlocked i{font-size:22px;color:var(--green);flex-shrink:0}
+.access-unlocked-info{flex:1}
+.access-unlocked-title{font-size:14px;font-weight:600;color:var(--green)}
+.access-unlocked-sub{font-size:12px;color:var(--text2);margin-top:2px}
+.watch-ad-btn{background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff;border:none;padding:13px 20px;border-radius:var(--radius-sm);font-size:14px;font-weight:700;cursor:pointer;width:100%;display:flex;align-items:center;justify-content:center;gap:8px;transition:opacity 0.2s}
+.watch-ad-btn:active{opacity:0.85}
+.watch-ad-btn:disabled{opacity:0.5;cursor:not-allowed}
+.locked-overlay{position:absolute;inset:0;background:rgba(10,14,26,0.7);backdrop-filter:blur(4px);display:flex;align-items:center;justify-content:center;z-index:5;border-radius:var(--radius)}
+.locked-overlay i{font-size:32px;color:var(--text3)}
+.sending-popup{position:fixed;bottom:32px;left:50%;transform:translateX(-50%) translateY(80px);background:var(--surface);border:1px solid var(--accent);border-radius:14px;padding:12px 20px;display:flex;align-items:center;gap:10px;z-index:999;transition:transform 0.3s cubic-bezier(.4,0,.2,1);white-space:nowrap;box-shadow:0 4px 24px rgba(0,0,0,0.2)}
+.sending-popup.show{transform:translateX(-50%) translateY(0)}
+.sending-dot{width:8px;height:8px;border-radius:50%;background:var(--accent);animation:pulse 1s ease-in-out infinite}
+@keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:0.5;transform:scale(0.8)}}
+.sending-text{font-size:13px;font-weight:500;color:var(--text)}
+</style>
+</head>
+<body>
+
+<!-- PAGE: Home (Batches) -->
+<div class="page active" id="page-home">
+  <div class="topbar">
+    <div style="display:flex;align-items:center;gap:10px;flex:1">
+      <div style="width:34px;height:34px;background:linear-gradient(135deg,#4f8ef7,#7c5cbf);border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:17px">📚</div>
+      <div><div style="font-size:15px;font-weight:700">EduBot</div><div style="font-size:10px;color:var(--text2)">Select Batch</div></div>
+    </div>
+    <button class="admin-btn" id="adminBtn" onclick="openAdmin()"><i class="ti ti-settings" style="font-size:13px"></i> Admin</button>
+    <button class="bell-btn" id="bellBtn" onclick="openAnnouncements()"><i class="ti ti-bell"></i><span class="bell-badge" id="bellBadge"></span></button>
+    <div class="theme-toggle">
+      <label class="toggle-switch" title="Toggle light/dark mode">
+        <input type="checkbox" id="themeToggle" onchange="toggleTheme(this.checked)">
+        <span class="toggle-slider"></span>
+      </label>
+    </div>
+  </div>
+  <div class="search-wrap">
+    <div class="search-inner">
+      <i class="ti ti-search search-icon"></i>
+      <input class="search-input" id="searchInput" placeholder="Search batches..." oninput="handleSearch(this.value)">
+    </div>
+  </div>
+  <!-- Flicker Notice Banner -->
+  <div class="flicker-notice">
+    <div class="flicker-notice-left">
+      <span class="flicker-notice-icon">⚡</span>
+      <div>
+        <div class="flicker-notice-title">Experiencing flickering or blank screens?</div>
+        <div class="flicker-notice-sub">A quick reload will fix it instantly.</div>
+      </div>
+    </div>
+    <button class="flicker-reload-btn" onclick="hardReload()">
+      <i class="ti ti-refresh"></i> Reload
+    </button>
+  </div>
+  <!-- Home Access Timer Bar -->
+  <div id="homeTimerBar" style="display:none;background:linear-gradient(90deg,#0f2a1a,#0a1f2e);border-bottom:1px solid var(--border);padding:8px 16px;flex-shrink:0;display:flex;align-items:center;justify-content:space-between;gap:10px">
+    <div style="display:flex;align-items:center;gap:8px">
+      <i class="ti ti-shield-check" style="color:var(--green);font-size:16px;flex-shrink:0"></i>
+      <div>
+        <div style="font-size:11px;color:var(--green);font-weight:600">Access Active</div>
+        <div style="font-size:10px;color:var(--text2)">Expires in <span id="homeCountdown" style="color:var(--text);font-weight:600">--:--:--</span></div>
+      </div>
+    </div>
+    <div id="homeTimerBar-progress" style="flex:1;max-width:100px;height:4px;background:var(--surface3);border-radius:2px;overflow:hidden">
+      <div id="homeTimerBarFill" style="height:100%;background:linear-gradient(90deg,var(--green),var(--accent));border-radius:2px;transition:width 1s linear;width:100%"></div>
+    </div>
+  </div>
+  <div class="page-body">
+    <div id="accessBanner"></div>
+    <div id="lockedMsg" style="display:none;text-align:center;padding:40px 20px;color:var(--text2)">
+      <i class="ti ti-lock" style="font-size:40px;color:var(--text3);display:block;margin-bottom:12px"></i>
+      <div style="font-size:15px;font-weight:600;margin-bottom:6px">Access Required</div>
+      <div style="font-size:13px">Watch an ad above to unlock lectures for 24 hours.</div>
+    </div>
+    <div id="batchSection">
+      <div class="sec-label">All Batches</div>
+      <div class="batch-grid" id="batchGrid"><div class="loading" style="grid-column:1/-1"><i class="ti ti-loader-2"></i>Loading...</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- PAGE: Subjects -->
+<div class="page" id="page-subjects">
+  <div class="topbar">
+    <button class="back-btn" onclick="goBack()"><i class="ti ti-arrow-left"></i></button>
+    <div style="flex:1;min-width:0"><div class="topbar-title" id="subjPageTitle"></div><div class="topbar-sub" id="subjPageSub"></div></div>
+  </div>
+  <div class="flicker-notice">
+    <div class="flicker-notice-left">
+      <span class="flicker-notice-icon">⚡</span>
+      <div>
+        <div class="flicker-notice-title">Experiencing flickering or blank screens?</div>
+        <div class="flicker-notice-sub">A quick reload will fix it instantly.</div>
+      </div>
+    </div>
+    <button class="flicker-reload-btn" onclick="hardReload()">
+      <i class="ti ti-refresh"></i> Reload
+    </button>
+  </div>
+  <div class="page-body">
+    <div class="hero" id="batchHero"></div>
+    <div class="sec-label">Subjects</div>
+    <div class="list" id="subjectList"></div>
+  </div>
+</div>
+
+<!-- PAGE: Chapters -->
+<div class="page" id="page-chapters">
+  <div class="topbar">
+    <button class="back-btn" onclick="goBack()"><i class="ti ti-arrow-left"></i></button>
+    <div style="flex:1;min-width:0"><div class="topbar-title" id="chapPageTitle"></div><div class="topbar-sub" id="chapPageSub"></div></div>
+  </div>
+  <div class="flicker-notice">
+    <div class="flicker-notice-left">
+      <span class="flicker-notice-icon">⚡</span>
+      <div>
+        <div class="flicker-notice-title">Experiencing flickering or blank screens?</div>
+        <div class="flicker-notice-sub">A quick reload will fix it instantly.</div>
+      </div>
+    </div>
+    <button class="flicker-reload-btn" onclick="hardReload()">
+      <i class="ti ti-refresh"></i> Reload
+    </button>
+  </div>
+  <div class="page-body">
+    <div class="sec-label">Chapters</div>
+    <div class="list" id="chapterList"></div>
+  </div>
+</div>
+
+<!-- PAGE: Units or Lectures -->
+<div class="page" id="page-units">
+  <div class="topbar">
+    <button class="back-btn" onclick="goBack()"><i class="ti ti-arrow-left"></i></button>
+    <div style="flex:1;min-width:0"><div class="topbar-title" id="unitPageTitle"></div><div class="topbar-sub" id="unitPageSub"></div></div>
+  </div>
+  <div class="flicker-notice">
+    <div class="flicker-notice-left">
+      <span class="flicker-notice-icon">⚡</span>
+      <div>
+        <div class="flicker-notice-title">Experiencing flickering or blank screens?</div>
+        <div class="flicker-notice-sub">A quick reload will fix it instantly.</div>
+      </div>
+    </div>
+    <button class="flicker-reload-btn" onclick="hardReload()">
+      <i class="ti ti-refresh"></i> Reload
+    </button>
+  </div>
+  <div class="page-body">
+    <div class="sec-label" id="unitSecLabel">Content</div>
+    <div class="list" id="unitList"></div>
+  </div>
+</div>
+
+<!-- PAGE: Lectures (inside unit) -->
+<div class="page" id="page-lectures">
+  <div class="topbar">
+    <button class="back-btn" onclick="goBack()"><i class="ti ti-arrow-left"></i></button>
+    <div style="flex:1;min-width:0"><div class="topbar-title" id="lecPageTitle"></div><div class="topbar-sub" id="lecPageSub"></div></div>
+  </div>
+  <div class="flicker-notice">
+    <div class="flicker-notice-left">
+      <span class="flicker-notice-icon">⚡</span>
+      <div>
+        <div class="flicker-notice-title">Experiencing flickering or blank screens?</div>
+        <div class="flicker-notice-sub">A quick reload will fix it instantly.</div>
+      </div>
+    </div>
+    <button class="flicker-reload-btn" onclick="hardReload()">
+      <i class="ti ti-refresh"></i> Reload
+    </button>
+  </div>
+  <div class="page-body">
+    <div class="sec-label">Lectures</div>
+    <div class="list" id="lectureList"></div>
+  </div>
+</div>
+
+<!-- PAGE: Lecture Detail -->
+<div class="page" id="page-lecture-detail">
+  <div class="topbar">
+    <button class="back-btn" onclick="goBack()"><i class="ti ti-arrow-left"></i></button>
+    <div style="flex:1;min-width:0">
+      <div class="topbar-title" id="lecDetailTitle">Lecture</div>
+      <div class="topbar-sub" id="lecDetailSub"></div>
+    </div>
+  </div>
+  <div class="flicker-notice">
+    <div class="flicker-notice-left">
+      <span class="flicker-notice-icon">⚡</span>
+      <div>
+        <div class="flicker-notice-title">Experiencing flickering or blank screens?</div>
+        <div class="flicker-notice-sub">A quick reload will fix it instantly.</div>
+      </div>
+    </div>
+    <button class="flicker-reload-btn" onclick="hardReload()">
+      <i class="ti ti-refresh"></i> Reload
+    </button>
+  </div>
+  <div class="page-body">
+    <div id="lecDetailContent"></div>
+  </div>
+</div>
+
+<!-- Admin Modal -->
+<div class="modal-overlay" id="adminModal" onclick="closeModalOutside(event)">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <button class="modal-close" onclick="closeAdmin()"><i class="ti ti-x"></i></button>
+    <div class="modal-title"><i class="ti ti-settings"></i>Admin Panel</div>
+    <div class="tabs">
+      <button class="tab-btn active" onclick="switchTab('batch')">+ Batch</button>
+      <button class="tab-btn" onclick="switchTab('subject')">+ Subject</button>
+      <button class="tab-btn" onclick="switchTab('chapter')">+ Chapter</button>
+      <button class="tab-btn" onclick="switchTab('unit')">+ Unit</button>
+      <button class="tab-btn" onclick="switchTab('lecture')">+ Lecture</button>
+      <button class="tab-btn" onclick="switchTab('manage')">Manage</button>
+    </div>
+
+    <!-- Add Batch -->
+    <div class="tab-content active" id="tab-batch">
+      <div class="form-group">
+        <label class="form-label">Batch Picture</label>
+        <div class="img-preview" id="imgPreview" onclick="document.getElementById('picInput').click()">
+          <div class="img-preview-label"><i class="ti ti-camera" style="font-size:24px;display:block;margin-bottom:6px;color:var(--text3)"></i>Tap to select image</div>
+        </div>
+        <input type="file" id="picInput" accept="image/*" style="display:none" onchange="handlePic(this)">
+      </div>
+      <div class="form-group"><label class="form-label">Batch Name</label><input class="form-input" id="bName" placeholder="e.g. JEE 2025 Batch"></div>
+      <div class="form-group"><label class="form-label">Description (optional)</label><input class="form-input" id="bDesc" placeholder="e.g. Complete preparation batch"></div>
+      <button class="btn-add" id="btnBatch" onclick="addBatch()"><i class="ti ti-plus"></i> Add Batch</button>
+    </div>
+
+    <!-- Add Subject -->
+    <div class="tab-content" id="tab-subject">
+      <div class="form-group"><label class="form-label">Batch</label><select class="form-select" id="sBatch"></select></div>
+      <div class="form-group"><label class="form-label">Subject Name</label><input class="form-input" id="sName" placeholder="e.g. Mathematics"></div>
+      <div class="form-group"><label class="form-label">Icon (emoji)</label><input class="form-input" id="sIcon" placeholder="📐" maxlength="4" style="font-size:20px"></div>
+      <div class="form-group">
+        <label class="form-label">Color</label>
+        <select class="form-select" id="sColor">
+          <option value="#4f8ef7">🔵 Blue</option><option value="#7c5cbf">🟣 Purple</option>
+          <option value="#22c55e">🟢 Green</option><option value="#f5a623">🟠 Orange</option>
+          <option value="#ef4444">🔴 Red</option><option value="#06b6d4">🩵 Cyan</option><option value="#ec4899">🩷 Pink</option>
+        </select>
+      </div>
+      <button class="btn-add" id="btnSubject" onclick="addSubject()"><i class="ti ti-plus"></i> Add Subject</button>
+    </div>
+
+    <!-- Add Chapter -->
+    <div class="tab-content" id="tab-chapter">
+      <div class="form-group"><label class="form-label">Batch</label><select class="form-select" id="cBatch" onchange="_saveSel('cBatch',this.value);updateSubjectSelect()"></select></div>
+      <div class="form-group"><label class="form-label">Subject</label><select class="form-select" id="cSubject" onchange="_saveSel('cSubject',this.value)"></select></div>
+      <div class="form-group"><label class="form-label">Chapter Name</label><input class="form-input" id="cName" placeholder="e.g. Chapter 1 - Algebra"></div>
+      <button class="btn-add" id="btnChapter" onclick="addChapter()"><i class="ti ti-plus"></i> Add Chapter</button>
+    </div>
+
+    <!-- Add Unit (optional) -->
+    <div class="tab-content" id="tab-unit">
+      <div class="form-group"><label class="form-label">Batch</label><select class="form-select" id="uBatch" onchange="_saveSel('uBatch',this.value);updateUSubjectSelect()"></select></div>
+      <div class="form-group"><label class="form-label">Subject</label><select class="form-select" id="uSubject" onchange="_saveSel('uSubject',this.value);updateUChapterSelect()"></select></div>
+      <div class="form-group"><label class="form-label">Chapter</label><select class="form-select" id="uChapter" onchange="_saveSel('uChapter',this.value)"></select></div>
+      <div class="form-group"><label class="form-label">Unit Name</label><input class="form-input" id="uName" placeholder="e.g. Unit 1 - Basics"></div>
+      <button class="btn-add" id="btnUnit" onclick="addUnit()"><i class="ti ti-plus"></i> Add Unit</button>
+    </div>
+
+    <!-- Add Lecture -->
+    <div class="tab-content" id="tab-lecture">
+      <div class="form-group"><label class="form-label">Batch</label><select class="form-select" id="lBatch" onchange="_saveSel('lBatch',this.value);updateLSubjectSelect()"></select></div>
+      <div class="form-group"><label class="form-label">Subject</label><select class="form-select" id="lSubject" onchange="_saveSel('lSubject',this.value);updateLChapterSelect()"></select></div>
+      <div class="form-group"><label class="form-label">Chapter</label><select class="form-select" id="lChapter" onchange="_saveSel('lChapter',this.value);updateLUnitSelect()"></select></div>
+      <div class="form-group"><label class="form-label">Unit (optional — leave empty if no unit)</label><select class="form-select" id="lUnit" onchange="_saveSel('lUnit',this.value)"></select></div>
+      <div class="form-group"><label class="form-label">Lecture Name</label><input class="form-input" id="lName" placeholder="e.g. Introduction to Limits"></div>
+      <div class="form-group"><label class="form-label">Bot Link</label><input class="form-input" id="lLink" placeholder="https://t.me/YourBot?start=CODE"></div>
+      <div class="form-group"><label class="form-label">Class Notes Link <span style="color:var(--text3);font-weight:400">(optional)</span></label><input class="form-input" id="lNotes" placeholder="https://t.me/YourBot?start=NOTES_CODE"></div>
+      <button class="btn-add" id="btnLecture" onclick="addLecture()"><i class="ti ti-plus"></i> Add Lecture</button>
+    </div>
+
+    <!-- Manage -->
+    <div class="tab-content" id="tab-manage">
+  <div id="manageBreadcrumb"></div>
+  <div id="manageList"></div>
+</div>
+  </div>
+</div>
+
+<!-- PAGE: Access -->
+<div class="page" id="page-access">
+  <div class="topbar">
+    <div style="display:flex;align-items:center;gap:10px;flex:1">
+      <div style="width:34px;height:34px;background:linear-gradient(135deg,#22c55e,#4f8ef7);border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:17px">🔑</div>
+      <div><div style="font-size:15px;font-weight:700">Access</div><div style="font-size:10px;color:var(--text2)">Watch ad to unlock</div></div>
+    </div>
+  </div>
+  <div class="flicker-notice">
+    <div class="flicker-notice-left">
+      <span class="flicker-notice-icon">⚡</span>
+      <div>
+        <div class="flicker-notice-title">Experiencing flickering or blank screens?</div>
+        <div class="flicker-notice-sub">A quick reload will fix it instantly.</div>
+      </div>
+    </div>
+    <button class="flicker-reload-btn" onclick="hardReload()">
+      <i class="ti ti-refresh"></i> Reload
+    </button>
+  </div>
+  <div class="page-body">
+    <div class="access-page-wrap">
+      <div class="access-card" id="accessCard">
+        <!-- Rendered by JS -->
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Bottom Nav -->
+<div class="bottom-nav">
+  <button class="nav-tab active" id="navHome" onclick="switchNavTab('home')">
+    <i class="ti ti-home"></i>
+    Home
+  </button>
+  <button class="nav-tab" id="navAccess" onclick="switchNavTab('access')">
+    <i class="ti ti-key" style="position:relative"></i>
+    <span id="accessDot" class="access-dot locked" style="position:relative;display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--red);margin-left:4px;vertical-align:middle"></span>
+    Access
+  </button>
+  <button class="nav-tab" id="navRefer" onclick="switchNavTab('refer')">
+    <i class="ti ti-share"></i>
+    Refer
+  </button>
+</div>
+
+<!-- Refer Page -->
+<div class="page" id="page-refer">
+  <div class="page-header">
+    <div class="page-title"><i class="ti ti-share" style="color:var(--accent)"></i> Share & Refer</div>
+  </div>
+  <div class="page-body">
+
+    <!-- Referral link card -->
+    <div class="card" style="margin-bottom:14px">
+      <div style="font-size:13px;font-weight:600;margin-bottom:8px;color:var(--text)">🔗 Your Referral Link</div>
+      <div id="referLinkBox" style="background:var(--surface2);border-radius:var(--radius-sm);padding:10px 12px;font-size:12px;font-family:monospace;color:var(--accent);word-break:break-all;margin-bottom:10px">Loading...</div>
+      <div style="display:flex;gap:8px">
+        <button class="btn-add" style="flex:1" onclick="copyReferLink()"><i class="ti ti-copy"></i> Copy Link</button>
+        <button class="btn-add" style="flex:1;background:var(--surface2);color:var(--text)" onclick="shareReferLink()"><i class="ti ti-brand-telegram"></i> Share</button>
+      </div>
+    </div>
+
+    <!-- Stats card -->
+    <div class="card" style="margin-bottom:14px">
+      <div style="font-size:13px;font-weight:600;margin-bottom:12px;color:var(--text)">📊 Your Stats</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div style="background:var(--surface2);border-radius:var(--radius-sm);padding:14px 12px;text-align:center">
+          <div id="referCount" style="font-size:28px;font-weight:700;color:var(--accent)">–</div>
+          <div style="font-size:11px;color:var(--text2);margin-top:4px">Total Referrals</div>
+        </div>
+        <div style="background:var(--surface2);border-radius:var(--radius-sm);padding:14px 12px;text-align:center">
+          <div id="referPoints" style="font-size:28px;font-weight:700;color:#f59e0b">–</div>
+          <div style="font-size:11px;color:var(--text2);margin-top:4px">Points Earned</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Rewards card -->
+    <div class="card" style="margin-bottom:14px;border:1px solid rgba(245,158,11,0.25)">
+      <div style="font-size:13px;font-weight:600;margin-bottom:10px;color:var(--text)">🎁 Rewards</div>
+      <div style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--surface2);border-radius:var(--radius-sm);margin-bottom:8px">
+        <span style="font-size:22px">🏆</span>
+        <div>
+          <div style="font-size:12px;font-weight:600;color:var(--text)">Free Access Pass</div>
+          <div style="font-size:11px;color:var(--text2)">Redeem with points for free lecture access</div>
+        </div>
+        <span class="coming-soon-badge" style="margin-left:auto">🔜 Soon</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--surface2);border-radius:var(--radius-sm);margin-bottom:8px">
+        <span style="font-size:22px">⭐</span>
+        <div>
+          <div style="font-size:12px;font-weight:600;color:var(--text)">Bonus Points</div>
+          <div style="font-size:11px;color:var(--text2)">Extra points for milestone referrals</div>
+        </div>
+        <span class="coming-soon-badge" style="margin-left:auto">🔜 Soon</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--surface2);border-radius:var(--radius-sm)">
+        <span style="font-size:22px">🎟️</span>
+        <div>
+          <div style="font-size:12px;font-weight:600;color:var(--text)">Special Batch Access</div>
+          <div style="font-size:11px;color:var(--text2)">Unlock premium batches with points</div>
+        </div>
+        <span class="coming-soon-badge" style="margin-left:auto">🔜 Soon</span>
+      </div>
+      <div style="margin-top:12px;font-size:11px;color:var(--text3);text-align:center">
+        Each referral = <strong style="color:#f59e0b">1 point</strong> · Rewards launching soon!
+      </div>
+    </div>
+
+    <!-- How it works -->
+    <div class="card">
+      <div style="font-size:13px;font-weight:600;margin-bottom:10px;color:var(--text)">ℹ️ How It Works</div>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <div style="display:flex;align-items:center;gap:10px">
+          <div style="width:24px;height:24px;border-radius:50%;background:var(--accent);color:#fff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0">1</div>
+          <div style="font-size:12px;color:var(--text2)">Copy your unique referral link above</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px">
+          <div style="width:24px;height:24px;border-radius:50%;background:var(--accent);color:#fff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0">2</div>
+          <div style="font-size:12px;color:var(--text2)">Share it with your friends</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px">
+          <div style="width:24px;height:24px;border-radius:50%;background:var(--accent);color:#fff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0">3</div>
+          <div style="font-size:12px;color:var(--text2)">When they open the bot using your link, you get <strong style="color:#f59e0b">1 point</strong></div>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px">
+          <div style="width:24px;height:24px;border-radius:50%;background:var(--accent);color:#fff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0">4</div>
+          <div style="font-size:12px;color:var(--text2)">Redeem points for rewards (coming soon!)</div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<div class="sending-popup" id="sendingPopup">
+  <div class="sending-dot"></div>
+  <span class="sending-text">Lecture delivered to your bot! Check Telegram now 📩</span>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+var tg = window.Telegram && window.Telegram.WebApp;
+if (tg) {
+  tg.ready();
+  tg.expand();
+  // Fix 2: Force a reflow after expand so the WebView recalculates layout
+  // with the new viewport dimensions before the first paint.
+  requestAnimationFrame(function() {
+    document.body.offsetHeight; // reading this triggers synchronous reflow
+    // Fix 3: GPU-accelerate ONLY the active page-body and bottom-nav.
+    // We deliberately exclude toasts, popups and the FAB because promoting
+    // them to compositor layers makes them visible before their show/active
+    // class is applied, causing the "elements showing without a call" bug.
+    var activePage = document.querySelector('.page.active');
+    if (activePage) {
+      var body = activePage.querySelector('.page-body');
+      if (body) {
+        body.style.transform = 'translateZ(0)';
+        body.style.webkitOverflowScrolling = 'touch';
+      }
+    }
+    var nav = document.querySelector('.bottom-nav');
+    if (nav) nav.style.transform = 'translateZ(0)';
+  });
+}
+
+// Hard reload — uses Telegram's native reload to match the three-dot menu behaviour
+function hardReload() {
+  if (tg && tg.reload) {
+    tg.reload();
+  } else {
+    // Force a fresh navigation — bypasses WebView cache better than location.reload()
+    location.href = location.href.split('?')[0] + '?_r=' + Date.now();
+  }
+}
+
+var batches = [];
+var _popupLectures = []; // stores lectures for popup reference by index
+var isAdmin = false;
+var pageStack = ['home'];
+var picBase64 = '';
+
+// ── Nav ───────────────────────────────────────────────────────────────────────
+function goTo(pageId) {
+  var cur = pageStack[pageStack.length-1];
+  var curEl = document.getElementById('page-'+cur);
+  var nextEl = document.getElementById('page-'+pageId);
+  nextEl.style.transition = 'none';
+  nextEl.style.transform = 'translateX(100%)';
+  nextEl.classList.add('active');
+  nextEl.getBoundingClientRect();
+  nextEl.style.transition = '';
+  nextEl.style.transform = '';
+  curEl.style.transform = 'translateX(-25%)';
+  curEl.style.transition = 'transform 0.28s cubic-bezier(.4,0,.2,1)';
+  pageStack.push(pageId);
+  syncBackButton();
+  setTimeout(() => {
+    curEl.classList.remove('active');
+    curEl.style.transform = '';
+    curEl.style.transition = '';
+  }, 300);
+}
+
+function goBack() {
+  if (pageStack.length <= 1) return;
+  var cur = pageStack.pop();
+  var prev = pageStack[pageStack.length-1];
+  var curEl = document.getElementById('page-'+cur);
+  var prevEl = document.getElementById('page-'+prev);
+  prevEl.style.transition = 'none';
+  prevEl.style.transform = 'translateX(-25%)';
+  prevEl.classList.add('active');
+  prevEl.getBoundingClientRect();
+  prevEl.style.transition = 'transform 0.28s cubic-bezier(.4,0,.2,1)';
+  prevEl.style.transform = '';
+  curEl.style.transition = 'transform 0.28s cubic-bezier(.4,0,.2,1)';
+  curEl.style.transform = 'translateX(100%)';
+  syncBackButton();
+  setTimeout(() => {
+    curEl.classList.remove('active');
+    curEl.style.transform = '';
+    curEl.style.transition = '';
+  }, 300);
+}
+
+function syncBackButton() {
+  if (!tg) return;
+  // Always re-register the handler to survive app focus loss
+  tg.BackButton.offClick(goBack);
+  tg.BackButton.onClick(goBack);
+  if (pageStack.length > 1) {
+    tg.BackButton.show();
+  } else {
+    tg.BackButton.hide();
+  }
+}
+
+// Also re-sync when app regains focus (user comes back from bot)
+if (tg) {
+  tg.onEvent('activated', function() {
+    syncBackButton();
+    // Close popup cleanly if it was open when user left
+    var popup = document.getElementById('lecturePopup');
+    if (popup && popup.classList.contains('show')) {
+      // no-op, popup disabled
+    }
+  });
+}
+
+// ── Open Batch ────────────────────────────────────────────────────────────────
+function openBatch(bid) {
+  var b = batches.find(x => x._id === bid);
+  if (!b) return;
+  document.getElementById('subjPageTitle').textContent = b.name;
+  document.getElementById('subjPageSub').textContent = b.subjects.length + ' subjects';
+  document.getElementById('batchHero').innerHTML = `
+    <div class="hero-img">${b.pic ? `<img src="${b.pic}">` : '🎓'}</div>
+    <div class="hero-body">
+      <div class="hero-name">${b.name}</div>
+      ${b.description ? `<div class="hero-desc">${b.description}</div>` : ''}
+      <div class="hero-meta">
+        <span class="hero-stat"><i class="ti ti-books"></i>${b.subjects.length} subjects</span>
+        <span class="hero-stat"><i class="ti ti-layers"></i>${b.subjects.reduce((a,s)=>a+s.chapters.length,0)} chapters</span>
+      </div>
+    </div>`;
+  var list = document.getElementById('subjectList');
+  list.innerHTML = !b.subjects.length ? '<div class="empty"><i class="ti ti-books"></i>No subjects yet</div>' :
+    b.subjects.map(s => `
+      <div class="row" onclick="openSubject('${bid}','${s._id}')">
+        <div class="row-icon" style="background:${s.color}22;border:1px solid ${s.color}44">${s.icon}</div>
+        <div class="row-info">
+          <div class="row-name">${s.name}</div>
+          <div class="row-sub">${s.chapters.length} chapters</div>
+        </div>
+        <i class="ti ti-chevron-right row-arrow"></i>
+      </div>`).join('');
+  goTo('subjects');
+}
+
+// ── Open Subject ──────────────────────────────────────────────────────────────
+function openSubject(bid, sid) {
+  var b = batches.find(x => x._id === bid);
+  var s = b && b.subjects.find(x => x._id === sid);
+  if (!s) return;
+  document.getElementById('chapPageTitle').textContent = s.name;
+  document.getElementById('chapPageSub').textContent = s.chapters.length + ' chapters';
+  var list = document.getElementById('chapterList');
+  list.innerHTML = !s.chapters.length ? '<div class="empty"><i class="ti ti-layers"></i>No chapters yet</div>' :
+    s.chapters.map((c,i) => `
+      <div class="chap-row" onclick="openChapter('${bid}','${sid}','${c._id}')">
+        <div class="chap-num" style="background:${s.color}">${i+1}</div>
+        <div class="chap-info">
+          <div class="chap-name">${c.name}</div>
+          <div class="chap-sub">${c.units.length ? c.units.length+' units' : c.lectures.length+' lectures'}</div>
+        </div>
+        <i class="ti ti-chevron-right row-arrow"></i>
+      </div>`).join('');
+  goTo('chapters');
+}
+
+// ── Open Chapter ──────────────────────────────────────────────────────────────
+function openChapter(bid, sid, cid) {
+  var b = batches.find(x => x._id === bid);
+  var s = b && b.subjects.find(x => x._id === sid);
+  var c = s && s.chapters.find(x => x._id === cid);
+  if (!c) return;
+  _popupLectures = []; // Reset on every chapter open
+  var color = s.color;
+  document.getElementById('unitPageTitle').textContent = c.name;
+
+  var html = '';
+
+  if (c.units && c.units.length > 0) {
+    var totalLec = c.units.reduce((a,u)=>a+u.lectures.length,0) + c.lectures.length;
+    document.getElementById('unitPageSub').textContent = c.units.length + ' units · ' + totalLec + ' lectures';
+    document.getElementById('unitSecLabel').textContent = 'UNITS';
+    html += c.units.map((u,i) => `
+      <div class="unit-row" onclick="openUnit('${bid}','${sid}','${cid}','${u._id}')">
+        <div class="unit-icon"><i class="ti ti-folder" style="color:#fff;font-size:16px"></i></div>
+        <div class="row-info">
+          <div class="row-name">${u.name}</div>
+          <div class="row-sub">${u.lectures.length} lectures</div>
+        </div>
+        <i class="ti ti-chevron-right row-arrow"></i>
+      </div>`).join('');
+
+    // Direct lectures also shown in separate section
+    if (c.lectures && c.lectures.length > 0) {
+      html += `<div style="padding:14px 0 8px;font-size:11px;font-weight:600;color:var(--text2);letter-spacing:1.2px;text-transform:uppercase">OTHER LECTURES</div>`;
+      html += c.lectures.map((l,i) => {
+        var idx = _popupLectures.push(l) - 1;
+        return `
+        <div class="lec-row">
+          <div class="lec-num">${i+1}</div>
+          <div class="lec-info">
+            <div class="lec-name">${l.name}</div>
+            ${l.comingSoon
+              ? '<div style="margin-top:6px"><span class="coming-soon-badge">🔜 Coming Soon</span></div>'
+              : `<div class="lec-mini-btns">
+                  <button class="lec-mini-btn lec-mini-watch" onclick="openLink('${l.link}','lecture')"><i class="ti ti-player-play-filled"></i> Lecture</button>
+                  ${l.notes ? `<button class="lec-mini-btn lec-mini-notes" onclick="openLink('${l.notes}','notes')"><i class="ti ti-notes"></i> Notes</button>` : ''}
+                </div>`}
+          </div>
+        </div>`;
+      }).join('');
+    }
+  } else {
+    // No units — show lectures directly
+    document.getElementById('unitPageSub').textContent = c.lectures.length + ' lectures';
+    document.getElementById('unitSecLabel').textContent = 'LECTURES';
+    html = !c.lectures.length ? '<div class="empty"><i class="ti ti-video"></i>No lectures yet</div>' :
+      c.lectures.map((l,i) => {
+        var idx = _popupLectures.push(l) - 1;
+        return `
+        <div class="lec-row">
+          <div class="lec-num">${i+1}</div>
+          <div class="lec-info">
+            <div class="lec-name">${l.name}</div>
+            <div class="lec-mini-btns">
+              <button class="lec-mini-btn lec-mini-watch" onclick="openLink('${l.link}','lecture')"><i class="ti ti-player-play-filled"></i> Lecture</button>
+              ${l.notes ? `<button class="lec-mini-btn lec-mini-notes" onclick="openLink('${l.notes}','notes')"><i class="ti ti-notes"></i> Notes</button>` : ''}
+            </div>
+          </div>
+        </div>`;
+      }).join('');
+  }
+  document.getElementById('unitList').innerHTML = html;
+  goTo('units');
+}
+
+// ── Open Unit ─────────────────────────────────────────────────────────────────
+function openUnit(bid, sid, cid, uid) {
+  var b = batches.find(x => x._id === bid);
+  var s = b && b.subjects.find(x => x._id === sid);
+  var c = s && s.chapters.find(x => x._id === cid);
+  var u = c && c.units.find(x => x._id === uid);
+  if (!u) return;
+  _popupLectures = []; // Reset on every unit open
+  document.getElementById('lecPageTitle').textContent = u.name;
+  document.getElementById('lecPageSub').textContent = u.lectures.length + ' lectures';
+  document.getElementById('lectureList').innerHTML = !u.lectures.length ? '<div class="empty"><i class="ti ti-video"></i>No lectures yet</div>' :
+    u.lectures.map((l,i) => {
+      var idx = _popupLectures.push(l) - 1;
+      return `
+      <div class="lec-row">
+        <div class="lec-num">${i+1}</div>
+        <div class="lec-info">
+          <div class="lec-name">${l.name}</div>
+          ${l.comingSoon
+            ? '<div style="margin-top:6px"><span class="coming-soon-badge">🔜 Coming Soon</span></div>'
+            : `<div class="lec-mini-btns">
+                <button class="lec-mini-btn lec-mini-watch" onclick="openLink('${l.link}','lecture')"><i class="ti ti-player-play-filled"></i> Lecture</button>
+                ${l.notes ? `<button class="lec-mini-btn lec-mini-notes" onclick="openLink('${l.notes}','notes')"><i class="ti ti-notes"></i> Notes</button>` : ''}
+              </div>`}
+        </div>
+      </div>`;
+    }).join('');
+  goTo('lectures');
+}
+
+function openLink(url, type) {
+  if (!url || url.trim() === '') {
+    toast('Link not available!', 'error');
+    return;
+  }
+  // Open link first — THEN close popup after a small delay
+  // This prevents the popup close animation from conflicting with app-switch
+  if (tg) {
+    tg.openLink(url, { try_instant_view: false });
+  } else {
+    var a = document.createElement('a');
+    a.href = url;
+    a.target = '_blank';
+    a.rel = 'noopener noreferrer';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  }
+  showSendingPopup(type);
+}
+
+function showSendingPopup(type) {
+  var p = document.getElementById('sendingPopup');
+  var txt = p.querySelector('.sending-text');
+  txt.textContent = type === 'notes' ? 'Notes delivered to your bot! Check Telegram now 📝' : 'Lecture delivered to your bot! Check Telegram now 📩';
+  p.classList.add('show');
+  setTimeout(() => p.classList.remove('show'), 2500);
+}
+
+// ── Load ──────────────────────────────────────────────────────────────────────
+async function load() {
+  // Load from cache instantly — prevents blink
+  try {
+    var cached = localStorage.getItem('edubot_batches');
+    if (cached) {
+      batches = JSON.parse(cached);
+      renderBatches(batches);
+    }
+  } catch(e) {}
+
+  // Fetch fresh data in background
+  try {
+    var fresh = await (await fetch('/api/batches')).json();
+    // Only update if data has changed
+    if (JSON.stringify(fresh) !== JSON.stringify(batches)) {
+      batches = fresh;
+      renderBatches(batches);
+    }
+    localStorage.setItem('edubot_batches', JSON.stringify(fresh));
+  } catch(e) {
+    if (!batches.length) {
+      document.getElementById('batchGrid').innerHTML = '<div class="empty" style="grid-column:1/-1"><i class="ti ti-wifi-off"></i>Load failed</div>';
+    }
+  }
+}
+
+function renderBatches(list) {
+  var el = document.getElementById('batchGrid');
+  // Non-admin users: show only public batches
+  var visible = isAdmin ? list : list.filter(b => b.isPublic === true);
+  if (!visible || !visible.length) {
+    el.innerHTML = '<div class="empty" style="grid-column:1/-1"><i class="ti ti-school"></i>No batches yet</div>';
+    return;
+  }
+  el.innerHTML = visible.map(b => `
+    <div class="batch-card" onclick="openBatch('${b._id}')" style="${b.isPublic !== true ? 'opacity:0.6;border-style:dashed' : ''}">
+      <div class="batch-img" style="position:relative">
+        ${b.pic ? `<img src="${b.pic}">` : '🎓'}
+        ${b.isPublic !== true ? '<div style="position:absolute;top:6px;left:6px;background:rgba(0,0,0,0.7);border-radius:6px;padding:3px 7px;font-size:10px;font-weight:700;color:#aaa;display:flex;align-items:center;gap:4px"><i class="ti ti-lock" style="font-size:10px"></i>Private</div>' : ''}
+      </div>
+      <div class="batch-body">
+        <div class="batch-name">${b.name}</div>
+        ${b.description ? `<div class="batch-desc">${b.description}</div>` : ''}
+        <div class="batch-meta">${b.subjects.length} subjects</div>
+      </div>
+    </div>`).join('');
+}
+
+function handleSearch(q) {
+  q = q.toLowerCase().trim();
+  renderBatches(!q ? batches : batches.filter(b => b.name.toLowerCase().includes(q)));
+}
+
+// ── Toast ─────────────────────────────────────────────────────────────────────
+function toast(msg, type) {
+  var t = document.getElementById('toast');
+  t.textContent = msg; t.className = 'toast show'+(type?' '+type:'');
+  setTimeout(()=>t.classList.remove('show'),2800);
+}
+
+// ── Theme Toggle ──────────────────────────────────────────────────────────────
+function toggleTheme(isLight) {
+  if (isLight) {
+    document.body.classList.add('light-mode');
+    localStorage.setItem('edubot_theme', 'light');
+  } else {
+    document.body.classList.remove('light-mode');
+    localStorage.setItem('edubot_theme', 'dark');
+  }
+}
+
+function initTheme() {
+  var saved = localStorage.getItem('edubot_theme');
+  if (saved === 'light') {
+    document.body.classList.add('light-mode');
+    var toggle = document.getElementById('themeToggle');
+    if (toggle) toggle.checked = true;
+  }
+}
+
+// ── Pic ───────────────────────────────────────────────────────────────────────
+function handlePic(input) {
+  var file = input.files[0];
+  if (!file) return;
+  var reader = new FileReader();
+  reader.onload = function(e) {
+    picBase64 = e.target.result;
+    document.getElementById('imgPreview').innerHTML = `<img src="${picBase64}">`;
+  };
+  reader.readAsDataURL(file);
+}
+
+// ── Admin ─────────────────────────────────────────────────────────────────────
+async function checkAdminAccess() {
+  try {
+    var config = await (await fetch('/api/config')).json();
+    var ownerId = config.ownerId;
+    if (config.botUsername) window._botUsername = config.botUsername;
+    if (!ownerId) return;
+    var tgUser = tg && tg.initDataUnsafe && tg.initDataUnsafe.user;
+    var curId = tgUser ? tgUser.id : null;
+    if (curId && curId === ownerId) { isAdmin = true; document.getElementById('adminBtn').classList.add('visible'); }
+  } catch(e) {}
+}
+
+async function apiFetch(url, method, body) {
+  var opts = { method: method||'GET', headers: {'Content-Type':'application/json','x-tg-init-data': tg?tg.initData:''} };
+  if (body) opts.body = JSON.stringify(body);
+  var r = await fetch(url, opts);
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+}
+
+function openAdmin(tab) {
+  if (!isAdmin) return;
+  document.getElementById('adminModal').classList.add('show');
+  populateAllSelects();
+  switchTab(tab||'batch');
+}
+function closeAdmin() { document.getElementById('adminModal').classList.remove('show'); }
+function closeModalOutside(e) { if (e.target.id==='adminModal') closeAdmin(); }
+
+function switchTab(name) {
+  var tabs = ['batch','subject','chapter','unit','lecture','manage'];
+  document.querySelectorAll('.tab-btn').forEach((b,i)=>b.classList.toggle('active',tabs[i]===name));
+  document.querySelectorAll('.tab-content').forEach(t=>t.classList.remove('active'));
+  document.getElementById('tab-'+name).classList.add('active');
+  if (name==='manage') renderManage();
+}
+
+function batchOpts() { return batches.map(b=>`<option value="${b._id}">${b.name}</option>`).join('')||'<option>Add a batch first</option>'; }
+
+function subjectOpts(bid) {
+  var b = batches.find(x=>x._id===bid);
+  return b ? b.subjects.map(s=>`<option value="${s._id}">${s.icon} ${s.name}</option>`).join('')||'<option>Add a subject first</option>' : '<option>Select a batch</option>';
+}
+
+function chapterOpts(bid, sid) {
+  var b = batches.find(x=>x._id===bid);
+  var s = b && b.subjects.find(x=>x._id===sid);
+  return s ? s.chapters.map(c=>`<option value="${c._id}">${c.name}</option>`).join('')||'<option>Add a chapter first</option>' : '<option>Select a subject</option>';
+}
+
+function unitOpts(bid, sid, cid) {
+  var b = batches.find(x=>x._id===bid);
+  var s = b && b.subjects.find(x=>x._id===sid);
+  var c = s && s.chapters.find(x=>x._id===cid);
+  var base = '<option value="">-- Direct under chapter (no unit) --</option>';
+  return c && c.units.length ? base + c.units.map(u=>`<option value="${u._id}">${u.name}</option>`).join('') : base;
+}
+
+// ── Last-selection memory (persists across tab sessions) ─────────────────────
+var _lastSel = (function() {
+  try { return JSON.parse(sessionStorage.getItem('edubot_lastsel') || '{}'); } catch(e) { return {}; }
+})();
+function _saveSel(key, val) { _lastSel[key] = val; try { sessionStorage.setItem('edubot_lastsel', JSON.stringify(_lastSel)); } catch(e){} }
+function _restoreSel(el, key) { if (el && _lastSel[key] && el.querySelector('option[value="'+_lastSel[key]+'"]')) el.value = _lastSel[key]; }
+
+function populateAllSelects() {
+  var bo = batchOpts();
+  ['sBatch','cBatch','uBatch','lBatch'].forEach(id => {
+    var el = document.getElementById(id);
+    if (el) { el.innerHTML = bo; _restoreSel(el, id); }
+  });
+  updateSubjectSelect();
+  updateUSubjectSelect();
+  updateLSubjectSelect();
+}
+
+function updateSubjectSelect() {
+  var el = document.getElementById('cSubject');
+  el.innerHTML = subjectOpts(document.getElementById('cBatch').value);
+  _restoreSel(el, 'cSubject');
+}
+function updateUSubjectSelect() {
+  var el = document.getElementById('uSubject');
+  el.innerHTML = subjectOpts(document.getElementById('uBatch').value);
+  _restoreSel(el, 'uSubject');
+  updateUChapterSelect();
+}
+function updateUChapterSelect() {
+  var el = document.getElementById('uChapter');
+  el.innerHTML = chapterOpts(document.getElementById('uBatch').value, document.getElementById('uSubject').value);
+  _restoreSel(el, 'uChapter');
+}
+function updateLSubjectSelect() {
+  var el = document.getElementById('lSubject');
+  el.innerHTML = subjectOpts(document.getElementById('lBatch').value);
+  _restoreSel(el, 'lSubject');
+  updateLChapterSelect();
+}
+function updateLChapterSelect() {
+  var el = document.getElementById('lChapter');
+  el.innerHTML = chapterOpts(document.getElementById('lBatch').value, document.getElementById('lSubject').value);
+  _restoreSel(el, 'lChapter');
+  updateLUnitSelect();
+}
+function updateLUnitSelect() {
+  var el = document.getElementById('lUnit');
+  el.innerHTML = unitOpts(document.getElementById('lBatch').value, document.getElementById('lSubject').value, document.getElementById('lChapter').value);
+  _restoreSel(el, 'lUnit');
+}
+
+function setLoading(id, on, label) {
+  var b = document.getElementById(id);
+  b.disabled = on;
+  b.innerHTML = on ? '<i class="ti ti-loader-2" style="animation:spin 0.8s linear infinite;display:inline-block"></i> Adding...' : label;
+}
+
+async function addBatch() {
+  var name = document.getElementById('bName').value.trim();
+  var desc = document.getElementById('bDesc').value.trim();
+  if (!name) return toast('Please enter a batch name!','error');
+  setLoading('btnBatch',true);
+  try {
+    var newBatch = await apiFetch('/api/batches','POST',{name, description:desc, pic:picBase64});
+    batches.push(newBatch);
+    renderBatches(batches); populateAllSelects();
+    document.getElementById('bName').value=''; document.getElementById('bDesc').value='';
+    document.getElementById('imgPreview').innerHTML='<div class="img-preview-label"><i class="ti ti-camera" style="font-size:24px;display:block;margin-bottom:6px;color:var(--text3)"></i>Tap to select image</div>';
+    picBase64='';
+    toast('Batch added!','success');
+  } catch(e){toast('Error: '+e.message,'error');}
+  setLoading('btnBatch',false,'<i class="ti ti-plus"></i> Add Batch');
+}
+
+async function addSubject() {
+  var bid=document.getElementById('sBatch').value, name=document.getElementById('sName').value.trim(), icon=document.getElementById('sIcon').value.trim()||'📚', color=document.getElementById('sColor').value;
+  if(!bid||!name) return toast('Please fill all fields!','error');
+  setLoading('btnSubject',true);
+  try {
+    var updated = await apiFetch(`/api/batches/${bid}/subjects`,'POST',{name,icon,color});
+    var idx = batches.findIndex(x=>x._id===bid); if(idx>=0) batches[idx]=updated;
+    renderBatches(batches); populateAllSelects();
+    document.getElementById('sName').value=''; toast('Subject added!','success');
+  } catch(e){toast('Error: '+e.message,'error');}
+  setLoading('btnSubject',false,'<i class="ti ti-plus"></i> Add Subject');
+}
+
+async function addChapter() {
+  var bid=document.getElementById('cBatch').value, sid=document.getElementById('cSubject').value, name=document.getElementById('cName').value.trim();
+  if(!bid||!sid||!name) return toast('Please fill all fields!','error');
+  setLoading('btnChapter',true);
+  try {
+    var updated = await apiFetch(`/api/batches/${bid}/subjects/${sid}/chapters`,'POST',{name});
+    var idx = batches.findIndex(x=>x._id===bid); if(idx>=0) batches[idx]=updated;
+    populateAllSelects();
+    document.getElementById('cName').value=''; toast('Chapter added!','success');
+  } catch(e){toast('Error: '+e.message,'error');}
+  setLoading('btnChapter',false,'<i class="ti ti-plus"></i> Add Chapter');
+}
+
+async function addUnit() {
+  var bid=document.getElementById('uBatch').value, sid=document.getElementById('uSubject').value, cid=document.getElementById('uChapter').value, name=document.getElementById('uName').value.trim();
+  if(!bid||!sid||!cid||!name) return toast('Please fill all fields!','error');
+  setLoading('btnUnit',true);
+  try {
+    var updated = await apiFetch(`/api/batches/${bid}/subjects/${sid}/chapters/${cid}/units`,'POST',{name});
+    var idx = batches.findIndex(x=>x._id===bid); if(idx>=0) batches[idx]=updated;
+    populateAllSelects();
+    document.getElementById('uName').value=''; toast('Unit added!','success');
+  } catch(e){toast('Error: '+e.message,'error');}
+  setLoading('btnUnit',false,'<i class="ti ti-plus"></i> Add Unit');
+}
+
+async function addLecture() {
+  var bid=document.getElementById('lBatch').value, sid=document.getElementById('lSubject').value, cid=document.getElementById('lChapter').value, uid=document.getElementById('lUnit').value, name=document.getElementById('lName').value.trim(), link=document.getElementById('lLink').value.trim();
+  if(!bid||!sid||!cid||!name||!link) return toast('Please fill all fields!','error');
+  setLoading('btnLecture',true);
+  try {
+    var url = uid ? `/api/batches/${bid}/subjects/${sid}/chapters/${cid}/units/${uid}/lectures` : `/api/batches/${bid}/subjects/${sid}/chapters/${cid}/lectures`;
+    var notes = document.getElementById('lNotes').value.trim();
+    var updated = await apiFetch(url,'POST',{name,link,notes});
+    var idx = batches.findIndex(x=>x._id===bid); if(idx>=0) batches[idx]=updated;
+    populateAllSelects();
+    document.getElementById('lName').value=''; document.getElementById('lLink').value=''; document.getElementById('lNotes').value='';
+    toast('Lecture added!','success');
+  } catch(e){toast('Error: '+e.message,'error');}
+  setLoading('btnLecture',false,'<i class="ti ti-plus"></i> Add Lecture');
+}
+
+// ── Manage drill-down state ──────────────────────────────────────────────────
+var _mState = { level: 'batches', bid: null, sid: null, cid: null };
+
+function renderManage() { _mState = { level: 'batches', bid: null, sid: null, cid: null }; _renderManageLevel(); }
+
+function _renderManageLevel() {
+  _renderBreadcrumb();
+  var html = '';
+  var list = document.getElementById('manageList');
+
+  if (_mState.level === 'batches') {
+    if (!batches.length) { list.innerHTML = '<div style="text-align:center;padding:20px;color:var(--text2);font-size:13px">Nothing here yet</div>'; return; }
+    batches.forEach(b => {
+      var pub = b.isPublic === true;
+      var pubLabel = pub ? '<i class="ti ti-eye-off" style="font-size:11px"></i> Unpublish' : '<i class="ti ti-send" style="font-size:11px"></i> Publish';
+      var pubClass = pub ? 'publish-btn public' : 'publish-btn';
+      html += `<div class="manage-item">
+        <span class="manage-item-icon">🎓</span>
+        <div class="manage-item-info" style="cursor:pointer" onclick="_mDrill('subjects','${b._id}')">
+          <div class="manage-item-name">${b.name}</div>
+          <div class="manage-item-sub">${b.subjects.length} subjects · ${pub ? '🟢 Public' : '🔒 Private'}</div>
+        </div>
+        <button class="${pubClass}" onclick="togglePublish('${b._id}')">${pubLabel}</button>
+        <button class="edit-btn" onclick="openEdit('batch','${b._id}')"><i class="ti ti-pencil"></i></button>
+        <button class="del-btn" onclick="delBatch('${b._id}')"><i class="ti ti-trash"></i></button>
+      </div>`;
+    });
+
+  } else if (_mState.level === 'subjects') {
+    var b = batches.find(x => x._id === _mState.bid);
+    if (!b) return;
+    if (!b.subjects.length) { html = '<div style="text-align:center;padding:20px;color:var(--text2);font-size:13px">No subjects yet</div>'; }
+    b.subjects.forEach(s => {
+      html += `<div class="manage-item">
+        <span class="manage-item-icon">${s.icon}</span>
+        <div class="manage-item-info" style="cursor:pointer" onclick="_mDrill('chapters','${b._id}','${s._id}')">
+          <div class="manage-item-name">${s.name}</div>
+          <div class="manage-item-sub">${s.chapters.length} chapters</div>
+        </div>
+        <button class="edit-btn" onclick="openEdit('subject','${b._id}','${s._id}')"><i class="ti ti-pencil"></i></button>
+        <button class="del-btn" onclick="delSubject('${b._id}','${s._id}')"><i class="ti ti-trash"></i></button>
+      </div>`;
+    });
+
+  } else if (_mState.level === 'chapters') {
+    var b = batches.find(x => x._id === _mState.bid);
+    var s = b && b.subjects.find(x => x._id === _mState.sid);
+    if (!s) return;
+    if (!s.chapters.length) { html = '<div style="text-align:center;padding:20px;color:var(--text2);font-size:13px">No chapters yet</div>'; }
+    s.chapters.forEach(c => {
+      var cs = c.comingSoon ? '<span class="coming-soon-badge">🔜 Coming Soon</span>' : '';
+      var lecCount = c.lectures.length + c.units.reduce((a,u)=>a+u.lectures.length,0);
+      html += `<div class="manage-item">
+        <span class="manage-item-icon">📂</span>
+        <div class="manage-item-info" style="cursor:pointer" onclick="_mDrill('lectures','${b._id}','${s._id}','${c._id}')">
+          <div class="manage-item-name">${c.name} ${cs}</div>
+          <div class="manage-item-sub">${lecCount} lectures</div>
+        </div>
+        <button class="edit-btn" onclick="openEdit('chapter','${b._id}','${s._id}','${c._id}')"><i class="ti ti-pencil"></i></button>
+        <button class="del-btn" onclick="delChapter('${b._id}','${s._id}','${c._id}')"><i class="ti ti-trash"></i></button>
+      </div>`;
+    });
+
+  } else if (_mState.level === 'lectures') {
+    var b = batches.find(x => x._id === _mState.bid);
+    var s = b && b.subjects.find(x => x._id === _mState.sid);
+    var ch = s && s.chapters.find(x => x._id === _mState.cid);
+    if (!ch) return;
+    var allLecs = [];
+    ch.units.forEach(u => u.lectures.forEach(l => allLecs.push({ l, uid: u._id, uname: u.name })));
+    ch.lectures.forEach(l => allLecs.push({ l, uid: null, uname: null }));
+    if (!allLecs.length) { html = '<div style="text-align:center;padding:20px;color:var(--text2);font-size:13px">No lectures yet</div>'; }
+    allLecs.forEach(({ l, uid, uname }) => {
+      var lcs = l.comingSoon ? '<span class="coming-soon-badge">🔜</span>' : '';
+      var sub = uname ? uname : ch.name;
+      html += `<div class="manage-item">
+        <span class="manage-item-icon" style="font-size:13px">▶</span>
+        <div class="manage-item-info">
+          <div class="manage-item-name">${l.name} ${lcs}</div>
+          <div class="manage-item-sub">${sub}</div>
+        </div>
+        <button class="edit-btn" onclick="openEdit('lecture','${b._id}','${s._id}','${ch._id}','${uid||''}','${l._id}')"><i class="ti ti-pencil"></i></button>
+        <button class="del-btn" onclick="delLecture('${b._id}','${s._id}','${ch._id}','${uid||''}','${l._id}')"><i class="ti ti-trash"></i></button>
+      </div>`;
+    });
+  }
+
+  list.innerHTML = html;
+}
+
+function _mDrill(level, bid, sid, cid) {
+  _mState = { level, bid: bid||null, sid: sid||null, cid: cid||null };
+  _renderManageLevel();
+}
+
+function _mBack() {
+  if (_mState.level === 'lectures')  { _mDrill('chapters', _mState.bid, _mState.sid); }
+  else if (_mState.level === 'chapters') { _mDrill('subjects', _mState.bid); }
+  else if (_mState.level === 'subjects') { _mDrill('batches'); }
+}
+
+function _renderBreadcrumb() {
+  var el = document.getElementById('manageBreadcrumb');
+  if (!el) return;
+  if (_mState.level === 'batches') { el.innerHTML = ''; return; }
+  var b = batches.find(x => x._id === _mState.bid);
+  var s = b && batches.find(x=>x._id===_mState.bid).subjects.find(x => x._id === _mState.sid);
+  var ch = s && s.chapters.find(x => x._id === _mState.cid);
+  var parts = [{ label: 'Batches', level: 'batches' }];
+  if (b) parts.push({ label: b.name, level: 'subjects', bid: b._id });
+  if (s) parts.push({ label: s.name, level: 'chapters', bid: b._id, sid: s._id });
+  if (ch) parts.push({ label: ch.name, level: 'lectures' });
+  var html = '<div class="manage-breadcrumb">';
+  parts.forEach((p, i) => {
+    if (i < parts.length - 1) {
+      html += `<button class="manage-bc-btn" onclick="_mDrill('${p.level}','${p.bid||''}','${p.sid||''}')">${p.label}</button><span class="manage-bc-sep">›</span>`;
+    } else {
+      html += `<span style="font-size:13px;font-weight:600;color:var(--text);padding:2px 4px">${p.label}</span>`;
+    }
+  });
+  html += '</div>';
+  el.innerHTML = html;
+}
+
+
+// ── Edit Modal ────────────────────────────────────────────────────────────────
+var _editCtx = {};
+
+function openEdit(type, bid, sid, cid, uid, lid) {
+  _editCtx = { type, bid, sid, cid, uid, lid };
+  var body = '';
+  var title = '';
+
+  if (type === 'batch') {
+    var b = batches.find(x => x._id === bid);
+    title = 'Edit Batch';
+    body = `<div class="form-group"><label class="form-label">Batch Name</label><input class="form-input" id="ei_name" value="${b.name}"></div>
+            <div class="form-group"><label class="form-label">Description</label><input class="form-input" id="ei_desc" value="${b.description||''}"></div>`;
+  } else if (type === 'subject') {
+    var b = batches.find(x => x._id === bid);
+    var s = b && b.subjects.find(x => x._id === sid);
+    title = 'Edit Subject';
+    body = `<div class="form-group"><label class="form-label">Subject Name</label><input class="form-input" id="ei_name" value="${s.name}"></div>
+            <div class="form-group"><label class="form-label">Icon (emoji)</label><input class="form-input" id="ei_icon" value="${s.icon}" maxlength="4" style="font-size:20px"></div>
+            <div class="form-group"><label class="form-label">Color</label>
+              <select class="form-select" id="ei_color">
+                <option value="#4f8ef7" ${s.color==='#4f8ef7'?'selected':''}>🔵 Blue</option>
+                <option value="#7c5cbf" ${s.color==='#7c5cbf'?'selected':''}>🟣 Purple</option>
+                <option value="#22c55e" ${s.color==='#22c55e'?'selected':''}>🟢 Green</option>
+                <option value="#f5a623" ${s.color==='#f5a623'?'selected':''}>🟠 Orange</option>
+                <option value="#ef4444" ${s.color==='#ef4444'?'selected':''}>🔴 Red</option>
+                <option value="#06b6d4" ${s.color==='#06b6d4'?'selected':''}>🩵 Cyan</option>
+                <option value="#ec4899" ${s.color==='#ec4899'?'selected':''}>🩷 Pink</option>
+              </select>
+            </div>`;
+  } else if (type === 'chapter') {
+    var b = batches.find(x => x._id === bid);
+    var s = b && b.subjects.find(x => x._id === sid);
+    var c = s && s.chapters.find(x => x._id === cid);
+    title = 'Edit Chapter';
+    body = `<div class="form-group"><label class="form-label">Chapter Name</label><input class="form-input" id="ei_name" value="${c.name}"></div>
+            <div class="form-group" style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--surface2);border-radius:var(--radius-sm)">
+              <input type="checkbox" id="ei_comingSoon" ${c.comingSoon?'checked':''} style="width:18px;height:18px;cursor:pointer;accent-color:var(--accent)">
+              <label for="ei_comingSoon" style="font-size:13px;font-weight:500;cursor:pointer">Mark as Coming Soon 🔜</label>
+            </div>`;
+  } else if (type === 'lecture') {
+    var b = batches.find(x => x._id === bid);
+    var s = b && b.subjects.find(x => x._id === sid);
+    var c = s && s.chapters.find(x => x._id === cid);
+    var lec = uid
+      ? (c && c.units.find(x => x._id === uid) && c.units.find(x => x._id === uid).lectures.find(x => x._id === lid))
+      : (c && c.lectures.find(x => x._id === lid));
+    title = 'Edit Lecture';
+    body = `<div class="form-group"><label class="form-label">Lecture Name</label><input class="form-input" id="ei_name" value="${lec.name}"></div>
+            <div class="form-group"><label class="form-label">Bot Link</label><input class="form-input" id="ei_link" value="${lec.link||''}"></div>
+            <div class="form-group"><label class="form-label">Notes Link <span style="color:var(--text3)">(optional)</span></label><input class="form-input" id="ei_notes" value="${lec.notes||''}"></div>
+            <div class="form-group" style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--surface2);border-radius:var(--radius-sm)">
+              <input type="checkbox" id="ei_comingSoon" ${lec.comingSoon?'checked':''} style="width:18px;height:18px;cursor:pointer;accent-color:var(--accent)">
+              <label for="ei_comingSoon" style="font-size:13px;font-weight:500;cursor:pointer">Mark as Coming Soon 🔜</label>
+            </div>`;
+  }
+
+  document.getElementById('editModalTitle').textContent = title;
+  document.getElementById('editModalBody').innerHTML = body;
+  document.getElementById('editModal').classList.add('show');
+}
+
+function closeEdit() { document.getElementById('editModal').classList.remove('show'); }
+function closeEditOutside(e) { if (e.target.id === 'editModal') closeEdit(); }
+
+async function saveEdit() {
+  var btn = document.getElementById('editSaveBtn');
+  btn.disabled = true;
+  btn.innerHTML = '<i class="ti ti-loader-2" style="animation:spin 0.8s linear infinite;display:inline-block"></i> Saving...';
+
+  var { type, bid, sid, cid, uid, lid } = _editCtx;
+  try {
+    var updated;
+    if (type === 'batch') {
+      updated = await apiFetch(`/api/batches/${bid}/edit`, 'PATCH', {
+        name: document.getElementById('ei_name').value.trim(),
+        description: document.getElementById('ei_desc').value.trim()
+      });
+      var idx = batches.findIndex(x => x._id === bid);
+      if (idx >= 0) batches[idx] = updated;
+    } else if (type === 'subject') {
+      updated = await apiFetch(`/api/batches/${bid}/subjects/${sid}/edit`, 'PATCH', {
+        name: document.getElementById('ei_name').value.trim(),
+        icon: document.getElementById('ei_icon').value.trim(),
+        color: document.getElementById('ei_color').value
+      });
+      var idx = batches.findIndex(x => x._id === bid);
+      if (idx >= 0) batches[idx] = updated;
+    } else if (type === 'chapter') {
+      updated = await apiFetch(`/api/batches/${bid}/subjects/${sid}/chapters/${cid}/edit`, 'PATCH', {
+        name: document.getElementById('ei_name').value.trim(),
+        comingSoon: document.getElementById('ei_comingSoon').checked
+      });
+      var idx = batches.findIndex(x => x._id === bid);
+      if (idx >= 0) batches[idx] = updated;
+    } else if (type === 'lecture') {
+      var url = uid
+        ? `/api/batches/${bid}/subjects/${sid}/chapters/${cid}/units/${uid}/lectures/${lid}/edit`
+        : `/api/batches/${bid}/subjects/${sid}/chapters/${cid}/lectures/${lid}/edit`;
+      updated = await apiFetch(url, 'PATCH', {
+        name: document.getElementById('ei_name').value.trim(),
+        link: document.getElementById('ei_link').value.trim(),
+        notes: document.getElementById('ei_notes').value.trim(),
+        comingSoon: document.getElementById('ei_comingSoon').checked
+      });
+      var idx = batches.findIndex(x => x._id === bid);
+      if (idx >= 0) batches[idx] = updated;
+    }
+    renderBatches(batches);
+    populateAllSelects();
+    _renderManageLevel();
+    closeEdit();
+    toast('Saved! ✅', 'success');
+  } catch(e) {
+    toast('Error: ' + e.message, 'error');
+  }
+  btn.disabled = false;
+  btn.innerHTML = '<i class="ti ti-check"></i> Save';
+}
+
+async function delBatch(bid){if(!confirm('Batch delete?'))return;try{await apiFetch(`/api/batches/${bid}`,'DELETE');batches=batches.filter(x=>x._id!==bid);renderBatches(batches);populateAllSelects();_renderManageLevel();toast('Deleted!','success');}catch(e){toast('Error','error');}}
+async function delSubject(bid,sid){if(!confirm('Subject delete?'))return;try{await apiFetch(`/api/batches/${bid}/subjects/${sid}`,'DELETE');var b=batches.find(x=>x._id===bid);if(b)b.subjects=b.subjects.filter(x=>x._id!==sid);populateAllSelects();_renderManageLevel();toast('Deleted!','success');}catch(e){toast('Error','error');}}
+async function delChapter(bid,sid,cid){if(!confirm('Chapter delete?'))return;try{await apiFetch(`/api/batches/${bid}/subjects/${sid}/chapters/${cid}`,'DELETE');var b=batches.find(x=>x._id===bid);var s=b&&b.subjects.find(x=>x._id===sid);if(s)s.chapters=s.chapters.filter(x=>x._id!==cid);populateAllSelects();_renderManageLevel();toast('Deleted!','success');}catch(e){toast('Error','error');}}
+async function delUnit(bid,sid,cid,uid){if(!confirm('Unit delete?'))return;try{await apiFetch(`/api/batches/${bid}/subjects/${sid}/chapters/${cid}/units/${uid}`,'DELETE');var b=batches.find(x=>x._id===bid);var s=b&&b.subjects.find(x=>x._id===sid);var c=s&&s.chapters.find(x=>x._id===cid);if(c)c.units=c.units.filter(x=>x._id!==uid);populateAllSelects();_renderManageLevel();toast('Deleted!','success');}catch(e){toast('Error','error');}}
+async function delLecture(bid,sid,cid,uid,lid){if(!confirm('Lecture delete?'))return;try{
+  var url = uid ? `/api/batches/${bid}/subjects/${sid}/chapters/${cid}/units/${uid}/lectures/${lid}` : `/api/batches/${bid}/subjects/${sid}/chapters/${cid}/lectures/${lid}`;
+  await apiFetch(url,'DELETE');
+  var b=batches.find(x=>x._id===bid);var s=b&&b.subjects.find(x=>x._id===sid);var c=s&&s.chapters.find(x=>x._id===cid);
+  if(uid){var u=c&&c.units.find(x=>x._id===uid);if(u)u.lectures=u.lectures.filter(x=>x._id!==lid);}
+  else{if(c)c.lectures=c.lectures.filter(x=>x._id!==lid);}
+  populateAllSelects();_renderManageLevel();toast('Deleted!','success');}catch(e){toast('Error','error');}}
+
+async function togglePublish(bid) {
+  try {
+    var r = await apiFetch('/api/batches/' + bid + '/publish', 'PATCH');
+    var b = batches.find(x => x._id === bid);
+    if (b) b.isPublic = r.isPublic;
+    renderBatches(batches);
+    _renderManageLevel();
+    toast(r.isPublic ? '🟢 Batch is now Public!' : '🔒 Batch is now Private!', 'success');
+  } catch(e) { toast('Error: ' + e.message, 'error'); }
+}
+
+// ── Access Control ────────────────────────────────────────────────────────────
+var accessExpiresAt = null;
+var countdownTimer = null;
+var currentTab = 'home';
+var userId = null;
+
+function getUserId() {
+  var tgUser = tg && tg.initDataUnsafe && tg.initDataUnsafe.user;
+  return tgUser ? String(tgUser.id) : 'guest_' + (localStorage.getItem('guest_id') || (function(){ var id=Math.random().toString(36).slice(2); localStorage.setItem('guest_id',id); return id; })());
+}
+
+function hasAccess() {
+  if (isAdmin) return true;
+  if (!accessExpiresAt) return false;
+  return new Date(accessExpiresAt) > new Date();
+}
+
+async function loadAccess() {
+  if (isAdmin) return;
+
+  // Load from cache instantly — prevents timer blink
+  try {
+    var cached = localStorage.getItem('edubot_access_expires');
+    if (cached && new Date(cached) > new Date()) {
+      accessExpiresAt = cached;
+    }
+  } catch(e) {}
+
+  // Verify with server in background
+  try {
+    userId = getUserId();
+    var r = await fetch('/api/access/' + userId);
+    var data = await r.json();
+    if (data.hasAccess && data.expiresAt) {
+      accessExpiresAt = data.expiresAt;
+      localStorage.setItem('edubot_access_expires', data.expiresAt);
+    } else {
+      accessExpiresAt = null;
+      localStorage.removeItem('edubot_access_expires');
+    }
+  } catch(e) { /* cached value will be used */ }
+}
+
+async function grantAccessDB() {
+  try {
+    userId = getUserId();
+    var r = await fetch('/api/access/' + userId, { method: 'POST' });
+    var data = await r.json();
+    if (data.expiresAt) accessExpiresAt = data.expiresAt;
+  } catch(e) {}
+}
+
+function getTimeLeft() {
+  if (!accessExpiresAt) return null;
+  var ms = new Date(accessExpiresAt) - new Date();
+  if (ms <= 0) return null;
+  var h = Math.floor(ms / 3600000);
+  var m = Math.floor((ms % 3600000) / 60000);
+  var s = Math.floor((ms % 60000) / 1000);
+  return { h:h, m:m, s:s, ms:ms, total: 24*3600000 };
+}
+
+function formatCountdown() {
+  var t = getTimeLeft();
+  if (!t) return null;
+  return (t.h < 10 ? '0'+t.h : t.h) + ':' + (t.m < 10 ? '0'+t.m : t.m) + ':' + (t.s < 10 ? '0'+t.s : t.s);
+}
+
+// ── Nav Tab Switch ────────────────────────────────────────────────────────────
+function switchNavTab(tab) {
+  currentTab = tab;
+  document.getElementById('navHome').classList.toggle('active', tab === 'home');
+  document.getElementById('navAccess').classList.toggle('active', tab === 'access');
+  document.getElementById('navRefer').classList.toggle('active', tab === 'refer');
+
+  if (tab === 'refer') {
+    document.querySelectorAll('.page').forEach(function(p) {
+      p.style.transition = 'none';
+      p.style.transform = 'translateX(100%)';
+      p.classList.remove('active');
+    });
+    var refEl = document.getElementById('page-refer');
+    refEl.style.transform = '';
+    refEl.classList.add('active');
+    if (tg) tg.BackButton.hide();
+    loadReferStats();
+    return;
+  }
+
+  if (tab === 'home') {
+    var homeEl = document.getElementById('page-home');
+    // Deactivate ALL pages instantly, then bring home forward cleanly
+    document.querySelectorAll('.page').forEach(function(p) {
+      p.style.transition = 'none';
+      p.style.transform = 'translateX(100%)';
+      p.classList.remove('active');
+    });
+    homeEl.style.transform = '';
+    homeEl.classList.add('active');
+    // Reset pageStack so navigation works fresh from batch list
+    pageStack = ['home'];
+    if (tg) tg.BackButton.hide();
+  } else if (tab === 'access') {
+    var homeEl = document.getElementById('page-home');
+    var accEl = document.getElementById('page-access');
+    document.querySelectorAll('.page').forEach(function(p) {
+      p.style.transition = 'none';
+      p.style.transform = 'translateX(100%)';
+      p.classList.remove('active');
+    });
+    homeEl.style.transform = 'translateX(-25%)';
+    accEl.style.transform = 'translateX(0)';
+    accEl.classList.add('active');
+    renderAccessCard();
+    startCountdown();
+  }
+}
+
+var adWatched = false;
+
+function renderAccessCard() {
+  var card = document.getElementById('accessCard');
+  if (!card) return;
+
+  if (isAdmin) {
+    card.innerHTML = '<div style="padding:40px;text-align:center;color:var(--text2)"><i class="ti ti-shield-check" style="font-size:48px;color:var(--green);display:block;margin-bottom:12px"></i><div style="font-size:16px;font-weight:600">Admin Access</div><div style="font-size:13px;margin-top:6px">You have permanent access.</div></div>';
+    return;
+  }
+
+  var t = getTimeLeft();
+  var locked = !hasAccess();
+  var dot = document.getElementById('accessDot');
+  if (dot) dot.style.background = locked ? 'var(--red)' : 'var(--green)';
+
+  if (!locked && t) {
+    // Access is active — show countdown only, no buttons (once per 24h)
+    var pct = Math.min(100, Math.round((t.ms / t.total) * 100));
+    card.innerHTML =
+      '<div class="access-card-header">' +
+        '<i class="ti ti-shield-check status-unlocked"></i>' +
+        '<h2 class="status-unlocked">Access Unlocked!</h2>' +
+        '<p>All lectures are available. Your access expires in:</p>' +
+      '</div>' +
+      '<div class="countdown-box">' +
+        '<div class="countdown-time" id="countdownDisplay">' + (formatCountdown() || '--:--:--') + '</div>' +
+        '<div class="countdown-label">Hours : Minutes : Seconds</div>' +
+        '<div class="countdown-bar"><div class="countdown-bar-fill" id="countdownBar" style="width:' + pct + '%"></div></div>' +
+      '</div>' +
+      '<div style="padding:16px;text-align:center;color:var(--text2);font-size:12px">' +
+        '<i class="ti ti-info-circle" style="margin-right:4px"></i>24 ghante mein sirf ek baar ad dekh sakte hain.' +
+      '</div>';
+  } else if (adWatched) {
+    // Ad dekh liya — Claim button dikhao
+    card.innerHTML =
+      '<div class="access-card-header">' +
+        '<i class="ti ti-circle-check" style="font-size:48px;display:block;margin-bottom:12px;color:var(--green)"></i>' +
+        '<h2 style="color:var(--green)">Ad Complete! 🎉</h2>' +
+        '<p>Ad successfully dekh liya. Now claim your 24h access below.</p>' +
+      '</div>' +
+      '<div class="access-action">' +
+        '<button class="watch-ad-btn" onclick="claimAccess()" style="background:linear-gradient(135deg,var(--green),#16a34a)">' +
+          '<i class="ti ti-gift"></i> Claim 24h Access' +
+        '</button>' +
+      '</div>';
+  } else {
+    // Locked — Watch Ad button
+    card.innerHTML =
+      '<div class="access-card-header">' +
+        '<i class="ti ti-lock status-locked"></i>' +
+        '<h2>Unlock Lectures</h2>' +
+        '<p>Watch a short ad to get <strong>free access</strong> to all lectures for <strong>24 hours</strong>.</p>' +
+      '</div>' +
+      '<div style="padding:20px;background:var(--surface2);text-align:center">' +
+        '<div style="font-size:13px;color:var(--text2);margin-bottom:4px">Access Status</div>' +
+        '<div style="font-size:15px;font-weight:700;color:var(--red)">🔒 Locked</div>' +
+      '</div>' +
+      '<div class="access-action">' +
+        '<button class="watch-ad-btn" id="watchAdBtn" onclick="watchAd()">' +
+          '<i class="ti ti-player-play"></i> Watch Ad — Get 24h Access' +
+        '</button>' +
+      '</div>';
+  }
+}
+
+function updateHomeTimer() {
+  var bar = document.getElementById('homeTimerBar');
+  var countdown = document.getElementById('homeCountdown');
+  var fill = document.getElementById('homeTimerBarFill');
+  if (!bar) return;
+  var t = getTimeLeft();
+  if (t) {
+    bar.style.display = 'flex';
+    if (countdown) countdown.textContent = formatCountdown();
+    if (fill) fill.style.width = Math.min(100, Math.round((t.ms / t.total) * 100)) + '%';
+  } else {
+    bar.style.display = 'none';
+  }
+}
+
+function startCountdown() {
+  if (countdownTimer) clearInterval(countdownTimer);
+  updateHomeTimer();
+  countdownTimer = setInterval(function() {
+    updateHomeTimer();
+    if (currentTab !== 'access') return;
+    var display = document.getElementById('countdownDisplay');
+    var bar = document.getElementById('countdownBar');
+    var t = getTimeLeft();
+    if (!t) {
+      accessExpiresAt = null;
+      renderAccessCard();
+      clearInterval(countdownTimer);
+      return;
+    }
+    if (display) display.textContent = formatCountdown();
+    if (bar) bar.style.width = Math.min(100, Math.round((t.ms / t.total) * 100)) + '%';
+  }, 1000);
+}
+
+var _adToken = null;
+var _adActuallyShown = false;
+
+async function watchAd() {
+  if (hasAccess()) {
+    toast('Your access is already active!', 'error');
+    return;
+  }
+
+  var btn = document.getElementById('watchAdBtn');
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = '<i class="ti ti-loader-2" style="animation:spin 0.8s linear infinite;display:inline-block"></i> Loading Ad...';
+  }
+
+  try {
+    userId = getUserId();
+    var r = await fetch('/api/access/token/' + userId, { method: 'POST' });
+    var data = await r.json();
+    if (!data.token) throw new Error('No token');
+    _adToken = data.token;
+  } catch(e) {
+    toast('Server error. Please try again.', 'error');
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-player-play"></i> Watch Ad — Get 24h Access'; }
+    return;
+  }
+
+  _adActuallyShown = false;
+
+  if (typeof show_11011844 === 'undefined') {
+    _adToken = null;
+    toast('Ad failed to load. Please disable your ad blocker and try again.', 'error');
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-player-play"></i> Watch Ad — Get 24h Access'; }
+    return;
+  }
+
+  if (btn) btn.innerHTML = '<i class="ti ti-player-play"></i> Ad is loading...';
+
+  var uid = tg && tg.initDataUnsafe && tg.initDataUnsafe.user ? String(tg.initDataUnsafe.user.id) : 'unknown';
+
+  // Monetag Promise — .then() = ad watched, .catch() = failed/no inventory/blocked
+  show_11011844({ ymid: uid })
+    .then(function() {
+      _adActuallyShown = true;
+      adWatched = true;
+      renderAccessCard();
+      toast('Ad complete! Now claim your access. 👇', 'success');
+    })
+    .catch(function(err) {
+      _adToken = null;
+      _adActuallyShown = false;
+      adWatched = false;
+      if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-player-play"></i> Watch Ad — Get 24h Access'; }
+      var msg = (err && err.message) || '';
+      if (msg.toLowerCase().indexOf('block') !== -1 || msg.toLowerCase().indexOf('load') !== -1) {
+        toast('Ad blocker detected! Please disable it and try again.', 'error');
+      } else {
+        toast('No ad available right now. Please try again in a moment.', 'error');
+      }
+    });
+}
+
+async function claimAccess() {
+  if (!_adToken) {
+    toast('Ad did not play properly. Please try again.', 'error');
+    adWatched = false;
+    renderAccessCard();
+    return;
+  }
+  if (!_adActuallyShown) {
+    toast('Ad was not completed. Please watch the full ad.', 'error');
+    _adToken = null;
+    adWatched = false;
+    renderAccessCard();
+    return;
+  }
+
+  var btn = document.querySelector('[onclick="claimAccess()"]');
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = '<i class="ti ti-loader-2" style="animation:spin 0.8s linear infinite;display:inline-block"></i> Claiming...';
+  }
+
+  try {
+    userId = getUserId();
+    // Send claim request to server with token
+    var r = await fetch('/api/access/claim/' + userId, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: _adToken })
+    });
+    var data = await r.json();
+    if (!data.hasAccess) throw new Error(data.error || 'Claim failed');
+
+    _adToken = null;
+    adWatched = false;
+    accessExpiresAt = data.expiresAt;
+    localStorage.setItem('edubot_access_expires', data.expiresAt);
+    renderAccessCard();
+    startCountdown();
+    var dot = document.getElementById('accessDot');
+    if (dot) dot.style.background = 'var(--green)';
+    toast('Access unlocked for 24 hours! 🎉', 'success');
+  } catch(e) {
+    toast('Claim failed: ' + (e.message || 'Please try again.'), 'error');
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-gift"></i> Claim 24h Access'; }
+  }
+}
+
+// Batch open pe access check
+var _origOpenBatch = openBatch;
+openBatch = function(bid) {
+  if (!hasAccess()) {
+    toast('Watch an ad to unlock access!', 'error');
+    switchNavTab('access');
+    return;
+  }
+  _origOpenBatch(bid);
+};
+
+async function init() {
+  initTheme();
+  await checkAdminAccess();
+  await Promise.all([load(), loadAccess(), loadAnnouncements()]);
+  // Update access indicator dot
+  var dot = document.getElementById('accessDot');
+  if (dot) dot.style.background = hasAccess() ? 'var(--green)' : 'var(--red)';
+  // Remove old access banner from home page
+  var banner = document.getElementById('accessBanner');
+  if (banner) banner.innerHTML = '';
+  var lockedMsg = document.getElementById('lockedMsg');
+  if (lockedMsg) lockedMsg.style.display = 'none';
+  var batchSection = document.getElementById('batchSection');
+  if (batchSection) batchSection.style.display = '';
+  // Update home timer bar
+  updateHomeTimer();
+  if (hasAccess()) startCountdown();
+  // Fade in once, then switch to ready state to prevent future blinks
+  document.body.classList.add('fadein');
+  setTimeout(function() {
+    document.body.classList.remove('fadein');
+    document.body.classList.add('ready');
+  }, 200);
+}
+init();
+
+</script>
+<script>
+function showLecturePopup(idx) {
+  var lecture = _popupLectures[idx];
+  if (!lecture) return;
+  if (lecture.link) {
+    openLink(lecture.link);
+  } else if (lecture.notes) {
+    openLink(lecture.notes, 'notes');
+  } else {
+    toast('No links available!', 'error');
+  }
+}
+function closeLecturePopup() {}
+function closeLecturePopupOutside(e) {}
+</script>
+
+<!-- Lecture Popup (hidden — no longer used) -->
+<div id="lecturePopup" onclick="closeLecturePopupOutside(event)">
+  <div class="lec-popup-sheet">
+    <div class="lec-popup-header">
+      <div class="lec-popup-handle"></div>
+      <div class="lec-popup-icon-wrap"><i class="ti ti-player-play-filled"></i></div>
+      <div class="lec-popup-title" id="popupLecName">Lecture</div>
+      <button class="lec-popup-close" onclick="closeLecturePopup()"><i class="ti ti-x"></i></button>
+    </div>
+    <div class="lec-popup-body" id="popupButtons"></div>
+  </div>
+</div>
+
+<style>
+/* Light mode fixes */
+body.light-mode .modal{background:#fff;color:var(--text)}
+body.light-mode .modal-title{color:var(--text)}
+body.light-mode .form-input,body.light-mode .form-select{background:var(--surface2);color:var(--text);border-color:var(--border)}
+body.light-mode .form-label{color:var(--text2)}
+body.light-mode .manage-item{background:var(--surface2)}
+body.light-mode .manage-item-name{color:var(--text)}
+body.light-mode .manage-item-sub{color:var(--text2)}
+body.light-mode .tab-btn{color:var(--text2);border-color:var(--border)}
+body.light-mode .row{background:var(--surface);border-color:var(--border)}
+body.light-mode .row-name{color:var(--text)}
+body.light-mode .chap-row{background:var(--surface);border-color:var(--border)}
+body.light-mode .chap-name{color:var(--text)}
+body.light-mode .unit-row{background:var(--surface);border-color:var(--border)}
+body.light-mode .lec-row{background:var(--surface);border-color:var(--border)}
+body.light-mode .lec-name{color:var(--text)}
+body.light-mode .batch-card{background:var(--surface);border-color:var(--border)}
+body.light-mode .batch-name{color:var(--text)}
+body.light-mode .search-input{background:var(--surface2);color:var(--text);border-color:var(--border)}
+body.light-mode .search-input::placeholder{color:var(--text3)}
+body.light-mode .nav-tab{color:var(--text3)}
+body.light-mode .nav-tab.active{color:var(--accent)}
+body.light-mode .hero{background:var(--surface);border-color:var(--border)}
+body.light-mode .hero-name{color:var(--text)}
+body.light-mode .access-card{background:var(--surface);border-color:var(--border)}
+body.light-mode .modal-overlay{background:rgba(0,0,0,0.5)}
+
+/* ── Lecture Popup ──────────────────────────────── */
+#lecturePopup {
+  display:flex;
+  position:fixed;inset:0;
+  background:rgba(0,0,0,0);
+  z-index:500;
+  align-items:flex-end;justify-content:center;
+  pointer-events:none;
+  transition:background 0.3s ease;
+  will-change:background;
+  backface-visibility:hidden;
+  -webkit-backface-visibility:hidden;
+}
+#lecturePopup.show {
+  background:rgba(0,0,0,0.72);
+  pointer-events:all;
+}
+.lec-popup-sheet {
+  width:100%;max-width:480px;
+  background:var(--surface);
+  border-radius:24px 24px 0 0;
+  overflow:hidden;
+  transform:translateY(100%);
+  transition:transform 0.35s cubic-bezier(.32,1.1,.58,1);
+  will-change:transform;
+  backface-visibility:hidden;
+  -webkit-backface-visibility:hidden;
+}
+#lecturePopup.show .lec-popup-sheet { transform:translateY(0); }
+.lec-popup-header {
+  background:linear-gradient(135deg,var(--accent),var(--accent2));
+  padding:20px 18px 18px;position:relative;
+}
+.lec-popup-handle {
+  width:36px;height:4px;background:rgba(255,255,255,0.35);
+  border-radius:2px;margin:0 auto 14px;
+}
+.lec-popup-icon-wrap {
+  width:44px;height:44px;background:rgba(255,255,255,0.2);
+  border-radius:14px;display:flex;align-items:center;justify-content:center;margin-bottom:10px;
+}
+.lec-popup-icon-wrap i{font-size:22px;color:#fff}
+.lec-popup-title {
+  font-size:15px;font-weight:700;color:#fff;line-height:1.35;padding-right:36px;
+}
+.lec-popup-close {
+  position:absolute;top:16px;right:14px;width:30px;height:30px;
+  background:rgba(255,255,255,0.2);border:none;border-radius:50%;
+  color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:15px;
+}
+.lec-popup-body { padding:16px 16px 28px;display:flex;flex-direction:column;gap:10px; }
+.popup-lec-btn {
+  width:100%;display:flex;align-items:center;gap:14px;
+  padding:14px 16px;border-radius:14px;border:none;
+  cursor:pointer;text-align:left;
+  transition:opacity 0.12s;
+  will-change:opacity;
+  backface-visibility:hidden;
+  -webkit-backface-visibility:hidden;
+}
+.popup-lec-btn:active{opacity:0.75}
+.popup-lec-btn-watch{background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff}
+.popup-lec-btn-notes{background:var(--surface2);border:1px solid var(--border) !important;color:var(--text)}
+body.light-mode .popup-lec-btn-notes{background:var(--surface2);color:var(--text)}
+.popup-lec-btn-icon {
+  width:38px;height:38px;border-radius:10px;
+  display:flex;align-items:center;justify-content:center;flex-shrink:0;
+}
+.popup-lec-btn-watch .popup-lec-btn-icon{background:rgba(255,255,255,0.2)}
+.popup-lec-btn-notes .popup-lec-btn-icon{background:var(--surface3)}
+.popup-lec-btn-icon i{font-size:19px}
+.popup-lec-btn-watch .popup-lec-btn-icon i{color:#fff}
+.popup-lec-btn-notes .popup-lec-btn-icon i{color:var(--accent)}
+.popup-lec-btn-text{flex:1}
+.popup-lec-btn-label{font-size:14px;font-weight:700;display:block}
+.popup-lec-btn-sub{font-size:11px;opacity:0.7;margin-top:2px;display:block}
+.popup-lec-btn-arrow{font-size:16px;opacity:0.4}
+
+/* ── Lecture row redesign ─────────────────────── */
+.lec-row {
+  background:var(--surface);border:1px solid var(--border);
+  border-radius:var(--radius);display:flex;align-items:center;
+  padding:12px 14px;gap:12px;
+  transition:background 0.15s,border-color 0.15s;
+  will-change:transform;
+  backface-visibility:hidden;
+  -webkit-backface-visibility:hidden;
+  transform:translateZ(0);
+}
+.lec-num {
+  width:36px;height:36px;border-radius:10px;
+  background:linear-gradient(135deg,var(--accent),var(--accent2));
+  display:flex;align-items:center;justify-content:center;
+  font-size:13px;font-weight:700;color:#fff;flex-shrink:0;align-self:flex-start;margin-top:2px;
+}
+.lec-info{flex:1;min-width:0}
+.lec-name{font-size:14px;font-weight:500;line-height:1.35}
+.lec-mini-btns{display:flex;gap:7px;margin-top:7px;flex-wrap:wrap}
+.lec-mini-btn{
+  display:inline-flex;align-items:center;gap:4px;
+  padding:5px 11px;border-radius:20px;border:none;
+  font-size:11px;font-weight:600;cursor:pointer;
+  transition:opacity 0.15s;
+  -webkit-tap-highlight-color:transparent;
+}
+.lec-mini-btn:active{opacity:0.7}
+.lec-mini-watch{
+  background:linear-gradient(135deg,var(--accent),var(--accent2));
+  color:#fff;
+}
+.lec-mini-notes{
+  background:var(--surface2);
+  border:1px solid var(--border) !important;
+  color:var(--text);
+}
+body.light-mode .lec-mini-notes{background:var(--surface2);color:var(--text)}
+.lec-mini-btn i{font-size:11px}
+
+/* ── Flicker Notice Banner ────────────────────── */
+.flicker-notice{
+  display:flex;align-items:center;justify-content:space-between;gap:10px;
+  padding:9px 14px;
+  background:linear-gradient(90deg,rgba(79,142,247,0.12),rgba(124,92,191,0.10));
+  border-bottom:1px solid rgba(79,142,247,0.25);
+  flex-shrink:0;
+}
+.flicker-notice-left{display:flex;align-items:center;gap:9px;flex:1;min-width:0}
+.flicker-notice-icon{font-size:16px;flex-shrink:0}
+.flicker-notice-title{font-size:11px;font-weight:600;color:var(--text);line-height:1.3}
+.flicker-notice-sub{font-size:10px;color:var(--text2);margin-top:1px}
+.flicker-reload-btn{
+  display:flex;align-items:center;gap:5px;
+  background:var(--accent);color:#fff;
+  border:none;border-radius:20px;
+  padding:6px 12px;font-size:11px;font-weight:700;
+  cursor:pointer;flex-shrink:0;
+  transition:opacity 0.15s;
+}
+.flicker-reload-btn:active{opacity:0.75}
+.flicker-reload-btn i{font-size:12px}
+
+/* ── Announcement Bell ───────────────────────────── */
+.bell-btn{position:relative;width:36px;height:36px;border-radius:50%;background:var(--surface2);border:none;color:var(--text);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0;transition:background 0.2s}
+.bell-btn:active{background:var(--surface3)}
+.bell-badge{position:absolute;top:4px;right:4px;width:9px;height:9px;border-radius:50%;background:var(--red);border:2px solid var(--topbar);display:none}
+.bell-badge.show{display:block}
+.ann-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:300;align-items:flex-end;justify-content:center}
+.ann-overlay.show{display:flex}
+.ann-modal{background:var(--surface);border-radius:20px 20px 0 0;width:100%;max-width:480px;max-height:85vh;overflow-y:auto;position:relative;padding-bottom:24px}
+.ann-modal-handle{width:40px;height:4px;background:var(--border);border-radius:2px;margin:16px auto 0;display:block}
+.ann-modal-close{position:absolute;right:16px;top:32px;background:var(--surface2);border:none;color:var(--text2);width:32px;height:32px;border-radius:50%;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:16px}
+.ann-title-wrap{display:flex;align-items:center;gap:8px;padding:16px 16px 12px}
+.ann-title-icon{width:40px;height:40px;border-radius:12px;background:linear-gradient(135deg,rgba(79,142,247,0.2),rgba(124,92,191,0.2));border:1px solid rgba(79,142,247,0.3);display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0}
+.ann-title-text{font-size:16px;font-weight:700;color:var(--text)}
+.ann-title-sub{font-size:11px;color:var(--text2);margin-top:2px}
+.ann-card{margin:0 16px 12px;border-radius:14px;overflow:hidden;border:1px solid rgba(79,142,247,0.2);background:linear-gradient(135deg,rgba(79,142,247,0.06),rgba(124,92,191,0.04))}
+.ann-card-top{padding:14px 16px 10px;display:flex;align-items:flex-start;gap:10px}
+.ann-card-emoji{font-size:24px;flex-shrink:0;margin-top:2px}
+.ann-card-info{flex:1;min-width:0}
+.ann-card-heading{font-size:14px;font-weight:700;color:var(--text);line-height:1.4}
+.ann-card-body{font-size:13px;color:var(--text2);line-height:1.6;margin-top:5px;white-space:pre-wrap;word-break:break-word}
+.ann-card-footer{padding:8px 16px 12px;display:flex;align-items:center;justify-content:space-between;border-top:1px solid rgba(79,142,247,0.12);margin-top:2px}
+.ann-card-date{font-size:11px;color:var(--text3);display:flex;align-items:center;gap:4px}
+.ann-new-badge{font-size:10px;font-weight:700;color:#fff;background:var(--red);border-radius:20px;padding:2px 8px;letter-spacing:0.3px}
+.ann-empty{text-align:center;padding:40px 20px;color:var(--text2)}
+.ann-empty i{font-size:40px;color:var(--text3);display:block;margin-bottom:10px}
+.ann-admin-form{margin:0 16px 16px;padding:14px;background:var(--surface2);border-radius:12px;border:1px solid var(--border)}
+.ann-admin-title{font-size:12px;font-weight:600;color:var(--text2);margin-bottom:10px;display:flex;align-items:center;gap:5px}
+
+/* ── Contact Button ───────────────────────────── */
+#contactBtn{position:fixed;bottom:80px;right:16px;z-index:300;cursor:pointer;user-select:none}
+#contactInner{
+  display:flex;align-items:center;gap:0;
+  background:linear-gradient(135deg,var(--accent),var(--accent2));
+  border-radius:50px;padding:10px;
+  box-shadow:0 4px 16px rgba(79,142,247,0.4);
+  transition:all 0.3s cubic-bezier(.4,0,.2,1);
+  overflow:hidden;max-width:42px;height:42px;
+}
+#contactInner.expanded{max-width:180px;padding:10px 14px;gap:7px}
+#contactIcon{font-size:18px;flex-shrink:0;line-height:1}
+#contactText{
+  font-size:12px;font-weight:700;color:#fff;white-space:nowrap;
+  overflow:hidden;max-width:0;opacity:0;
+  transition:max-width 0.3s ease,opacity 0.3s ease;
+}
+#contactInner.expanded #contactText{max-width:140px;opacity:1}
+</style>
+
+
+<!-- Edit Modal -->
+<div class="modal-overlay" id="editModal" onclick="closeEditOutside(event)">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <button class="modal-close" onclick="closeEdit()"><i class="ti ti-x"></i></button>
+    <div class="modal-title"><i class="ti ti-pencil" style="color:var(--accent)"></i><span id="editModalTitle">Edit</span></div>
+    <div id="editModalBody"></div>
+    <button class="btn-add" id="editSaveBtn" onclick="saveEdit()" style="margin-top:8px"><i class="ti ti-check"></i> Save</button>
+  </div>
+</div>
+
+<!-- Announcement Modal -->
+<div class="ann-overlay" id="annModal" onclick="closeAnnOutside(event)">
+  <div class="ann-modal">
+    <span class="ann-modal-handle"></span>
+    <button class="ann-modal-close" onclick="closeAnnouncements()"><i class="ti ti-x"></i></button>
+    <div class="ann-title-wrap">
+      <div class="ann-title-icon">🔔</div>
+      <div>
+        <div class="ann-title-text">Announcements</div>
+        <div class="ann-title-sub">Latest updates from admin</div>
+      </div>
+    </div>
+    <div class="ann-admin-form" id="annAdminForm" style="display:none">
+      <div class="ann-admin-title"><i class="ti ti-pencil" style="color:var(--accent)"></i> Post New Announcement</div>
+      <div class="form-group" style="margin-bottom:8px;display:flex;gap:8px">
+        <input class="form-input" id="annEmojiInput" placeholder="📢" maxlength="4" style="font-size:18px;width:60px;flex-shrink:0">
+        <input class="form-input" id="annHeadingInput" placeholder="Heading" style="flex:1">
+      </div>
+      <div class="form-group" style="margin-bottom:10px">
+        <textarea class="form-input" id="annBodyInput" placeholder="Write your announcement here..." rows="3" style="resize:none;font-family:inherit"></textarea>
+      </div>
+      <button class="btn-add" onclick="postAnnouncement()" id="annPostBtn"><i class="ti ti-send"></i> Post</button>
+    </div>
+    <div id="annList"></div>
+  </div>
+</div>
+
+<!-- Contact Floating Button -->
+<div id="contactBtn" onclick="handleContact()">
+  <div id="contactInner">
+    <span id="contactIcon">💬</span>
+    <span id="contactText"></span>
+  </div>
+</div>
+
+<script>
+var _contactExpanded=false,_contactTimer=null;
+function handleContact(){
+  if(!_contactExpanded){
+    _contactExpanded=true;
+    document.getElementById('contactInner').classList.add('expanded');
+    document.getElementById('contactIcon').textContent='📩';
+    document.getElementById('contactText').textContent='Click to open support';
+    _contactTimer=setTimeout(collapseContact,5000);
+  } else {
+    clearTimeout(_contactTimer);
+    if(tg){tg.openLink('https://t.me/team_secret_cont_bot');}
+    else{window.open('https://t.me/team_secret_cont_bot','_blank');}
+    collapseContact();
+  }
+}
+function collapseContact(){
+  _contactExpanded=false;clearTimeout(_contactTimer);
+  document.getElementById('contactInner').classList.remove('expanded');
+  setTimeout(function(){document.getElementById('contactIcon').textContent='💬';},300);
+}
+
+// ── Refer & Share ─────────────────────────────────────────────────────────────
+var _referLink = '';
+
+function getReferLink() {
+  var uid = getUserId();
+  if (!uid) return '';
+  return 'https://t.me/' + (window._botUsername || '') + '?start=ref_' + uid;
+}
+
+async function loadReferStats() {
+  var uid = getUserId();
+  if (!uid) return;
+
+  // Set referral link
+  _referLink = getReferLink();
+  var box = document.getElementById('referLinkBox');
+  if (box) box.textContent = _referLink || 'Open via Telegram to see your link';
+
+  // Fetch stats from server
+  try {
+    var r = await fetch('/api/refer/stats/' + uid);
+    var data = await r.json();
+    var countEl = document.getElementById('referCount');
+    var pointsEl = document.getElementById('referPoints');
+    if (countEl) countEl.textContent = data.referrals || 0;
+    if (pointsEl) pointsEl.textContent = data.points || 0;
+  } catch(e) {
+    console.error('Refer stats error:', e);
+  }
+}
+
+function copyReferLink() {
+  if (!_referLink) return toast('Open via Telegram to get your link', 'error');
+  if (navigator.clipboard) {
+    navigator.clipboard.writeText(_referLink).then(function() {
+      toast('Link copied! 📋', 'success');
+    });
+  } else {
+    // Fallback
+    var el = document.createElement('textarea');
+    el.value = _referLink;
+    document.body.appendChild(el);
+    el.select();
+    document.execCommand('copy');
+    document.body.removeChild(el);
+    toast('Link copied! 📋', 'success');
+  }
+}
+
+function shareReferLink() {
+  if (!_referLink) return toast('Open via Telegram to get your link', 'error');
+  var shareUrl = 'https://t.me/share/url?url=' + encodeURIComponent(_referLink) + '&text=' + encodeURIComponent('Join and access free lectures! 📚');
+  if (tg && tg.openLink) {
+    tg.openLink(shareUrl, { try_instant_view: false });
+  } else {
+    window.open(shareUrl, '_blank');
+  }
+}
+
+// ── Announcements ─────────────────────────────────────────────────────────────
+
+var _announcements = [];
+
+async function loadAnnouncements() {
+  try {
+    var r = await fetch('/api/announcements');
+    _announcements = await r.json() || [];
+    _updateBellBadge();
+  } catch(e) {
+    console.error('Announcements load error:', e);
+  }
+}
+
+function _getLastSeen() {
+  return localStorage.getItem('ann_last_seen') || '0';
+}
+
+function _hasUnread() {
+  if (!_announcements.length) return false;
+  var lastSeen = _getLastSeen();
+  return _announcements.some(function(a) { return a.createdAt > lastSeen; });
+}
+
+function _updateBellBadge() {
+  var badge = document.getElementById('bellBadge');
+  if (!badge) return;
+  _hasUnread() ? badge.classList.add('show') : badge.classList.remove('show');
+}
+
+function _relativeTime(isoStr) {
+  var diff = Date.now() - new Date(isoStr).getTime();
+  var mins = Math.floor(diff / 60000);
+  if (mins < 1) return 'Just now';
+  if (mins < 60) return mins + 'm ago';
+  var hrs = Math.floor(mins / 60);
+  if (hrs < 24) return hrs + 'h ago';
+  var days = Math.floor(hrs / 24);
+  if (days < 7) return days + 'd ago';
+  return new Date(isoStr).toLocaleDateString('en-IN', { day:'numeric', month:'short' });
+}
+
+function _escHtml(str) {
+  return String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function openAnnouncements() {
+  var adminForm = document.getElementById('annAdminForm');
+  if (adminForm) adminForm.style.display = isAdmin ? 'block' : 'none';
+  localStorage.setItem('ann_last_seen', new Date().toISOString());
+  _updateBellBadge();
+  _renderAnnList();
+  document.getElementById('annModal').classList.add('show');
+}
+
+function _renderAnnList() {
+  var list = document.getElementById('annList');
+  var lastSeen = _getLastSeen();
+  if (!_announcements.length) {
+    list.innerHTML = '<div class="ann-empty"><i class="ti ti-bell-off"></i><div>No announcements yet</div></div>';
+    return;
+  }
+  var sorted = _announcements.slice().sort(function(a,b){ return new Date(b.createdAt) - new Date(a.createdAt); });
+  list.innerHTML = sorted.map(function(a) {
+    var isNew = a.createdAt > lastSeen;
+    return '<div class="ann-card">' +
+      '<div class="ann-card-top">' +
+        '<div class="ann-card-emoji">' + (a.emoji || '📢') + '</div>' +
+        '<div class="ann-card-info">' +
+          '<div class="ann-card-heading">' + _escHtml(a.heading) + '</div>' +
+          '<div class="ann-card-body">' + _escHtml(a.body) + '</div>' +
+        '</div>' +
+      '</div>' +
+      '<div class="ann-card-footer">' +
+        '<span class="ann-card-date"><i class="ti ti-clock" style="font-size:11px"></i> ' + _relativeTime(a.createdAt) + '</span>' +
+        (isAdmin
+          ? '<button onclick="deleteAnnouncement(\'' + a._id + '\')" style="background:none;border:none;color:var(--text3);cursor:pointer;padding:3px 6px;border-radius:6px;display:flex;align-items:center;gap:3px;font-size:13px"><i class="ti ti-trash"></i></button>'
+          : (isNew ? '<span class="ann-new-badge">NEW</span>' : '')) +
+      '</div>' +
+    '</div>';
+  }).join('');
+}
+
+function closeAnnouncements() {
+  document.getElementById('annModal').classList.remove('show');
+}
+
+function closeAnnOutside(e) {
+  if (e.target.id === 'annModal') closeAnnouncements();
+}
+
+async function postAnnouncement() {
+  var emoji = document.getElementById('annEmojiInput').value.trim() || '📢';
+  var heading = document.getElementById('annHeadingInput').value.trim();
+  var body = document.getElementById('annBodyInput').value.trim();
+  if (!heading || !body) return toast('Please fill heading and body!', 'error');
+  var btn = document.getElementById('annPostBtn');
+  btn.disabled = true;
+  btn.innerHTML = '<i class="ti ti-loader-2" style="animation:spin 0.8s linear infinite;display:inline-block"></i> Posting...';
+  try {
+    var r = await apiFetch('/api/announcements', 'POST', { emoji, heading, body });
+    _announcements.push(r);
+    document.getElementById('annEmojiInput').value = '';
+    document.getElementById('annHeadingInput').value = '';
+    document.getElementById('annBodyInput').value = '';
+    _renderAnnList();
+    toast('Announcement posted! 🔔', 'success');
+  } catch(e) {
+    toast('Error: ' + e.message, 'error');
+  }
+  btn.disabled = false;
+  btn.innerHTML = '<i class="ti ti-send"></i> Post';
+}
+
+async function deleteAnnouncement(id) {
+  if (!confirm('Delete this announcement?')) return;
+  try {
+    await apiFetch('/api/announcements/' + id, 'DELETE');
+    _announcements = _announcements.filter(function(a){ return a._id !== id; });
+    _renderAnnList();
+    toast('Deleted!', 'success');
+  } catch(e) {
+    toast('Error', 'error');
+  }
+}
+</script>
+
+</body>
+</html>
