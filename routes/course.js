@@ -441,6 +441,64 @@ router.post('/refer/record', async (req, res) => {
   }
 });
 
+// ── Force Join ────────────────────────────────────────────────────────────────
+// Returns list of channels user must join (from env FORCE_JOIN_CHANNELS)
+// and their current membership status (checked via Telegram Bot API).
+//
+// ENV: FORCE_JOIN_CHANNELS = comma-separated channel IDs e.g. "-100123,-100456"
+//      BOT_TOKEN is already available above
+//
+// GET /api/force-join/channels        — public: returns channel list (ids + invite links if set)
+// POST /api/force-join/check          — body: { userId } — returns { allJoined, channels:[{id,name,link,joined}] }
+
+// Optional: admin can store channel display names/invite links in env like:
+//   FORCE_JOIN_CHANNEL_NAMES = "Channel One,Channel Two"
+//   FORCE_JOIN_CHANNEL_LINKS = "https://t.me/chan1,https://t.me/chan2"
+
+function getForceJoinChannels() {
+  const ids = (process.env.FORCE_JOIN_CHANNELS || '').split(',').map(s => s.trim()).filter(Boolean);
+  const names = (process.env.FORCE_JOIN_CHANNEL_NAMES || '').split(',').map(s => s.trim());
+  const links = (process.env.FORCE_JOIN_CHANNEL_LINKS || '').split(',').map(s => s.trim());
+  return ids.map((id, i) => ({
+    id,
+    name: names[i] || ('Channel ' + (i + 1)),
+    link: links[i] || null,
+  }));
+}
+
+router.get('/force-join/channels', (req, res) => {
+  const channels = getForceJoinChannels();
+  res.json({ channels, required: channels.length > 0 });
+});
+
+router.post('/force-join/check', async (req, res) => {
+  const { userId } = req.body;
+  if (!userId) return res.status(400).json({ error: 'userId required' });
+
+  const channels = getForceJoinChannels();
+  if (!channels.length) return res.json({ allJoined: true, channels: [] });
+
+  const BOT_TOKEN = process.env.BOT_TOKEN;
+  if (!BOT_TOKEN) return res.status(500).json({ error: 'BOT_TOKEN not set' });
+
+  const results = await Promise.all(channels.map(async (ch) => {
+    try {
+      const url = `https://api.telegram.org/bot${BOT_TOKEN}/getChatMember?chat_id=${encodeURIComponent(ch.id)}&user_id=${encodeURIComponent(userId)}`;
+      const r = await fetch(url);
+      const data = await r.json();
+      const status = data.result && data.result.status;
+      const joined = ['member', 'administrator', 'creator'].includes(status);
+      return { ...ch, joined, status: status || 'not_member' };
+    } catch (e) {
+      // If check fails (bot not in channel etc), assume not joined
+      return { ...ch, joined: false, status: 'error' };
+    }
+  }));
+
+  const allJoined = results.every(c => c.joined);
+  res.json({ allJoined, channels: results });
+});
+
 // ── Stats API (owner only via bot) ───────────────────────────────────────────
 router.get('/stats', async (req, res) => {
   try {
