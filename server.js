@@ -101,7 +101,12 @@ app.get("/health", (req, res) => res.status(200).json({
 }));
 
 app.get("/api/config", (req, res) => {
-  res.json({ ownerId: OWNER_ID, botUsername: BOT_USERNAME || '' });
+  const forceJoinChannels = (process.env.FORCE_JOIN_CHANNELS || '').split(',').map(s => s.trim()).filter(Boolean);
+  res.json({
+    ownerId: OWNER_ID,
+    botUsername: BOT_USERNAME || '',
+    forceJoinRequired: forceJoinChannels.length > 0,
+  });
 });
 
 app.use("/api", require("./routes/course"));
