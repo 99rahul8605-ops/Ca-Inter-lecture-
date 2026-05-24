@@ -210,9 +210,50 @@ body.ready{transition:none}
 .sending-dot{width:8px;height:8px;border-radius:50%;background:var(--accent);animation:pulse 1s ease-in-out infinite}
 @keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:0.5;transform:scale(0.8)}}
 .sending-text{font-size:13px;font-weight:500;color:var(--text)}
+
+/* ── Force Join Gate ─────────────────────────────── */
+#forceJoinGate{
+  position:fixed;inset:0;background:var(--bg);z-index:9999;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  padding:24px;text-align:center;
+}
+#forceJoinGate.hidden{display:none}
+.fj-logo{width:72px;height:72px;background:linear-gradient(135deg,#4f8ef7,#7c5cbf);border-radius:18px;display:flex;align-items:center;justify-content:center;font-size:34px;margin:0 auto 20px;box-shadow:0 8px 24px rgba(79,142,247,0.35)}
+.fj-title{font-size:20px;font-weight:700;margin-bottom:8px}
+.fj-sub{font-size:13px;color:var(--text2);line-height:1.6;margin-bottom:24px;max-width:320px}
+.fj-channels{width:100%;max-width:360px;display:flex;flex-direction:column;gap:10px;margin-bottom:24px}
+.fj-channel-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:13px 14px;display:flex;align-items:center;gap:12px;transition:border-color 0.2s}
+.fj-channel-card.joined{border-color:var(--green);background:rgba(34,197,94,0.06)}
+.fj-channel-icon{width:40px;height:40px;border-radius:10px;background:linear-gradient(135deg,#4f8ef7,#7c5cbf);display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0}
+.fj-channel-info{flex:1;text-align:left;min-width:0}
+.fj-channel-name{font-size:14px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.fj-channel-status{font-size:11px;margin-top:2px}
+.fj-channel-status.ok{color:var(--green)}
+.fj-channel-status.pending{color:var(--text3)}
+.fj-join-btn{background:var(--accent);color:#fff;border:none;border-radius:8px;padding:7px 14px;font-size:12px;font-weight:700;cursor:pointer;flex-shrink:0;display:flex;align-items:center;gap:4px;transition:opacity 0.2s}
+.fj-join-btn:active{opacity:0.8}
+.fj-join-btn.done{background:var(--green);pointer-events:none}
+.fj-verify-btn{background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff;border:none;border-radius:var(--radius-sm);padding:14px 24px;font-size:15px;font-weight:700;cursor:pointer;width:100%;max-width:360px;display:flex;align-items:center;justify-content:center;gap:8px;transition:opacity 0.2s;box-shadow:0 4px 16px rgba(79,142,247,0.35)}
+.fj-verify-btn:active{opacity:0.85}
+.fj-verify-btn:disabled{opacity:0.5;cursor:not-allowed}
+.fj-err{font-size:12px;color:var(--red);margin-top:10px;min-height:18px}
 </style>
 </head>
 <body>
+
+<!-- FORCE JOIN GATE (shown before app if user hasn't joined required channels) -->
+<div id="forceJoinGate" class="hidden">
+  <div class="fj-logo">📚</div>
+  <div class="fj-title">Join to Continue</div>
+  <div class="fj-sub">Please join our official channel(s) to access the app. It's free and keeps you updated!</div>
+  <div class="fj-channels" id="fjChannelList">
+    <!-- Rendered by JS -->
+  </div>
+  <button class="fj-verify-btn" id="fjVerifyBtn" onclick="verifyForceJoin()">
+    <i class="ti ti-check"></i> I've Joined — Verify
+  </button>
+  <div class="fj-err" id="fjErr"></div>
+</div>
 
 <!-- PAGE: Home (Batches) -->
 <div class="page active" id="page-home">
@@ -1012,6 +1053,8 @@ async function checkAdminAccess() {
     var config = await (await fetch('/api/config')).json();
     var ownerId = config.ownerId;
     if (config.botUsername) window._botUsername = config.botUsername;
+    // Store force-join requirement
+    _fjRequired = !!config.forceJoinRequired;
     if (!ownerId) return;
     var tgUser = tg && tg.initDataUnsafe && tg.initDataUnsafe.user;
     var curId = tgUser ? tgUser.id : null;
@@ -1802,9 +1845,149 @@ openBatch = function(bid) {
   _origOpenBatch(bid);
 };
 
+// ── Force Join Gate ───────────────────────────────────────────────────────────
+var _fjChannels = [];   // [{id, name, link, joined}]
+var _fjRequired = false;
+var _fjPassed = false;
+
+async function checkForceJoin() {
+  // If admin, skip force join
+  if (isAdmin) return true;
+
+  // Check if force join is required from config (already fetched in checkAdminAccess)
+  if (!_fjRequired) return true;
+
+  var userId = getUserId();
+  if (!userId) {
+    // Not in Telegram context — skip gate (will fail auth anyway)
+    return true;
+  }
+
+  try {
+    var r = await fetch('/api/force-join/check', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId }),
+    });
+    var data = await r.json();
+    _fjChannels = data.channels || [];
+
+    if (data.allJoined) {
+      _fjPassed = true;
+      document.getElementById('forceJoinGate').classList.add('hidden');
+      return true;
+    }
+
+    // Show gate
+    _renderFjChannels();
+    document.getElementById('forceJoinGate').classList.remove('hidden');
+    return false;
+  } catch (e) {
+    console.error('Force join check failed:', e);
+    // On error, allow through (don't block user because of server error)
+    return true;
+  }
+}
+
+function _renderFjChannels() {
+  var list = document.getElementById('fjChannelList');
+  if (!list) return;
+  list.innerHTML = _fjChannels.map(function(ch) {
+    return '<div class="fj-channel-card' + (ch.joined ? ' joined' : '') + '" id="fjCard_' + ch.id + '">' +
+      '<div class="fj-channel-icon">📢</div>' +
+      '<div class="fj-channel-info">' +
+        '<div class="fj-channel-name">' + _escFj(ch.name) + '</div>' +
+        '<div class="fj-channel-status ' + (ch.joined ? 'ok' : 'pending') + '">' +
+          (ch.joined ? '✅ Joined' : '⏳ Not joined yet') +
+        '</div>' +
+      '</div>' +
+      (ch.joined
+        ? '<div class="fj-join-btn done"><i class="ti ti-check"></i> Done</div>'
+        : (ch.link
+            ? '<button class="fj-join-btn" onclick="fjOpenChannel(\'' + _escFj(ch.link) + '\')"><i class="ti ti-brand-telegram"></i> Join</button>'
+            : '<div style="font-size:11px;color:var(--text3)">ID: ' + ch.id + '</div>'
+          )
+      ) +
+    '</div>';
+  }).join('');
+}
+
+function _escFj(s) {
+  return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+function fjOpenChannel(link) {
+  if (tg && tg.openLink) {
+    tg.openLink(link, { try_instant_view: false });
+  } else {
+    window.open(link, '_blank');
+  }
+}
+
+async function verifyForceJoin() {
+  var btn = document.getElementById('fjVerifyBtn');
+  var errEl = document.getElementById('fjErr');
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader-2" style="animation:spin 0.8s linear infinite;display:inline-block"></i> Checking...'; }
+  if (errEl) errEl.textContent = '';
+
+  var userId = getUserId();
+  if (!userId) {
+    if (errEl) errEl.textContent = 'Please open via Telegram to verify.';
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-check"></i> I\'ve Joined — Verify'; }
+    return;
+  }
+
+  try {
+    var r = await fetch('/api/force-join/check', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId }),
+    });
+    var data = await r.json();
+    _fjChannels = data.channels || [];
+    _renderFjChannels();
+
+    if (data.allJoined) {
+      _fjPassed = true;
+      document.getElementById('forceJoinGate').classList.add('hidden');
+      // Resume app init flow — update UI that was loaded in background
+      var dot = document.getElementById('accessDot');
+      if (dot) dot.style.background = hasAccess() ? 'var(--green)' : 'var(--red)';
+      var banner = document.getElementById('accessBanner');
+      if (banner) banner.innerHTML = '';
+      var lockedMsg = document.getElementById('lockedMsg');
+      if (lockedMsg) lockedMsg.style.display = 'none';
+      updateHomeTimer();
+      if (hasAccess()) startCountdown();
+      document.body.classList.add('fadein');
+      setTimeout(function() {
+        document.body.classList.remove('fadein');
+        document.body.classList.add('ready');
+      }, 200);
+    } else {
+      var notJoined = _fjChannels.filter(function(c){ return !c.joined; });
+      if (errEl) errEl.textContent = 'Please join ' + notJoined.length + ' more channel(s) above, then verify again.';
+      if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-check"></i> I\'ve Joined — Verify'; }
+    }
+  } catch (e) {
+    if (errEl) errEl.textContent = 'Verification failed. Please try again.';
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-check"></i> I\'ve Joined — Verify'; }
+  }
+}
+
 async function init() {
   initTheme();
   await checkAdminAccess();
+
+  // ── Force Join Gate check ──────────────────────────────
+  var passed = await checkForceJoin();
+  if (!passed) {
+    // Show gate — stop init here. verifyForceJoin() will reload app flow on success.
+    // But still load the rest silently in background so it's ready instantly after gate clears.
+    Promise.all([load(), loadAccess(), loadAnnouncements()]).catch(function(){});
+    return;
+  }
+
   await Promise.all([load(), loadAccess(), loadAnnouncements()]);
   // Update access indicator dot
   var dot = document.getElementById('accessDot');
