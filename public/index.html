@@ -1114,20 +1114,33 @@ async function checkAdminAccess() {
 }
 
 async function apiFetch(url, method, body) {
-  var opts = { method: method||'GET', headers: {'Content-Type':'application/json','x-tg-init-data': tg?tg.initData:''} };
+  var controller = new AbortController();
+  var timer = setTimeout(function(){ controller.abort(); }, 15000); // 15s timeout
+  var opts = { method: method||'GET', headers: {'Content-Type':'application/json','x-tg-init-data': tg?tg.initData:''}, signal: controller.signal };
   if (body) opts.body = JSON.stringify(body);
-  var r = await fetch(url, opts);
-  if (!r.ok) throw new Error(await r.text());
-  return r.json();
+  try {
+    var r = await fetch(url, opts);
+    clearTimeout(timer);
+    if (!r.ok) throw new Error(await r.text());
+    return r.json();
+  } catch(e) {
+    clearTimeout(timer);
+    if (e.name === 'AbortError') throw new Error('Request timed out. Please check your connection and try again.');
+    throw e;
+  }
 }
 
 function openAdmin(tab) {
   if (!isAdmin) return;
   document.getElementById('adminModal').classList.add('show');
+  var cb = document.getElementById('contactBtn'); if (cb) cb.style.display = 'none';
   populateAllSelects();
   switchTab(tab||'batch');
 }
-function closeAdmin() { document.getElementById('adminModal').classList.remove('show'); }
+function closeAdmin() {
+  document.getElementById('adminModal').classList.remove('show');
+  var cb = document.getElementById('contactBtn'); if (cb) cb.style.display = '';
+}
 function closeModalOutside(e) { if (e.target.id==='adminModal') closeAdmin(); }
 
 function switchTab(name) {
@@ -1285,8 +1298,8 @@ async function addLecture() {
     populateAllSelects();
     document.getElementById('lName').value=''; document.getElementById('lLink').value=''; document.getElementById('lNotes').value='';
     toast('Lecture added!','success');
-  } catch(e){toast('Error: '+e.message,'error');}
-  setLoading('btnLecture',false,'<i class="ti ti-plus"></i> Add Lecture');
+  } catch(e){toast('Error: '+(e.message||'Something went wrong'),'error');} finally {
+    setLoading('btnLecture',false,'<i class="ti ti-plus"></i> Add Lecture'); }
 }
 
 // ── Manage drill-down state ──────────────────────────────────────────────────
@@ -1357,23 +1370,55 @@ function _renderManageLevel() {
     var s = b && b.subjects.find(x => x._id === _mState.sid);
     var ch = s && s.chapters.find(x => x._id === _mState.cid);
     if (!ch) return;
-    var allLecs = [];
-    ch.units.forEach(u => u.lectures.forEach(l => allLecs.push({ l, uid: u._id, uname: u.name })));
-    ch.lectures.forEach(l => allLecs.push({ l, uid: null, uname: null }));
-    if (!allLecs.length) { html = '<div style="text-align:center;padding:20px;color:var(--text2);font-size:13px">No lectures yet</div>'; }
-    allLecs.forEach(({ l, uid, uname }) => {
-      var lcs = l.comingSoon ? '<span class="coming-soon-badge">🔜</span>' : '';
-      var sub = uname ? uname : ch.name;
-      html += `<div class="manage-item">
-        <span class="manage-item-icon" style="font-size:13px">▶</span>
-        <div class="manage-item-info">
-          <div class="manage-item-name">${l.name} ${lcs}</div>
-          <div class="manage-item-sub">${sub}</div>
-        </div>
-        <button class="edit-btn" onclick="openEdit('lecture','${b._id}','${s._id}','${ch._id}','${uid||''}','${l._id}')"><i class="ti ti-pencil"></i></button>
-        <button class="del-btn" onclick="delLecture('${b._id}','${s._id}','${ch._id}','${uid||''}','${l._id}')"><i class="ti ti-trash"></i></button>
-      </div>`;
-    });
+    // Show units with edit/delete buttons
+    if (ch.units && ch.units.length) {
+      html += '<div style="font-size:11px;font-weight:600;color:var(--text2);letter-spacing:1px;text-transform:uppercase;padding:8px 0 6px">Units</div>';
+      ch.units.forEach(u => {
+        html += `<div class="manage-item">
+          <span class="manage-item-icon">📁</span>
+          <div class="manage-item-info">
+            <div class="manage-item-name">${u.name}</div>
+            <div class="manage-item-sub">${u.lectures.length} lectures</div>
+          </div>
+          <button class="edit-btn" onclick="openEdit('unit','${b._id}','${s._id}','${ch._id}','${u._id}','')"><i class="ti ti-pencil"></i></button>
+          <button class="del-btn" onclick="delUnit('${b._id}','${s._id}','${ch._id}','${u._id}')"><i class="ti ti-trash"></i></button>
+        </div>`;
+      });
+      html += '<div style="font-size:11px;font-weight:600;color:var(--text2);letter-spacing:1px;text-transform:uppercase;padding:12px 0 6px">Lectures (in units)</div>';
+      ch.units.forEach(u => {
+        u.lectures.forEach(l => {
+          var lcs = l.comingSoon ? '<span class="coming-soon-badge">🔜</span>' : '';
+          html += `<div class="manage-item">
+            <span class="manage-item-icon" style="font-size:13px">▶</span>
+            <div class="manage-item-info">
+              <div class="manage-item-name">${l.name} ${lcs}</div>
+              <div class="manage-item-sub">${u.name}</div>
+            </div>
+            <button class="edit-btn" onclick="openEdit('lecture','${b._id}','${s._id}','${ch._id}','${u._id}','${l._id}')"><i class="ti ti-pencil"></i></button>
+            <button class="del-btn" onclick="delLecture('${b._id}','${s._id}','${ch._id}','${u._id}','${l._id}')"><i class="ti ti-trash"></i></button>
+          </div>`;
+        });
+      });
+    }
+    // Direct lectures (no unit)
+    if (ch.lectures && ch.lectures.length) {
+      html += '<div style="font-size:11px;font-weight:600;color:var(--text2);letter-spacing:1px;text-transform:uppercase;padding:12px 0 6px">Direct Lectures</div>';
+      ch.lectures.forEach(l => {
+        var lcs = l.comingSoon ? '<span class="coming-soon-badge">🔜</span>' : '';
+        html += `<div class="manage-item">
+          <span class="manage-item-icon" style="font-size:13px">▶</span>
+          <div class="manage-item-info">
+            <div class="manage-item-name">${l.name} ${lcs}</div>
+            <div class="manage-item-sub">${ch.name}</div>
+          </div>
+          <button class="edit-btn" onclick="openEdit('lecture','${b._id}','${s._id}','${ch._id}','','${l._id}')"><i class="ti ti-pencil"></i></button>
+          <button class="del-btn" onclick="delLecture('${b._id}','${s._id}','${ch._id}','','${l._id}')"><i class="ti ti-trash"></i></button>
+        </div>`;
+      });
+    }
+    if (!ch.units.length && !ch.lectures.length) {
+      html = '<div style="text-align:center;padding:20px;color:var(--text2);font-size:13px">No lectures yet</div>';
+    }
   }
 
   list.innerHTML = html;
@@ -1454,6 +1499,13 @@ function openEdit(type, bid, sid, cid, uid, lid) {
               <input type="checkbox" id="ei_comingSoon" ${c.comingSoon?'checked':''} style="width:18px;height:18px;cursor:pointer;accent-color:var(--accent)">
               <label for="ei_comingSoon" style="font-size:13px;font-weight:500;cursor:pointer">Mark as Coming Soon 🔜</label>
             </div>`;
+  } else if (type === 'unit') {
+    var b = batches.find(x => x._id === bid);
+    var s = b && b.subjects.find(x => x._id === sid);
+    var c = s && s.chapters.find(x => x._id === cid);
+    var u = c && c.units.find(x => x._id === uid);
+    title = 'Edit Unit';
+    body = `<div class="form-group"><label class="form-label">Unit Name</label><input class="form-input" id="ei_name" value="${u.name}"></div>`;
   } else if (type === 'lecture') {
     var b = batches.find(x => x._id === bid);
     var s = b && b.subjects.find(x => x._id === sid);
@@ -1506,6 +1558,12 @@ async function saveEdit() {
       updated = await apiFetch(`/api/batches/${bid}/subjects/${sid}/chapters/${cid}/edit`, 'PATCH', {
         name: document.getElementById('ei_name').value.trim(),
         comingSoon: document.getElementById('ei_comingSoon').checked
+      });
+      var idx = batches.findIndex(x => x._id === bid);
+      if (idx >= 0) batches[idx] = updated;
+    } else if (type === 'unit') {
+      updated = await apiFetch(`/api/batches/${bid}/subjects/${sid}/chapters/${cid}/units/${uid}/edit`, 'PATCH', {
+        name: document.getElementById('ei_name').value.trim()
       });
       var idx = batches.findIndex(x => x._id === bid);
       if (idx >= 0) batches[idx] = updated;
@@ -2363,11 +2421,15 @@ function handleContact(){
     _contactExpanded=true;
     document.getElementById('contactInner').classList.add('expanded');
     document.getElementById('contactIcon').textContent='📩';
-    document.getElementById('contactText').textContent='Click to open support';
-    _contactTimer=setTimeout(collapseContact,5000);
+    document.getElementById('contactText').textContent='Support';
+    _contactTimer=setTimeout(function(){
+      if(tg){tg.openLink('https://t.me/team_secret_cont_bot',{try_instant_view:false});}
+      else{window.open('https://t.me/team_secret_cont_bot','_blank');}
+      collapseContact();
+    }, 400);
   } else {
     clearTimeout(_contactTimer);
-    if(tg){tg.openLink('https://t.me/team_secret_cont_bot');}
+    if(tg){tg.openLink('https://t.me/team_secret_cont_bot',{try_instant_view:false});}
     else{window.open('https://t.me/team_secret_cont_bot','_blank');}
     collapseContact();
   }
