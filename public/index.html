@@ -211,22 +211,6 @@ body.ready{transition:none}
 @keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:0.5;transform:scale(0.8)}}
 .sending-text{font-size:13px;font-weight:500;color:var(--text)}
 
-/* ── Verifying Screen ───────────────────────────────── */
-#verifyingScreen{
-  position:fixed;inset:0;background:var(--bg);z-index:9998;
-  display:flex;flex-direction:column;align-items:center;justify-content:center;
-  gap:0;padding:24px;text-align:center;
-  transition:opacity 0.35s ease;
-}
-#verifyingScreen.fade-out{opacity:0;pointer-events:none}
-#verifyingScreen.hidden{display:none}
-.vs-logo{width:72px;height:72px;background:linear-gradient(135deg,#4f8ef7,#7c5cbf);border-radius:20px;display:flex;align-items:center;justify-content:center;font-size:34px;margin:0 auto 20px;box-shadow:0 8px 32px rgba(79,142,247,0.4)}
-.vs-title{font-size:18px;font-weight:700;margin-bottom:6px}
-.vs-sub{font-size:13px;color:var(--text2);margin-bottom:28px}
-.vs-bar{width:160px;height:3px;background:var(--surface2);border-radius:2px;overflow:hidden}
-.vs-bar-fill{height:100%;width:0%;background:linear-gradient(90deg,var(--accent),var(--accent2));border-radius:2px;animation:vsProgress 1.8s cubic-bezier(.4,0,.2,1) forwards}
-@keyframes vsProgress{0%{width:0%}60%{width:75%}85%{width:88%}100%{width:100%}}
-
 /* ── Force Join Gate ─────────────────────────────── */
 #forceJoinGate{
   position:fixed;inset:0;background:var(--bg);z-index:9999;
@@ -253,16 +237,26 @@ body.ready{transition:none}
 .fj-verify-btn:active{opacity:0.85}
 .fj-verify-btn:disabled{opacity:0.5;cursor:not-allowed}
 .fj-err{font-size:12px;color:var(--red);margin-top:10px;min-height:18px}
+
+/* ── Verifying Screen ───────────────────────────────── */
+#verifyingScreen{position:fixed;inset:0;background:var(--bg);z-index:99999;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:0;padding:24px;text-align:center;transition:opacity 0.3s ease}
+#verifyingScreen.vs-hide{opacity:0;pointer-events:none}
+#verifyingScreen.vs-gone{display:none}
+.vs-logo{width:72px;height:72px;background:linear-gradient(135deg,#4f8ef7,#7c5cbf);border-radius:20px;display:flex;align-items:center;justify-content:center;font-size:34px;margin:0 auto 20px;box-shadow:0 8px 32px rgba(79,142,247,0.4)}
+.vs-title{font-size:20px;font-weight:700;margin-bottom:6px}
+.vs-sub{font-size:13px;color:var(--text2);margin-bottom:28px}
+.vs-bar{width:160px;height:3px;background:var(--surface2);border-radius:2px;overflow:hidden;margin:0 auto}
+.vs-fill{height:100%;width:0%;background:linear-gradient(90deg,#4f8ef7,#7c5cbf);border-radius:2px;transition:width 0.4s ease}
 </style>
 </head>
 <body>
 
-<!-- VERIFYING SCREEN (shown while app initializes) -->
+<!-- VERIFYING SCREEN -->
 <div id="verifyingScreen">
   <div class="vs-logo">📚</div>
   <div class="vs-title">EduBot</div>
   <div class="vs-sub">Verifying your account...</div>
-  <div class="vs-bar"><div class="vs-bar-fill"></div></div>
+  <div class="vs-bar"><div class="vs-fill" id="vsFill"></div></div>
 </div>
 
 <!-- FORCE JOIN GATE (shown before app if user hasn't joined required channels) -->
@@ -336,7 +330,7 @@ body.ready{transition:none}
     </div>
     <div id="batchSection">
       <div class="sec-label">All Batches</div>
-      <div class="batch-grid" id="batchGrid"></div>
+      <div class="batch-grid" id="batchGrid"><div class="loading" style="grid-column:1/-1"><i class="ti ti-loader-2"></i>Loading...</div></div>
     </div>
   </div>
 </div>
@@ -1265,7 +1259,7 @@ async function addLecture() {
 // ── Manage drill-down state ──────────────────────────────────────────────────
 var _mState = { level: 'batches', bid: null, sid: null, cid: null };
 
-function renderManage() { _mState = { level: 'batches', bid: null, sid: null, cid: null, uid: null }; _renderManageLevel(); }
+function renderManage() { _mState = { level: 'batches', bid: null, sid: null, cid: null }; _renderManageLevel(); }
 
 function _renderManageLevel() {
   _renderBreadcrumb();
@@ -1314,73 +1308,27 @@ function _renderManageLevel() {
     s.chapters.forEach(c => {
       var cs = c.comingSoon ? '<span class="coming-soon-badge">🔜 Coming Soon</span>' : '';
       var lecCount = c.lectures.length + c.units.reduce((a,u)=>a+u.lectures.length,0);
-      // If chapter has units → drill into units level; else → drill into lectures level
-      var drillLevel = c.units.length ? 'units' : 'lectures';
-      var sub = c.units.length ? (c.units.length + ' units · ' + lecCount + ' lectures') : (lecCount + ' lectures');
       html += `<div class="manage-item">
         <span class="manage-item-icon">📂</span>
-        <div class="manage-item-info" style="cursor:pointer" onclick="_mDrill('${drillLevel}','${b._id}','${s._id}','${c._id}')">
+        <div class="manage-item-info" style="cursor:pointer" onclick="_mDrill('lectures','${b._id}','${s._id}','${c._id}')">
           <div class="manage-item-name">${c.name} ${cs}</div>
-          <div class="manage-item-sub">${sub}</div>
+          <div class="manage-item-sub">${lecCount} lectures</div>
         </div>
         <button class="edit-btn" onclick="openEdit('chapter','${b._id}','${s._id}','${c._id}')"><i class="ti ti-pencil"></i></button>
         <button class="del-btn" onclick="delChapter('${b._id}','${s._id}','${c._id}')"><i class="ti ti-trash"></i></button>
       </div>`;
     });
 
-  } else if (_mState.level === 'units') {
-    var b = batches.find(x => x._id === _mState.bid);
-    var s = b && b.subjects.find(x => x._id === _mState.sid);
-    var ch = s && s.chapters.find(x => x._id === _mState.cid);
-    if (!ch) return;
-    // Show units + also direct chapter-level lectures if any
-    if (!ch.units.length) { html = '<div style="text-align:center;padding:20px;color:var(--text2);font-size:13px">No units yet</div>'; }
-    ch.units.forEach(u => {
-      html += `<div class="manage-item">
-        <span class="manage-item-icon">📁</span>
-        <div class="manage-item-info" style="cursor:pointer" onclick="_mDrill('lectures','${b._id}','${s._id}','${ch._id}','${u._id}')">
-          <div class="manage-item-name">${u.name}</div>
-          <div class="manage-item-sub">${u.lectures.length} lectures</div>
-        </div>
-        <button class="edit-btn" onclick="openEdit('unit','${b._id}','${s._id}','${ch._id}','${u._id}')"><i class="ti ti-pencil"></i></button>
-        <button class="del-btn" onclick="delUnit('${b._id}','${s._id}','${ch._id}','${u._id}')"><i class="ti ti-trash"></i></button>
-      </div>`;
-    });
-    // Also show direct chapter lectures (if any) at bottom
-    if (ch.lectures.length) {
-      html += `<div style="padding:10px 0 6px;font-size:11px;font-weight:600;color:var(--text2);letter-spacing:1px;text-transform:uppercase">Direct Lectures</div>`;
-      ch.lectures.forEach(l => {
-        var lcs = l.comingSoon ? '<span class="coming-soon-badge">🔜</span>' : '';
-        html += `<div class="manage-item">
-          <span class="manage-item-icon" style="font-size:13px">▶</span>
-          <div class="manage-item-info">
-            <div class="manage-item-name">${l.name} ${lcs}</div>
-            <div class="manage-item-sub">Direct (no unit)</div>
-          </div>
-          <button class="edit-btn" onclick="openEdit('lecture','${b._id}','${s._id}','${ch._id}','','${l._id}')"><i class="ti ti-pencil"></i></button>
-          <button class="del-btn" onclick="delLecture('${b._id}','${s._id}','${ch._id}','','${l._id}')"><i class="ti ti-trash"></i></button>
-        </div>`;
-      });
-    }
-
   } else if (_mState.level === 'lectures') {
     var b = batches.find(x => x._id === _mState.bid);
     var s = b && b.subjects.find(x => x._id === _mState.sid);
     var ch = s && s.chapters.find(x => x._id === _mState.cid);
     if (!ch) return;
-
-    var lecs = [];
-    if (_mState.uid) {
-      // Inside a specific unit
-      var u = ch.units.find(x => x._id === _mState.uid);
-      if (u) u.lectures.forEach(l => lecs.push({ l, uid: u._id, uname: u.name }));
-    } else {
-      // Chapter-level lectures only (no unit)
-      ch.lectures.forEach(l => lecs.push({ l, uid: null, uname: null }));
-    }
-
-    if (!lecs.length) { html = '<div style="text-align:center;padding:20px;color:var(--text2);font-size:13px">No lectures yet</div>'; }
-    lecs.forEach(({ l, uid, uname }) => {
+    var allLecs = [];
+    ch.units.forEach(u => u.lectures.forEach(l => allLecs.push({ l, uid: u._id, uname: u.name })));
+    ch.lectures.forEach(l => allLecs.push({ l, uid: null, uname: null }));
+    if (!allLecs.length) { html = '<div style="text-align:center;padding:20px;color:var(--text2);font-size:13px">No lectures yet</div>'; }
+    allLecs.forEach(({ l, uid, uname }) => {
       var lcs = l.comingSoon ? '<span class="coming-soon-badge">🔜</span>' : '';
       var sub = uname ? uname : ch.name;
       html += `<div class="manage-item">
@@ -1398,18 +1346,13 @@ function _renderManageLevel() {
   list.innerHTML = html;
 }
 
-function _mDrill(level, bid, sid, cid, uid) {
-  _mState = { level, bid: bid||null, sid: sid||null, cid: cid||null, uid: uid||null };
+function _mDrill(level, bid, sid, cid) {
+  _mState = { level, bid: bid||null, sid: sid||null, cid: cid||null };
   _renderManageLevel();
 }
 
 function _mBack() {
-  if (_mState.level === 'lectures') {
-    // If came from a unit, go back to units; else go to chapters
-    if (_mState.uid) { _mDrill('units', _mState.bid, _mState.sid, _mState.cid); }
-    else { _mDrill('chapters', _mState.bid, _mState.sid); }
-  }
-  else if (_mState.level === 'units')    { _mDrill('chapters', _mState.bid, _mState.sid); }
+  if (_mState.level === 'lectures')  { _mDrill('chapters', _mState.bid, _mState.sid); }
   else if (_mState.level === 'chapters') { _mDrill('subjects', _mState.bid); }
   else if (_mState.level === 'subjects') { _mDrill('batches'); }
 }
@@ -1419,21 +1362,16 @@ function _renderBreadcrumb() {
   if (!el) return;
   if (_mState.level === 'batches') { el.innerHTML = ''; return; }
   var b = batches.find(x => x._id === _mState.bid);
-  var s = b && b.subjects.find(x => x._id === _mState.sid);
+  var s = b && batches.find(x=>x._id===_mState.bid).subjects.find(x => x._id === _mState.sid);
   var ch = s && s.chapters.find(x => x._id === _mState.cid);
-  var u = ch && _mState.uid && ch.units.find(x => x._id === _mState.uid);
   var parts = [{ label: 'Batches', level: 'batches' }];
   if (b) parts.push({ label: b.name, level: 'subjects', bid: b._id });
   if (s) parts.push({ label: s.name, level: 'chapters', bid: b._id, sid: s._id });
-  if (ch) {
-    var chapLevel = ch.units.length ? 'units' : 'lectures';
-    parts.push({ label: ch.name, level: chapLevel, bid: b._id, sid: s._id, cid: ch._id });
-  }
-  if (u) parts.push({ label: u.name, level: 'lectures', bid: b._id, sid: s._id, cid: ch._id, uid: u._id });
+  if (ch) parts.push({ label: ch.name, level: 'lectures' });
   var html = '<div class="manage-breadcrumb">';
   parts.forEach((p, i) => {
     if (i < parts.length - 1) {
-      html += `<button class="manage-bc-btn" onclick="_mDrill('${p.level}','${p.bid||''}','${p.sid||''}','${p.cid||''}','${p.uid||''}')">${p.label}</button><span class="manage-bc-sep">›</span>`;
+      html += `<button class="manage-bc-btn" onclick="_mDrill('${p.level}','${p.bid||''}','${p.sid||''}')">${p.label}</button><span class="manage-bc-sep">›</span>`;
     } else {
       html += `<span style="font-size:13px;font-weight:600;color:var(--text);padding:2px 4px">${p.label}</span>`;
     }
@@ -1473,14 +1411,11 @@ function openEdit(type, bid, sid, cid, uid, lid) {
                 <option value="#ec4899" ${s.color==='#ec4899'?'selected':''}>🩷 Pink</option>
               </select>
             </div>`;
-  } else if (type === 'unit') {
+  } else if (type === 'chapter') {
     var b = batches.find(x => x._id === bid);
     var s = b && b.subjects.find(x => x._id === sid);
     var c = s && s.chapters.find(x => x._id === cid);
-    var u = c && c.units.find(x => x._id === uid);
-    title = 'Edit Unit';
-    body = `<div class="form-group"><label class="form-label">Unit Name</label><input class="form-input" id="ei_name" value="${u.name}"></div>`;
-  } else if (type === 'chapter') {
+    title = 'Edit Chapter';
     body = `<div class="form-group"><label class="form-label">Chapter Name</label><input class="form-input" id="ei_name" value="${c.name}"></div>
             <div class="form-group" style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--surface2);border-radius:var(--radius-sm)">
               <input type="checkbox" id="ei_comingSoon" ${c.comingSoon?'checked':''} style="width:18px;height:18px;cursor:pointer;accent-color:var(--accent)">
@@ -1534,13 +1469,8 @@ async function saveEdit() {
       });
       var idx = batches.findIndex(x => x._id === bid);
       if (idx >= 0) batches[idx] = updated;
-    } else if (type === 'unit') {
-      updated = await apiFetch(`/api/batches/${bid}/subjects/${sid}/chapters/${cid}/units/${uid}/edit`, 'PATCH', {
-        name: document.getElementById('ei_name').value.trim()
-      });
-      var idx = batches.findIndex(x => x._id === bid);
-      if (idx >= 0) batches[idx] = updated;
     } else if (type === 'chapter') {
+      updated = await apiFetch(`/api/batches/${bid}/subjects/${sid}/chapters/${cid}/edit`, 'PATCH', {
         name: document.getElementById('ei_name').value.trim(),
         comingSoon: document.getElementById('ei_comingSoon').checked
       });
@@ -1946,7 +1876,10 @@ async function checkForceJoin() {
   if (!_fjRequired) return true;
 
   var userId = getUserId();
-  if (!userId) return true;
+  if (!userId) {
+    // Not in Telegram context — skip gate (will fail auth anyway)
+    return true;
+  }
 
   try {
     var r = await fetch('/api/force-join/check', {
@@ -1963,16 +1896,13 @@ async function checkForceJoin() {
       return true;
     }
 
-    // Hide home page behind gate so spinner doesn't show through
-    var pageHome = document.getElementById('page-home');
-    if (pageHome) pageHome.style.visibility = 'hidden';
-
     // Show gate
     _renderFjChannels();
     document.getElementById('forceJoinGate').classList.remove('hidden');
     return false;
   } catch (e) {
     console.error('Force join check failed:', e);
+    // On error, allow through (don't block user because of server error)
     return true;
   }
 }
@@ -2048,10 +1978,7 @@ async function verifyForceJoin() {
     if (data.allJoined) {
       _fjPassed = true;
       document.getElementById('forceJoinGate').classList.add('hidden');
-      // Restore home page visibility
-      var pageHome = document.getElementById('page-home');
-      if (pageHome) pageHome.style.visibility = '';
-      // Resume full app init now that gate is cleared
+      // Load everything now that gate is cleared
       await Promise.all([load(), loadAccess(), loadAnnouncements()]);
       var dot = document.getElementById('accessDot');
       if (dot) dot.style.background = hasAccess() ? 'var(--green)' : 'var(--red)';
@@ -2063,11 +1990,6 @@ async function verifyForceJoin() {
       if (batchSection) batchSection.style.display = '';
       updateHomeTimer();
       if (hasAccess()) startCountdown();
-      document.body.classList.add('fadein');
-      setTimeout(function() {
-        document.body.classList.remove('fadein');
-        document.body.classList.add('ready');
-      }, 200);
     } else {
       var notJoined = _fjChannels.filter(function(c){ return !c.joined; });
       if (errEl) errEl.textContent = 'Please join ' + notJoined.length + ' more channel(s) above, then verify again.';
@@ -2079,46 +2001,53 @@ async function verifyForceJoin() {
   }
 }
 
-function _hideVerifyingScreen() {
-  var vs = document.getElementById('verifyingScreen');
-  if (!vs || vs.classList.contains('hidden')) return;
-  vs.classList.add('fade-out');
-  setTimeout(function() { vs.classList.add('hidden'); }, 360);
+// ── Verifying Screen helper ───────────────────────────────────────────────────
+function _animateVsBar() {
+  var fill = document.getElementById('vsFill');
+  if (!fill) return;
+  // Animate to 85% quickly, then wait for actual load
+  setTimeout(function(){ fill.style.width = '40%'; }, 50);
+  setTimeout(function(){ fill.style.width = '75%'; }, 600);
+  setTimeout(function(){ fill.style.width = '85%'; }, 1200);
+}
+function _hideVS(cb) {
+  var el = document.getElementById('verifyingScreen');
+  if (!el || el.classList.contains('vs-gone')) { if (cb) cb(); return; }
+  var fill = document.getElementById('vsFill');
+  if (fill) fill.style.width = '100%';
+  setTimeout(function() {
+    el.classList.add('vs-hide');
+    setTimeout(function() {
+      el.classList.add('vs-gone');
+      if (cb) cb();
+    }, 320);
+  }, 200);
 }
 
 async function init() {
   initTheme();
+  _animateVsBar();
   await checkAdminAccess();
 
-  // ── Force Join Gate check ──────────────────────────────
   var passed = await checkForceJoin();
   if (!passed) {
-    // Hide verifying screen, show force join gate
-    _hideVerifyingScreen();
+    // Force join required — hide verifying, show gate
+    _hideVS();
     return;
   }
 
   await Promise.all([load(), loadAccess(), loadAnnouncements()]);
-  // Update access indicator dot
   var dot = document.getElementById('accessDot');
   if (dot) dot.style.background = hasAccess() ? 'var(--green)' : 'var(--red)';
-  // Remove old access banner from home page
   var banner = document.getElementById('accessBanner');
   if (banner) banner.innerHTML = '';
   var lockedMsg = document.getElementById('lockedMsg');
   if (lockedMsg) lockedMsg.style.display = 'none';
   var batchSection = document.getElementById('batchSection');
   if (batchSection) batchSection.style.display = '';
-  // Update home timer bar
   updateHomeTimer();
   if (hasAccess()) startCountdown();
-  // Hide verifying screen smoothly, then fade in app
-  _hideVerifyingScreen();
-  document.body.classList.add('fadein');
-  setTimeout(function() {
-    document.body.classList.remove('fadein');
-    document.body.classList.add('ready');
-  }, 200);
+  _hideVS();
 }
 init();
 
