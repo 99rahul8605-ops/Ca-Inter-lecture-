@@ -736,14 +736,17 @@ async function startBot() {
 
     const session = bulkSessions.get(userId);
     if (session) {
-      // Bulk mode — just push immediately, order doesn't matter.
-      // Files will be forwarded to storage channel when /done is called.
-      session.files.push(fileInfo);
-      const count = session.files.length;
-      bot.sendMessage(chatId,
-        `✅ File ${count} added: ${fileInfo.file_name}\n📦 Total: ${count} file(s)\n\nSend more files or type /done to get the link.`,
-        { reply_to_message_id: msg.message_id }
-      );
+      // Bulk mode — enqueue each file so they are added one by one in order.
+      // Sending multiple files at once causes simultaneous delivery; without queuing
+      // they get pushed to session.files in a random order.
+      enqueueFile(userId, async () => {
+        session.files.push(fileInfo);
+        const count = session.files.length;
+        await bot.sendMessage(chatId,
+          `✅ File ${count} added: ${fileInfo.file_name}\n📦 Total: ${count} file(s)\n\nSend more files or type /done to get the link.`,
+          { reply_to_message_id: msg.message_id }
+        );
+      });
       return;
     }
 
