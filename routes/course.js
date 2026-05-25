@@ -210,6 +210,20 @@ router.delete("/batches/:bid/subjects/:sid/chapters/:cid/units/:uid", verifyAdmi
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// Edit unit name
+router.patch("/batches/:bid/subjects/:sid/chapters/:cid/units/:uid/edit", verifyAdmin, async (req, res) => {
+  try {
+    const batch = await Batch.findById(req.params.bid);
+    const subj = batch && batch.subjects.id(req.params.sid);
+    const chap = subj && subj.chapters.id(req.params.cid);
+    const unit = chap && chap.units.id(req.params.uid);
+    if (!unit) return res.status(404).json({ error: "Not found" });
+    if (req.body.name) unit.name = req.body.name;
+    await batch.save();
+    res.json(batch);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ── Lectures (chapter-level) ──────────────────────────────────────────────────
 
 router.post("/batches/:bid/subjects/:sid/chapters/:cid/lectures", verifyAdmin, async (req, res) => {
