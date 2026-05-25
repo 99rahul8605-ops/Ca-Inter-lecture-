@@ -239,23 +239,56 @@ body.ready{transition:none}
 .fj-err{font-size:12px;color:var(--red);margin-top:10px;min-height:18px}
 
 /* ── Verifying Screen ───────────────────────────────── */
-#verifyingScreen{position:fixed;inset:0;background:var(--bg);z-index:99999;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:0;padding:24px;text-align:center;transition:opacity 0.3s ease}
+#verifyingScreen{position:fixed;inset:0;background:var(--bg);z-index:99999;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:32px 24px;text-align:center;transition:opacity 0.35s ease}
 #verifyingScreen.vs-hide{opacity:0;pointer-events:none}
 #verifyingScreen.vs-gone{display:none}
-.vs-logo{width:72px;height:72px;background:linear-gradient(135deg,#4f8ef7,#7c5cbf);border-radius:20px;display:flex;align-items:center;justify-content:center;font-size:34px;margin:0 auto 20px;box-shadow:0 8px 32px rgba(79,142,247,0.4)}
-.vs-title{font-size:20px;font-weight:700;margin-bottom:6px}
-.vs-sub{font-size:13px;color:var(--text2);margin-bottom:28px}
-.vs-bar{width:160px;height:3px;background:var(--surface2);border-radius:2px;overflow:hidden;margin:0 auto}
-.vs-fill{height:100%;width:0%;background:linear-gradient(90deg,#4f8ef7,#7c5cbf);border-radius:2px;transition:width 0.4s ease}
+.vs-title{font-size:22px;font-weight:700;color:var(--text);letter-spacing:0.5px;margin-bottom:4px}
+.vs-sub{font-size:11px;color:var(--text3);letter-spacing:2.5px;text-transform:uppercase;margin-bottom:28px}
+.vs-scanner{position:relative;width:148px;height:148px;margin-bottom:28px}
+.vs-scanner::before,.vs-scanner::after{content:'';position:absolute;width:24px;height:24px;border-color:var(--accent);border-style:solid}
+.vs-scanner::before{top:0;left:0;border-width:2.5px 0 0 2.5px}
+.vs-scanner::after{top:0;right:0;border-width:2.5px 2.5px 0 0}
+.vs-bl,.vs-br{position:absolute;width:24px;height:24px;border-color:var(--accent);border-style:solid}
+.vs-bl{bottom:0;left:0;border-width:0 0 2.5px 2.5px}
+.vs-br{bottom:0;right:0;border-width:0 2.5px 2.5px 0}
+.vs-dots{position:absolute;inset:0;background-image:radial-gradient(circle,rgba(79,142,247,0.12) 1px,transparent 1px);background-size:13px 13px}
+.vs-user{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center}
+.vs-head{width:36px;height:36px;border-radius:50%;background:var(--surface2);border:1.5px solid var(--border);margin-bottom:7px}
+.vs-body{width:54px;height:40px;border-radius:14px 14px 0 0;background:var(--surface2);border:1.5px solid var(--border);border-bottom:none}
+.vs-scanline{position:absolute;left:4px;right:4px;height:1.5px;background:linear-gradient(90deg,transparent,var(--accent),var(--accent2),var(--accent),transparent);animation:vsScan 2s ease-in-out infinite;box-shadow:0 0 10px rgba(79,142,247,0.5)}
+@keyframes vsScan{0%{top:6px;opacity:0}10%{opacity:1}90%{opacity:1}100%{top:calc(100% - 6px);opacity:0}}
+.vs-status{display:flex;align-items:center;gap:7px;margin-bottom:18px}
+.vs-dot{width:5px;height:5px;border-radius:50%;background:var(--accent);animation:vsBlink 1.2s ease-in-out infinite}
+.vs-dot:nth-child(2){animation-delay:0.2s}
+.vs-dot:nth-child(3){animation-delay:0.4s}
+@keyframes vsBlink{0%,100%{opacity:0.2;transform:scale(0.7)}50%{opacity:1;transform:scale(1)}}
+.vs-status-text{font-size:11px;color:var(--accent);letter-spacing:2px;text-transform:uppercase;font-weight:700}
+.vs-bar{width:148px;height:2px;background:var(--surface2);border-radius:2px;overflow:hidden}
+.vs-fill{height:100%;width:0%;background:linear-gradient(90deg,var(--accent),var(--accent2));border-radius:2px;transition:width 0.4s ease}
 </style>
 </head>
 <body>
 
 <!-- VERIFYING SCREEN -->
 <div id="verifyingScreen">
-  <div class="vs-logo">📚</div>
   <div class="vs-title">EduBot</div>
-  <div class="vs-sub">Verifying your account...</div>
+  <div class="vs-sub">Identity check</div>
+  <div class="vs-scanner">
+    <div class="vs-dots"></div>
+    <div class="vs-user">
+      <div class="vs-head"></div>
+      <div class="vs-body"></div>
+    </div>
+    <div class="vs-scanline"></div>
+    <div class="vs-bl"></div>
+    <div class="vs-br"></div>
+  </div>
+  <div class="vs-status">
+    <div class="vs-dot"></div>
+    <div class="vs-dot"></div>
+    <div class="vs-dot"></div>
+    <span class="vs-status-text">Verifying</span>
+  </div>
   <div class="vs-bar"><div class="vs-fill" id="vsFill"></div></div>
 </div>
 
@@ -1978,7 +2011,6 @@ async function verifyForceJoin() {
     if (data.allJoined) {
       _fjPassed = true;
       document.getElementById('forceJoinGate').classList.add('hidden');
-      // Load everything now that gate is cleared
       await Promise.all([load(), loadAccess(), loadAnnouncements()]);
       var dot = document.getElementById('accessDot');
       if (dot) dot.style.background = hasAccess() ? 'var(--green)' : 'var(--red)';
@@ -2001,28 +2033,8 @@ async function verifyForceJoin() {
   }
 }
 
-// ── Verifying Screen helper ───────────────────────────────────────────────────
-function _animateVsBar() {
-  var fill = document.getElementById('vsFill');
-  if (!fill) return;
-  // Animate to 85% quickly, then wait for actual load
-  setTimeout(function(){ fill.style.width = '40%'; }, 50);
-  setTimeout(function(){ fill.style.width = '75%'; }, 600);
-  setTimeout(function(){ fill.style.width = '85%'; }, 1200);
-}
-function _hideVS(cb) {
-  var el = document.getElementById('verifyingScreen');
-  if (!el || el.classList.contains('vs-gone')) { if (cb) cb(); return; }
-  var fill = document.getElementById('vsFill');
-  if (fill) fill.style.width = '100%';
-  setTimeout(function() {
-    el.classList.add('vs-hide');
-    setTimeout(function() {
-      el.classList.add('vs-gone');
-      if (cb) cb();
-    }, 320);
-  }, 200);
-}
+function _animateVsBar(){var f=document.getElementById('vsFill');if(!f)return;setTimeout(function(){f.style.width='38%'},60);setTimeout(function(){f.style.width='72%'},700);setTimeout(function(){f.style.width='86%'},1400)}
+function _hideVS(cb){var el=document.getElementById('verifyingScreen');if(!el||el.classList.contains('vs-gone')){if(cb)cb();return}var f=document.getElementById('vsFill');if(f)f.style.width='100%';setTimeout(function(){el.classList.add('vs-hide');setTimeout(function(){el.classList.add('vs-gone');if(cb)cb()},350)},180)}
 
 async function init() {
   initTheme();
@@ -2031,7 +2043,6 @@ async function init() {
 
   var passed = await checkForceJoin();
   if (!passed) {
-    // Force join required — hide verifying, show gate
     _hideVS();
     return;
   }
