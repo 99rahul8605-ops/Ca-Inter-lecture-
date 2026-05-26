@@ -32,6 +32,11 @@ function isOwner(userId) {
   return userId === OWNER_ID;
 }
 
+// ── Helper: is this message from a group or supergroup? ──────────────────────
+function isGroupChat(msg) {
+  return msg.chat && (msg.chat.type === "group" || msg.chat.type === "supergroup");
+}
+
 // ── MongoDB connect ──────────────────────────────────────────────────────────
 mongoose
   .connect(MONGO_URI)
@@ -302,6 +307,7 @@ async function startBot() {
 
   // ── /start ──────────────────────────────────────────────────────────────────
   bot.onText(/\/start(.*)/, async (msg, match) => {
+    if (isGroupChat(msg)) return; // Ignore all group messages
     const chatId = msg.chat.id;
     const userId = msg.from?.id;
     const param = match[1].trim();
@@ -429,6 +435,7 @@ async function startBot() {
 
   // ── /bulk ────────────────────────────────────────────────────────────────────
   bot.onText(/\/bulk/, async (msg) => {
+    if (isGroupChat(msg)) return;
     const userId = msg.from?.id;
     if (!isOwner(userId)) return; // Silent ignore
 
@@ -458,6 +465,7 @@ async function startBot() {
 
   // ── /done — saves all bulk session files to storage channel then creates a batch ──
   bot.onText(/\/done/, async (msg) => {
+    if (isGroupChat(msg)) return;
     const userId = msg.from?.id;
     if (!isOwner(userId)) return; // Silent ignore
 
@@ -509,6 +517,7 @@ async function startBot() {
 
   // ── /cancel ──────────────────────────────────────────────────────────────────
   bot.onText(/\/cancel/, async (msg) => {
+    if (isGroupChat(msg)) return;
     const userId = msg.from?.id;
     if (!isOwner(userId)) return; // Silent ignore
 
@@ -590,6 +599,7 @@ async function startBot() {
   }
 
   bot.onText(/\/myfiles/, async (msg) => {
+    if (isGroupChat(msg)) return;
     const userId = msg.from?.id;
     if (!isOwner(userId)) return; // Silent ignore
     await sendMyFilesPage(msg.chat.id, userId, 0);
@@ -597,6 +607,7 @@ async function startBot() {
 
   // ── Inline button callback for pagination ────────────────────────────────────
   bot.on("callback_query", async (query) => {
+    if (query.message && isGroupChat(query.message)) return bot.answerCallbackQuery(query.id);
     const userId = query.from?.id;
     if (!isOwner(userId)) return bot.answerCallbackQuery(query.id);
 
@@ -610,6 +621,7 @@ async function startBot() {
 
   // ── /delete <code> ───────────────────────────────────────────────────────────
   bot.onText(/\/delete (.+)/, async (msg, match) => {
+    if (isGroupChat(msg)) return;
     const userId = msg.from?.id;
     if (!isOwner(userId)) return; // Silent ignore
 
@@ -638,6 +650,7 @@ async function startBot() {
   const TG_LINK_RE = /https?:\/\/t\.me\/(c\/(\d+)|([a-zA-Z][a-zA-Z0-9_]{3,}))\/(\d+)/;
 
   bot.onText(TG_LINK_RE, (msg, match) => {
+    if (isGroupChat(msg)) return;
     const userId = msg.from?.id;
     if (!isOwner(userId)) return; // Silent ignore
 
@@ -725,6 +738,7 @@ async function startBot() {
 
   // ── File upload handler (Owner only) ────────────────────────────────────────
   bot.on("message", (msg) => {
+    if (isGroupChat(msg)) return; // Ignore all group messages
     if (msg.text && TG_LINK_RE.test(msg.text)) return; // Already handled above
     if (msg.text) return; // Text messages ignore
     if (!isOwner(msg.from?.id)) return; // Silent ignore for non-owner
@@ -787,6 +801,7 @@ async function startBot() {
 
   // ── /stats (Owner only) ──────────────────────────────────────────────────────
   bot.onText(/\/stats/, async (msg) => {
+    if (isGroupChat(msg)) return;
     const userId = msg.from?.id;
     if (!isOwner(userId)) return;
 
