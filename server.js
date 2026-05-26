@@ -373,8 +373,18 @@ async function startBot() {
         try {
           const batch = await BulkBatch.findOne({ batch_code: param });
           if (!batch) return bot.sendMessage(chatId, `File not found. Link may be invalid or expired.`);
+          let hasVideo = false;
           for (const f of batch.files) {
-            await sendFile(bot, chatId, f);
+            const sentMsg = await sendFile(bot, chatId, f);
+            const isVideo = f.file_type === "video" || f.file_type === "video_note";
+            if (isVideo && sentMsg) {
+              hasVideo = true;
+              const deleteAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+              await scheduleDelete(bot, chatId, sentMsg.message_id, deleteAt);
+            }
+          }
+          if (hasVideo) {
+            await bot.sendMessage(chatId, `⚠️ Videos in this batch will be automatically deleted from your DM after 24 hours.`);
           }
           return;
         } catch (err) {
