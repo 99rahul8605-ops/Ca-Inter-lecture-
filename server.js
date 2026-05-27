@@ -114,7 +114,10 @@ app.get("/api/config", (req, res) => {
   });
 });
 
-app.use("/api", require("./routes/course"));
+const courseRoutes = require("./routes/course");
+app.use("/api", courseRoutes);
+const autoLectureSession = courseRoutes.autoLectureSession;
+const autoAddLecture     = courseRoutes.autoAddLecture;
 
 app.use(express.static(path.join(__dirname, "public")));
 app.get("*", (req, res) => {
@@ -718,9 +721,45 @@ async function startBot() {
       });
       const link = `https://t.me/${BOT_USERNAME}?start=${code}`;
       await bot.deleteMessage(chatId, processing.message_id);
-      await bot.sendMessage(chatId, `✅ ${storedFileInfo.file_name}\n\n🔗 Link:\n<code>${link}</code>`,
-        { parse_mode: 'HTML', reply_markup: { inline_keyboard: [[{ text: "📥 File Lo", url: link }]] } }
-      );
+
+      // ── Auto-lecture mode: auto-add lecture to selected chapter/unit ──────
+      if (autoLectureSession && autoLectureSession.active) {
+        try {
+          const lectureNum = autoLectureSession.lectureCount + 1;
+          const lectureName = `Lecture ${lectureNum}`;
+          await autoAddLecture({
+            batchId:   autoLectureSession.batchId,
+            subjectId: autoLectureSession.subjectId,
+            chapterId: autoLectureSession.chapterId,
+            unitId:    autoLectureSession.unitId,
+            name: lectureName,
+            link,
+          });
+          autoLectureSession.lectureCount = lectureNum;
+          const loc = autoLectureSession.unitName
+            ? `${autoLectureSession.subjectName} › ${autoLectureSession.chapterName} › ${autoLectureSession.unitName}`
+            : `${autoLectureSession.subjectName} › ${autoLectureSession.chapterName}`;
+          await bot.sendMessage(chatId,
+            `✅ <b>Auto-Saved!</b>\n` +
+            `📖 <b>${lectureName}</b>\n` +
+            `📁 ${storedFileInfo.file_name}\n` +
+            `📍 ${loc}\n` +
+            `🔗 <code>${link}</code>\n\n` +
+            `📨 Send next video for <b>Lecture ${lectureNum + 1}</b>`,
+            { parse_mode: 'HTML' }
+          );
+        } catch (autoErr) {
+          console.error("Auto-lecture error:", autoErr.message);
+          await bot.sendMessage(chatId,
+            `⚠️ File saved but auto-lecture failed: ${autoErr.message}\n🔗 <code>${link}</code>`,
+            { parse_mode: 'HTML' }
+          );
+        }
+      } else {
+        await bot.sendMessage(chatId, `✅ ${storedFileInfo.file_name}\n\n🔗 Link:\n<code>${link}</code>`,
+          { parse_mode: 'HTML', reply_markup: { inline_keyboard: [[{ text: "📥 File Lo", url: link }]] } }
+        );
+      }
 
     } catch (err) {
       console.error("Link fetch error:", err.message);
@@ -798,9 +837,45 @@ async function startBot() {
         });
         const link = `https://t.me/${BOT_USERNAME}?start=${code}`;
         await bot.deleteMessage(chatId, processing.message_id);
-        await bot.sendMessage(chatId, `✅ ${storedFileInfo.file_name}\n\n🔗 Link:\n<code>${link}</code>`,
-          { parse_mode: 'HTML', reply_markup: { inline_keyboard: [[{ text: "📥 Get File", url: link }]] } }
-        );
+
+        // ── Auto-lecture mode: auto-add lecture to selected chapter/unit ──────
+        if (autoLectureSession && autoLectureSession.active) {
+          try {
+            const lectureNum = autoLectureSession.lectureCount + 1;
+            const lectureName = `Lecture ${lectureNum}`;
+            await autoAddLecture({
+              batchId:   autoLectureSession.batchId,
+              subjectId: autoLectureSession.subjectId,
+              chapterId: autoLectureSession.chapterId,
+              unitId:    autoLectureSession.unitId,
+              name: lectureName,
+              link,
+            });
+            autoLectureSession.lectureCount = lectureNum;
+            const loc = autoLectureSession.unitName
+              ? `${autoLectureSession.subjectName} › ${autoLectureSession.chapterName} › ${autoLectureSession.unitName}`
+              : `${autoLectureSession.subjectName} › ${autoLectureSession.chapterName}`;
+            await bot.sendMessage(chatId,
+              `✅ <b>Auto-Saved!</b>\n` +
+              `📖 <b>${lectureName}</b>\n` +
+              `📁 ${storedFileInfo.file_name}\n` +
+              `📍 ${loc}\n` +
+              `🔗 <code>${link}</code>\n\n` +
+              `📨 Send next video for <b>Lecture ${lectureNum + 1}</b>`,
+              { parse_mode: 'HTML' }
+            );
+          } catch (autoErr) {
+            console.error("Auto-lecture error:", autoErr.message);
+            await bot.sendMessage(chatId,
+              `⚠️ File saved but auto-lecture failed: ${autoErr.message}\n🔗 <code>${link}</code>`,
+              { parse_mode: 'HTML' }
+            );
+          }
+        } else {
+          await bot.sendMessage(chatId, `✅ ${storedFileInfo.file_name}\n\n🔗 Link:\n<code>${link}</code>`,
+            { parse_mode: 'HTML', reply_markup: { inline_keyboard: [[{ text: "📥 Get File", url: link }]] } }
+          );
+        }
       } catch (err) {
         console.error("Save error:", err.message);
         try {
