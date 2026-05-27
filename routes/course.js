@@ -7,13 +7,49 @@ const Batch = require("../models/Course");
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const OWNER_ID = parseInt(process.env.OWNER_ID || "0");
 
-// ── Auto-Lecture Session (shared with server.js via module exports) ────────────
+// ── Auto-Lecture Session — MongoDB backed (survives server restarts) ──────────
+const autoLecSessionSchema = new mongoose.Schema({
+  _id:          { type: String, default: 'singleton' },
+  active:       { type: Boolean, default: false },
+  batchId:      { type: String, default: null },
+  subjectId:    { type: String, default: null },
+  chapterId:    { type: String, default: null },
+  unitId:       { type: String, default: null },
+  lectureCount: { type: Number, default: 0 },
+  batchName:    { type: String, default: '' },
+  subjectName:  { type: String, default: '' },
+  chapterName:  { type: String, default: '' },
+  unitName:     { type: String, default: '' },
+}, { _id: false });
+const AutoLecSession = mongoose.model('AutoLecSession', autoLecSessionSchema);
+
+// In-memory mirror — always synced with DB. Used by server.js bot handler.
 const autoLectureSession = {
   active: false,
   batchId: null, subjectId: null, chapterId: null, unitId: null,
   lectureCount: 0,
   batchName: '', subjectName: '', chapterName: '', unitName: '',
 };
+
+// Load persisted session from DB into memory on startup
+async function _loadAutoSession() {
+  try {
+    const doc = await AutoLecSession.findById('singleton');
+    if (doc) Object.assign(autoLectureSession, doc.toObject());
+  } catch (e) { console.error('AutoLecSession load error:', e.message); }
+}
+_loadAutoSession();
+
+// Save current in-memory state to DB
+async function _saveAutoSession() {
+  try {
+    await AutoLecSession.findByIdAndUpdate(
+      'singleton',
+      { $set: autoLectureSession },
+      { upsert: true, new: true }
+    );
+  } catch (e) { console.error('AutoLecSession save error:', e.message); }
+}
 
 async function autoAddLecture({ batchId, subjectId, chapterId, unitId, name, link }) {
   const batch = await Batch.findById(batchId);
@@ -585,6 +621,7 @@ router.post('/auto-lecture/start', verifyAdmin, async (req, res) => {
       batchName: batchName || '', subjectName: subjectName || '',
       chapterName: chapterName || '', unitName: unitName || '',
     });
+    await _saveAutoSession();
     res.json({ success: true, session: autoLectureSession });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -596,12 +633,14 @@ router.post('/auto-lecture/stop', verifyAdmin, (req, res) => {
     active: false, batchId: null, subjectId: null, chapterId: null, unitId: null,
     lectureCount: 0, batchName: '', subjectName: '', chapterName: '', unitName: '',
   });
+  await _saveAutoSession();
   res.json({ success: true, totalAdded });
 });
 
 // Export helpers so server.js (bot) can use them directly
 router.autoLectureSession = autoLectureSession;
 router.autoAddLecture = autoAddLecture;
+router.saveAutoSession = _saveAutoSession;
 
 router.post('/force-join/check', async (req, res) => {
   const { userId } = req.body;
