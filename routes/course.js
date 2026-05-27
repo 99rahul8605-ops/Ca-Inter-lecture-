@@ -7,67 +7,6 @@ const Batch = require("../models/Course");
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const OWNER_ID = parseInt(process.env.OWNER_ID || "0");
 
-// ── Auto-Lecture Session — MongoDB backed (survives server restarts) ──────────
-const autoLecSessionSchema = new mongoose.Schema({
-  _id:          { type: String, default: 'singleton' },
-  active:       { type: Boolean, default: false },
-  batchId:      { type: String, default: null },
-  subjectId:    { type: String, default: null },
-  chapterId:    { type: String, default: null },
-  unitId:       { type: String, default: null },
-  lectureCount: { type: Number, default: 0 },
-  batchName:    { type: String, default: '' },
-  subjectName:  { type: String, default: '' },
-  chapterName:  { type: String, default: '' },
-  unitName:     { type: String, default: '' },
-}, { _id: false });
-const AutoLecSession = mongoose.model('AutoLecSession', autoLecSessionSchema);
-
-// In-memory mirror — always synced with DB. Used by server.js bot handler.
-const autoLectureSession = {
-  active: false,
-  batchId: null, subjectId: null, chapterId: null, unitId: null,
-  lectureCount: 0,
-  batchName: '', subjectName: '', chapterName: '', unitName: '',
-};
-
-// Load persisted session from DB into memory on startup
-async function _loadAutoSession() {
-  try {
-    const doc = await AutoLecSession.findById('singleton');
-    if (doc) Object.assign(autoLectureSession, doc.toObject());
-  } catch (e) { console.error('AutoLecSession load error:', e.message); }
-}
-_loadAutoSession();
-
-// Save current in-memory state to DB
-async function _saveAutoSession() {
-  try {
-    await AutoLecSession.findByIdAndUpdate(
-      'singleton',
-      { $set: autoLectureSession },
-      { upsert: true, new: true }
-    );
-  } catch (e) { console.error('AutoLecSession save error:', e.message); }
-}
-
-async function autoAddLecture({ batchId, subjectId, chapterId, unitId, name, link }) {
-  const batch = await Batch.findById(batchId);
-  if (!batch) throw new Error('Batch not found');
-  const subj = batch.subjects.id(subjectId);
-  if (!subj) throw new Error('Subject not found');
-  const chap = subj.chapters.id(chapterId);
-  if (!chap) throw new Error('Chapter not found');
-  if (unitId) {
-    const unit = chap.units.id(unitId);
-    if (!unit) throw new Error('Unit not found');
-    unit.lectures.push({ name, link, notes: '', order: unit.lectures.length });
-  } else {
-    chap.lectures.push({ name, link, notes: '', order: chap.lectures.length });
-  }
-  await batch.save();
-}
-
 // ── Admin verification using Telegram initData + OWNER_ID ────────────────────
 function verifyAdmin(req, res, next) {
   const initData = req.headers["x-tg-init-data"];
@@ -372,8 +311,97 @@ router.patch("/batches/:bid/subjects/:sid/chapters/:cid/units/:uid/lectures/:lid
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-module.exports = router;
+// ── Auto-Lecture Session API ──────────────────────────────────────────────────
+// In-memory sessions: { userId: { batchId, subjectId, chapterId, unitId, count, createdAt } }
+// Exported so server.js can check it directly without HTTP round-trip
+const autoLecSessions = new Map();
 
+// Start a session — called from HTML when admin clicks "Auto-Add Lectures" button
+router.post("/auto-lec/start", verifyAdmin, async (req, res) => {
+  try {
+    const { batchId, subjectId, chapterId, unitId } = req.body;
+    if (!batchId || !subjectId || !chapterId) return res.status(400).json({ error: "batchId, subjectId, chapterId required" });
+
+    // Verify the chapter/unit actually exists
+    const batch = await Batch.findById(batchId);
+    const subj = batch && batch.subjects.id(subjectId);
+    const chap = subj && subj.chapters.id(chapterId);
+    if (!chap) return res.status(404).json({ error: "Chapter not found" });
+    if (unitId) {
+      const unit = chap.units.id(unitId);
+      if (!unit) return res.status(404).json({ error: "Unit not found" });
+    }
+
+    // Count existing lectures so we continue from the right number
+    const existingCount = unitId
+      ? (chap.units.id(unitId).lectures.length)
+      : chap.lectures.length;
+
+    // Store session keyed by OWNER_ID (only one admin anyway)
+    autoLecSessions.set(String(OWNER_ID), {
+      batchId, subjectId, chapterId, unitId: unitId || null,
+      count: existingCount,
+      createdAt: Date.now(),
+    });
+
+    // Auto-expire session after 30 minutes
+    setTimeout(() => {
+      autoLecSessions.delete(String(OWNER_ID));
+    }, 30 * 60 * 1000);
+
+    const target = unitId ? `Unit > ${chap.units.id(unitId).name}` : `Chapter > ${chap.name}`;
+    res.json({ success: true, existingCount, target });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Stop session — called from HTML "Done" button or bot "done" command
+router.post("/auto-lec/stop", verifyAdmin, async (req, res) => {
+  const had = autoLecSessions.has(String(OWNER_ID));
+  autoLecSessions.delete(String(OWNER_ID));
+  res.json({ success: true, had });
+});
+
+// Get current session info
+router.get("/auto-lec/session", verifyAdmin, async (req, res) => {
+  const session = autoLecSessions.get(String(OWNER_ID));
+  if (!session) return res.json({ active: false });
+  res.json({ active: true, ...session });
+});
+
+// Add one lecture to active session — called by bot when a video is forwarded
+// This is called internally from server.js, so no verifyAdmin (uses secret header)
+router.post("/auto-lec/add", async (req, res) => {
+  try {
+    // Internal secret check — only server.js can call this
+    if (req.headers["x-internal-secret"] !== process.env.INTERNAL_SECRET && process.env.INTERNAL_SECRET) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
+
+    const { userId, lecName, link } = req.body;
+    const session = autoLecSessions.get(String(userId));
+    if (!session) return res.status(404).json({ error: "No active session" });
+
+    const { batchId, subjectId, chapterId, unitId } = session;
+    const batch = await Batch.findById(batchId);
+    const subj = batch && batch.subjects.id(subjectId);
+    const chap = subj && subj.chapters.id(chapterId);
+    if (!chap) return res.status(404).json({ error: "Chapter not found" });
+
+    session.count += 1;
+    const name = lecName || `Lecture ${session.count}`;
+
+    if (unitId) {
+      const unit = chap.units.id(unitId);
+      if (!unit) return res.status(404).json({ error: "Unit not found" });
+      unit.lectures.push({ name, link, notes: "", order: unit.lectures.length });
+    } else {
+      chap.lectures.push({ name, link, notes: "", order: chap.lectures.length });
+    }
+
+    await batch.save();
+    res.json({ success: true, count: session.count, name });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 
 // ── Announcement Schema ───────────────────────────────────────────────────────
 const announcementSchema = new mongoose.Schema({
@@ -589,59 +617,6 @@ async function getChannelInfo(chatId, botToken) {
   }
 }
 
-// ── Auto-Lecture API (admin only) ─────────────────────────────────────────────
-
-// GET /api/auto-lecture/status — current session state
-router.get('/auto-lecture/status', verifyAdmin, (req, res) => {
-  res.json(autoLectureSession);
-});
-
-// POST /api/auto-lecture/start — body: { batchId, subjectId, chapterId, unitId?, batchName, subjectName, chapterName, unitName }
-router.post('/auto-lecture/start', verifyAdmin, async (req, res) => {
-  const { batchId, subjectId, chapterId, unitId, batchName, subjectName, chapterName, unitName } = req.body;
-  if (!batchId || !subjectId || !chapterId) return res.status(400).json({ error: 'batchId, subjectId, chapterId required' });
-  try {
-    const batch = await Batch.findById(batchId);
-    const subj = batch && batch.subjects.id(subjectId);
-    const chap = subj && subj.chapters.id(chapterId);
-    if (!chap) return res.status(404).json({ error: 'Chapter not found' });
-    // Count existing lectures so numbering continues correctly
-    let existingCount;
-    if (unitId) {
-      const unit = chap.units.id(unitId);
-      existingCount = unit ? unit.lectures.length : 0;
-    } else {
-      existingCount = chap.lectures.length;
-    }
-    Object.assign(autoLectureSession, {
-      active: true,
-      batchId, subjectId, chapterId,
-      unitId: unitId || null,
-      lectureCount: existingCount,
-      batchName: batchName || '', subjectName: subjectName || '',
-      chapterName: chapterName || '', unitName: unitName || '',
-    });
-    await _saveAutoSession();
-    res.json({ success: true, session: autoLectureSession });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// POST /api/auto-lecture/stop — stops session
-router.post('/auto-lecture/stop', verifyAdmin, async (req, res) => {
-  const totalAdded = autoLectureSession.lectureCount;
-  Object.assign(autoLectureSession, {
-    active: false, batchId: null, subjectId: null, chapterId: null, unitId: null,
-    lectureCount: 0, batchName: '', subjectName: '', chapterName: '', unitName: '',
-  });
-  await _saveAutoSession();
-  res.json({ success: true, totalAdded });
-});
-
-// Export helpers so server.js (bot) can use them directly
-router.autoLectureSession = autoLectureSession;
-router.autoAddLecture = autoAddLecture;
-router.saveAutoSession = _saveAutoSession;
-
 router.post('/force-join/check', async (req, res) => {
   const { userId } = req.body;
   if (!userId) return res.status(400).json({ error: 'userId required' });
@@ -722,3 +697,6 @@ router.get('/stats', async (req, res) => {
     });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
+
+module.exports = router;
+module.exports.autoLecSessions = autoLecSessions;
