@@ -570,32 +570,14 @@ body.ready{transition:none}
       <div class="form-group"><label class="form-label">Class Notes Link <span style="color:var(--text3);font-weight:400">(optional)</span></label><input class="form-input" id="lNotes" placeholder="https://t.me/YourBot?start=NOTES_CODE"></div>
       <button class="btn-add" id="btnLecture" onclick="addLecture()"><i class="ti ti-plus"></i> Add Lecture</button>
 
-      <!-- ── Auto Mode ─────────────────────────────────────────────────── -->
-      <div style="border-top:1px solid var(--border);margin-top:16px;padding-top:14px">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
-          <div>
-            <div style="font-size:13px;font-weight:700;display:flex;align-items:center;gap:6px">
-              🤖 Auto Mode
-              <span id="autoModeLiveBadge" style="display:none;font-size:10px;font-weight:700;color:#fff;background:var(--green);border-radius:20px;padding:2px 8px;animation:pulse 1.5s ease-in-out infinite">LIVE</span>
-            </div>
-            <div style="font-size:11px;color:var(--text2);margin-top:2px">Video bhejo → Lecture auto-save hoga</div>
-          </div>
-          <label class="toggle-switch" style="width:44px;height:24px">
-            <input type="checkbox" id="autoModeToggle" onchange="toggleAutoMode(this.checked)">
-            <div class="toggle-slider"></div>
-          </label>
-        </div>
-        <!-- Status card shown when active -->
-        <div id="autoModeStatusCard" style="display:none;border-radius:var(--radius-sm);overflow:hidden">
-          <div style="background:rgba(34,197,94,0.12);border:1px solid var(--green);border-radius:var(--radius-sm);padding:12px 14px">
-            <div style="font-size:12px;font-weight:700;color:var(--green);margin-bottom:6px">✅ Auto Mode Active</div>
-            <div id="autoModeInfoText" style="font-size:11px;color:var(--text2);line-height:1.6"></div>
-            <div style="margin-top:8px;font-size:11px;color:var(--text2)">📨 Bot mein video bhejo, lecture auto-add hoga</div>
-          </div>
-        </div>
-        <!-- Hint when inactive -->
-        <div id="autoModeHint" style="font-size:11px;color:var(--text3);padding:6px 0;line-height:1.6">
-          ⬆️ Pehle Batch, Subject, Chapter select karo — phir toggle ON karo.<br>Bot ko video bhejte hi lecture save ho jayega automatically.
+      <!-- Auto-Add Lectures via Bot -->
+      <div style="margin-top:18px;padding:14px;background:var(--card);border-radius:12px;border:1.5px dashed var(--accent)">
+        <div style="font-weight:600;font-size:14px;margin-bottom:6px;color:var(--accent)">📥 Auto-Add Lectures via Bot</div>
+        <div style="font-size:12px;color:var(--text2);margin-bottom:12px">Batch → Subject → Chapter → Unit upar select karo, phir <b>Start Session</b> dabao. Bot pe videos forward karte jao — Lec 1, Lec 2... automatically save hote jayenge. Bot pe <b>done</b> likhne par session khatam.</div>
+        <div id="autoLecStatus" style="display:none;font-size:12px;padding:8px 10px;background:var(--bg2);border-radius:8px;margin-bottom:10px;color:var(--text1)"></div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn-add" id="btnAutoLecStart" onclick="startAutoLecSession()" style="flex:1;min-width:120px"><i class="ti ti-bolt"></i> Start Session</button>
+          <button class="btn-add" id="btnAutoLecStop" onclick="stopAutoLecSession()" style="flex:1;min-width:100px;background:#e74c3c;display:none"><i class="ti ti-square-off"></i> Stop Session</button>
         </div>
       </div>
     </div>
@@ -1171,9 +1153,6 @@ function openAdmin(tab) {
   var cb = document.getElementById('contactBtn'); if (cb) cb.style.display = 'none';
   populateAllSelects();
   switchTab(tab||'batch');
-  // Instantly restore UI from memory, then refresh from server
-  if (_autoModeActive && _lastAutoInfo) _setAutoModeUI(true, _lastAutoInfo);
-  _syncAutoModeStatus();
 }
 function closeAdmin() {
   document.getElementById('adminModal').classList.remove('show');
@@ -1187,7 +1166,6 @@ function switchTab(name) {
   document.querySelectorAll('.tab-content').forEach(t=>t.classList.remove('active'));
   document.getElementById('tab-'+name).classList.add('active');
   if (name==='manage') renderManage();
-  if (name==='lecture') _syncAutoModeStatus();
 }
 
 function batchOpts() { return batches.map(b=>`<option value="${b._id}">${b.name}</option>`).join('')||'<option>Add a batch first</option>'; }
@@ -1341,99 +1319,36 @@ async function addLecture() {
     setLoading('btnLecture',false,'<i class="ti ti-plus"></i> Add Lecture'); }
 }
 
-// ── Auto Mode ─────────────────────────────────────────────────────────────────
-var _autoModeActive = false;
-
-var _lastAutoInfo = '';  // stores last status text for instant restore
-
-function _setAutoModeUI(active, infoText) {
-  var toggle = document.getElementById('autoModeToggle');
-  var badge  = document.getElementById('autoModeLiveBadge');
-  var card   = document.getElementById('autoModeStatusCard');
-  var hint   = document.getElementById('autoModeHint');
-  var info   = document.getElementById('autoModeInfoText');
-  if (toggle) toggle.checked = active;
-  if (badge)  badge.style.display  = active ? 'inline-block' : 'none';
-  if (card)   card.style.display   = active ? 'block' : 'none';
-  if (hint)   hint.style.display   = active ? 'none'  : 'block';
-  if (info && infoText) { info.innerHTML = infoText; _lastAutoInfo = infoText; }
-  if (!active) _lastAutoInfo = '';
-  _autoModeActive = active;
-}
-
-async function toggleAutoMode(checked) {
-  if (checked) {
-    // ── START ──
-    var bid = document.getElementById('lBatch').value;
-    var sid = document.getElementById('lSubject').value;
-    var cid = document.getElementById('lChapter').value;
-    var uid = document.getElementById('lUnit').value || '';
-
-    if (!bid || !sid || !cid) {
-      document.getElementById('autoModeToggle').checked = false;
-      return toast('Pehle Batch, Subject aur Chapter select karo!', 'error');
-    }
-
-    var batchSel   = document.getElementById('lBatch');
-    var subjectSel = document.getElementById('lSubject');
-    var chapterSel = document.getElementById('lChapter');
-    var unitSel    = document.getElementById('lUnit');
-    var batchName   = batchSel.options[batchSel.selectedIndex].text;
-    var subjectName = subjectSel.options[subjectSel.selectedIndex].text;
-    var chapterName = chapterSel.options[chapterSel.selectedIndex].text;
-    var unitName    = uid ? unitSel.options[unitSel.selectedIndex].text : '';
-
-    document.getElementById('autoModeToggle').disabled = true;
-    try {
-      var r = await apiFetch('/api/auto-lecture/start', 'POST', {
-        batchId: bid, subjectId: sid, chapterId: cid, unitId: uid || null,
-        batchName, subjectName, chapterName, unitName,
-      });
-      var nextNum = (r.session.lectureCount || 0) + 1;
-      var path = subjectName + ' › ' + chapterName + (unitName ? ' › ' + unitName : '');
-      _setAutoModeUI(true,
-        '📍 <b>' + path + '</b><br>' +
-        '▶️ Next: <b>Lecture ' + nextNum + '</b><br>' +
-        '📊 Already saved: ' + r.session.lectureCount + ' lectures'
-      );
-      toast('🤖 Auto Mode ON! Bot mein video bhejo.', 'success');
-    } catch(e) {
-      document.getElementById('autoModeToggle').checked = false;
-      toast('Auto Mode shuru nahi hua: ' + e.message, 'error');
-    }
-    document.getElementById('autoModeToggle').disabled = false;
-
-  } else {
-    // ── STOP ──
-    document.getElementById('autoModeToggle').disabled = true;
-    try {
-      var r = await apiFetch('/api/auto-lecture/stop', 'POST', {});
-      _setAutoModeUI(false, '');
-      toast('🤖 Auto Mode OFF — ' + (r.totalAdded || 0) + ' lectures save hue', 'success');
-    } catch(e) {
-      toast('Band nahi hua: ' + e.message, 'error');
-    }
-    document.getElementById('autoModeToggle').disabled = false;
-  }
-}
-
-// Restore auto-mode status when admin panel opens
-async function _syncAutoModeStatus() {
-  if (!isAdmin) return;
+// ── Auto-Lecture Session ──────────────────────────────────────────────────────
+async function startAutoLecSession() {
+  var bid=document.getElementById('lBatch').value,
+      sid=document.getElementById('lSubject').value,
+      cid=document.getElementById('lChapter').value,
+      uid=document.getElementById('lUnit').value;
+  if(!bid||!sid||!cid) return toast('Batch, Subject aur Chapter select karo!','error');
+  setLoading('btnAutoLecStart',true);
   try {
-    var r = await apiFetch('/api/auto-lecture/status', 'GET');
-    if (r && r.active) {
-      var nextNum = (r.lectureCount || 0) + 1;
-      var path = r.subjectName + ' › ' + r.chapterName + (r.unitName ? ' › ' + r.unitName : '');
-      _setAutoModeUI(true,
-        '📍 <b>' + path + '</b><br>' +
-        '▶️ Next: <b>Lecture ' + nextNum + '</b><br>' +
-        '📊 Already saved: ' + r.lectureCount + ' lectures'
-      );
-    } else {
-      _setAutoModeUI(false, '');
-    }
-  } catch(e) { /* silent */ }
+    var data = await apiFetch('/api/auto-lec/start','POST',{batchId:bid,subjectId:sid,chapterId:cid,unitId:uid||null});
+    var statusEl = document.getElementById('autoLecStatus');
+    statusEl.style.display='block';
+    statusEl.innerHTML = '✅ <b>Session Active!</b> Ab bot pe videos forward karo. Existing lectures: ' + data.existingCount + '<br>Target: ' + (data.target||'Chapter');
+    document.getElementById('btnAutoLecStart').style.display='none';
+    document.getElementById('btnAutoLecStop').style.display='';
+    toast('Session start! Bot pe videos bhejo 🎬','success');
+  } catch(e){toast('Error: '+(e.message||'Could not start'),'error');}
+  setLoading('btnAutoLecStart',false,'<i class="ti ti-bolt"></i> Start Session');
+}
+
+async function stopAutoLecSession() {
+  setLoading('btnAutoLecStop',true);
+  try {
+    await apiFetch('/api/auto-lec/stop','POST',{});
+    document.getElementById('autoLecStatus').style.display='none';
+    document.getElementById('btnAutoLecStart').style.display='';
+    document.getElementById('btnAutoLecStop').style.display='none';
+    toast('Session band kar diya ✅','success');
+  } catch(e){toast('Error: '+e.message,'error');}
+  setLoading('btnAutoLecStop',false,'<i class="ti ti-square-off"></i> Stop Session');
 }
 
 // ── Manage drill-down state ──────────────────────────────────────────────────
