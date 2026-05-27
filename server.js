@@ -429,7 +429,11 @@ async function startBot() {
         `/bulk — start bulk upload mode\n` +
         `/myfiles — view your saved files\n` +
         `/delete <code> — delete a file\n` +
-        `/cancel — cancel bulk mode`
+        `/cancel — cancel bulk mode\n\n` +
+        `📡 Broadcast:\n` +
+        `/broadcast <text> — text to all users\n` +
+        `/broadcast --pin <text> — text + pin\n` +
+        `Reply to any media + /broadcast to send media`
       : `👋 Hello ${msg.from.first_name}!\n\nTap the button below to browse all lectures! 📚`;
 
     bot.sendMessage(chatId, welcomeText, {
@@ -808,6 +812,233 @@ async function startBot() {
     });
   });
 
+
+  // ── /broadcast (Owner only) ──────────────────────────────────────────────────
+  // Usage:
+  //   Reply to any message (text / photo / video / audio / document /
+  //   voice / video_note / sticker / animation) with /broadcast [--pin] [--f]
+  //   • --pin  → pin the broadcast message in every recipient's DM
+  //   • --f    → forward mode: use Telegram forwardMessage (preserves original sender,
+  //               works for ALL media types including stickers; no file_id extraction needed)
+  //
+  // Flags are combinable:  /broadcast --pin --f
+  //
+  // The command also accepts inline text:
+  //   /broadcast Hello everyone!           (plain text, no flags)
+  //   /broadcast --pin Hello everyone!     (plain text + pin)
+  //   NOTE: --f has no effect for inline text (nothing to forward).
+  //
+  // Progress is reported live; a final summary is sent when done.
+
+  bot.onText(/\/broadcast(.*)/, async (msg, match) => {
+    if (isGroupChat(msg)) return;
+    const userId = msg.from?.id;
+    if (!isOwner(userId)) return;
+
+    const chatId = msg.chat.id;
+    const argRaw     = (match[1] || "").trim();
+    const pinFlag    = argRaw.includes("--pin");
+    const forwardFlag = argRaw.includes("--f");
+    const inlineText = argRaw.replace("--pin", "").replace("--f", "").trim();
+
+    // ── Resolve what to broadcast ────────────────────────────────────────────
+    const reply = msg.reply_to_message;
+
+    // Determine broadcast type + payload from replied-to message (if any)
+    let broadcastType = null; // "text" | "photo" | "video" | "audio" | "document" |
+                               // "voice" | "video_note" | "sticker" | "animation"
+    let broadcastPayload = {}; // { file_id?, caption?, text? }
+
+    if (reply) {
+      if (reply.sticker) {
+        broadcastType = "sticker";
+        broadcastPayload = { file_id: reply.sticker.file_id };
+      } else if (reply.animation) {
+        broadcastType = "animation";
+        broadcastPayload = { file_id: reply.animation.file_id, caption: reply.caption || "" };
+      } else if (reply.video_note) {
+        broadcastType = "video_note";
+        broadcastPayload = { file_id: reply.video_note.file_id };
+      } else if (reply.voice) {
+        broadcastType = "voice";
+        broadcastPayload = { file_id: reply.voice.file_id, caption: reply.caption || "" };
+      } else if (reply.audio) {
+        broadcastType = "audio";
+        broadcastPayload = { file_id: reply.audio.file_id, caption: reply.caption || "" };
+      } else if (reply.document) {
+        broadcastType = "document";
+        broadcastPayload = { file_id: reply.document.file_id, caption: reply.caption || "" };
+      } else if (reply.video) {
+        broadcastType = "video";
+        broadcastPayload = { file_id: reply.video.file_id, caption: reply.caption || "" };
+      } else if (reply.photo) {
+        broadcastType = "photo";
+        broadcastPayload = {
+          file_id: reply.photo[reply.photo.length - 1].file_id,
+          caption: reply.caption || "",
+        };
+      } else if (reply.text) {
+        broadcastType = "text";
+        broadcastPayload = { text: reply.text };
+      }
+    }
+
+    // Fallback: inline text after command
+    if (!broadcastType && inlineText) {
+      broadcastType = "text";
+      broadcastPayload = { text: inlineText };
+    }
+
+    if (!broadcastType) {
+      return bot.sendMessage(
+        chatId,
+        `❌ Nothing to broadcast.\n\nUsage:\n` +
+        `• Reply to a message with <code>/broadcast</code>\n` +
+        `• Or: <code>/broadcast Your message here</code>\n\n` +
+        `Flags (combinable):\n` +
+        `• <code>--pin</code> → pin message in each DM\n` +
+        `• <code>--f</code>   → forward mode (preserves sender info)`,
+        { parse_mode: "HTML" }
+      );
+    }
+
+    // ── Helper: send one message to a single user ────────────────────────────
+    // Forward mode: use Telegram's forwardMessage — preserves original sender,
+    // works for every content type without needing to extract file_id.
+    async function sendBroadcastToUser(targetId) {
+      if (forwardFlag && reply) {
+        return bot.forwardMessage(targetId, reply.chat.id, reply.message_id);
+      }
+      const opts = { parse_mode: "HTML" };
+      switch (broadcastType) {
+        case "text":
+          return bot.sendMessage(targetId, broadcastPayload.text, opts);
+        case "photo":
+          return bot.sendPhoto(targetId, broadcastPayload.file_id,
+            broadcastPayload.caption ? { caption: broadcastPayload.caption, ...opts } : {});
+        case "video":
+          return bot.sendVideo(targetId, broadcastPayload.file_id,
+            broadcastPayload.caption ? { caption: broadcastPayload.caption, ...opts } : {});
+        case "audio":
+          return bot.sendAudio(targetId, broadcastPayload.file_id,
+            broadcastPayload.caption ? { caption: broadcastPayload.caption, ...opts } : {});
+        case "document":
+          return bot.sendDocument(targetId, broadcastPayload.file_id,
+            broadcastPayload.caption ? { caption: broadcastPayload.caption, ...opts } : {});
+        case "voice":
+          return bot.sendVoice(targetId, broadcastPayload.file_id,
+            broadcastPayload.caption ? { caption: broadcastPayload.caption, ...opts } : {});
+        case "video_note":
+          return bot.sendVideoNote(targetId, broadcastPayload.file_id);
+        case "sticker":
+          return bot.sendSticker(targetId, broadcastPayload.file_id);
+        case "animation":
+          return bot.sendAnimation(targetId, broadcastPayload.file_id,
+            broadcastPayload.caption ? { caption: broadcastPayload.caption, ...opts } : {});
+        default:
+          throw new Error(`Unknown broadcast type: ${broadcastType}`);
+      }
+    }
+
+    // ── Fetch all registered users ───────────────────────────────────────────
+    let allUsers;
+    try {
+      allUsers = await User.find({}, { userId: 1 }).lean();
+    } catch (err) {
+      return bot.sendMessage(chatId, `❌ Failed to fetch users: ${err.message}`);
+    }
+
+    if (!allUsers.length) {
+      return bot.sendMessage(chatId, `⚠️ No users found in the database.`);
+    }
+
+    const typeLabel = {
+      text: "📝 Text", photo: "🖼️ Photo", video: "🎬 Video",
+      audio: "🎵 Audio", document: "📄 Document", voice: "🎤 Voice",
+      video_note: "📹 Video Note", sticker: "🎭 Sticker", animation: "🎞️ Animation",
+    }[broadcastType] || broadcastType;
+
+    const modeLabel = forwardFlag ? " ↪️ Forward" : "";
+    const progress = await bot.sendMessage(
+      chatId,
+      `📡 Starting broadcast...\n` +
+      `👥 Total users: ${allUsers.length}\n` +
+      `📦 Type: ${typeLabel}${modeLabel}${pinFlag ? " + 📌 Pin" : ""}`
+    );
+
+    let sent = 0, failed = 0, blocked = 0;
+    const BATCH = 25; // messages per batch before a short pause (Telegram rate limit ~30/s)
+
+    for (let i = 0; i < allUsers.length; i++) {
+      const targetId = parseInt(allUsers[i].userId, 10);
+      if (!targetId) { failed++; continue; }
+
+      try {
+        const sentMsg = await sendBroadcastToUser(targetId);
+
+        // Pin the message if --pin flag is set
+        if (pinFlag && sentMsg && sentMsg.message_id) {
+          try {
+            await bot.pinChatMessage(targetId, sentMsg.message_id, { disable_notification: true });
+          } catch (_) {
+            // Pinning may fail if user revoked pin permissions — non-fatal
+          }
+        }
+        sent++;
+      } catch (err) {
+        const errMsg = err.message || "";
+        if (
+          errMsg.includes("blocked") ||
+          errMsg.includes("user is deactivated") ||
+          errMsg.includes("bot was blocked") ||
+          errMsg.includes("Forbidden")
+        ) {
+          blocked++;
+        } else {
+          failed++;
+        }
+      }
+
+      // Live progress every 20 users
+      if ((i + 1) % 20 === 0 || i === allUsers.length - 1) {
+        try {
+          await bot.editMessageText(
+            `📡 Broadcasting...\n` +
+            `👥 Total: ${allUsers.length}\n` +
+            `📦 Type: ${typeLabel}${modeLabel}${pinFlag ? " + 📌 Pin" : ""}\n\n` +
+            `✅ Sent: ${sent}\n` +
+            `🚫 Blocked: ${blocked}\n` +
+            `❌ Failed: ${failed}\n` +
+            `⏳ Progress: ${i + 1}/${allUsers.length}`,
+            { chat_id: chatId, message_id: progress.message_id }
+          );
+        } catch (_) {}
+      }
+
+      // Throttle: pause briefly after each batch to avoid hitting Telegram limits
+      if ((i + 1) % BATCH === 0 && i < allUsers.length - 1) {
+        await wait(1000);
+      }
+    }
+
+    // ── Final summary ────────────────────────────────────────────────────────
+    try {
+      await bot.editMessageText(
+        `✅ <b>Broadcast Complete!</b>\n\n` +
+        `📦 Type: ${typeLabel}${modeLabel}${pinFlag ? " + 📌 Pinned" : ""}\n` +
+        `👥 Total users: ${allUsers.length}\n\n` +
+        `✅ Delivered: ${sent}\n` +
+        `🚫 Blocked/Deactivated: ${blocked}\n` +
+        `❌ Failed: ${failed}`,
+        { chat_id: chatId, message_id: progress.message_id, parse_mode: "HTML" }
+      );
+    } catch (_) {
+      bot.sendMessage(
+        chatId,
+        `✅ Broadcast done — Sent: ${sent} | Blocked: ${blocked} | Failed: ${failed}`
+      );
+    }
+  });
 
   // ── /stats (Owner only) ──────────────────────────────────────────────────────
   bot.onText(/\/stats/, async (msg) => {
