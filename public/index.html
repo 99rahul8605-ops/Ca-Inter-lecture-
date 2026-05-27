@@ -1171,6 +1171,9 @@ function openAdmin(tab) {
   var cb = document.getElementById('contactBtn'); if (cb) cb.style.display = 'none';
   populateAllSelects();
   switchTab(tab||'batch');
+  // Instantly restore UI from memory, then refresh from server
+  if (_autoModeActive && _lastAutoInfo) _setAutoModeUI(true, _lastAutoInfo);
+  _syncAutoModeStatus();
 }
 function closeAdmin() {
   document.getElementById('adminModal').classList.remove('show');
@@ -1341,6 +1344,8 @@ async function addLecture() {
 // ── Auto Mode ─────────────────────────────────────────────────────────────────
 var _autoModeActive = false;
 
+var _lastAutoInfo = '';  // stores last status text for instant restore
+
 function _setAutoModeUI(active, infoText) {
   var toggle = document.getElementById('autoModeToggle');
   var badge  = document.getElementById('autoModeLiveBadge');
@@ -1351,7 +1356,8 @@ function _setAutoModeUI(active, infoText) {
   if (badge)  badge.style.display  = active ? 'inline-block' : 'none';
   if (card)   card.style.display   = active ? 'block' : 'none';
   if (hint)   hint.style.display   = active ? 'none'  : 'block';
-  if (info && infoText) info.innerHTML = infoText;
+  if (info && infoText) { info.innerHTML = infoText; _lastAutoInfo = infoText; }
+  if (!active) _lastAutoInfo = '';
   _autoModeActive = active;
 }
 
