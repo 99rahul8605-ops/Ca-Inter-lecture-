@@ -736,6 +736,8 @@ async function startBot() {
             link,
           });
           autoLectureSession.lectureCount = lectureNum;
+          // Persist to DB so server restart keeps count
+          courseRoutes.saveAutoSession && courseRoutes.saveAutoSession();
           const loc = autoLectureSession.unitName
             ? `${autoLectureSession.subjectName} › ${autoLectureSession.chapterName} › ${autoLectureSession.unitName}`
             : `${autoLectureSession.subjectName} › ${autoLectureSession.chapterName}`;
@@ -852,6 +854,8 @@ async function startBot() {
               link,
             });
             autoLectureSession.lectureCount = lectureNum;
+          // Persist to DB so server restart keeps count
+          courseRoutes.saveAutoSession && courseRoutes.saveAutoSession();
             const loc = autoLectureSession.unitName
               ? `${autoLectureSession.subjectName} › ${autoLectureSession.chapterName} › ${autoLectureSession.unitName}`
               : `${autoLectureSession.subjectName} › ${autoLectureSession.chapterName}`;
