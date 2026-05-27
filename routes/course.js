@@ -627,7 +627,7 @@ router.post('/auto-lecture/start', verifyAdmin, async (req, res) => {
 });
 
 // POST /api/auto-lecture/stop — stops session
-router.post('/auto-lecture/stop', verifyAdmin, (req, res) => {
+router.post('/auto-lecture/stop', verifyAdmin, async (req, res) => {
   const totalAdded = autoLectureSession.lectureCount;
   Object.assign(autoLectureSession, {
     active: false, batchId: null, subjectId: null, chapterId: null, unitId: null,
