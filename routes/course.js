@@ -7,6 +7,31 @@ const Batch = require("../models/Course");
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const OWNER_ID = parseInt(process.env.OWNER_ID || "0");
 
+// ── Auto-Lecture Session (shared with server.js via module exports) ────────────
+const autoLectureSession = {
+  active: false,
+  batchId: null, subjectId: null, chapterId: null, unitId: null,
+  lectureCount: 0,
+  batchName: '', subjectName: '', chapterName: '', unitName: '',
+};
+
+async function autoAddLecture({ batchId, subjectId, chapterId, unitId, name, link }) {
+  const batch = await Batch.findById(batchId);
+  if (!batch) throw new Error('Batch not found');
+  const subj = batch.subjects.id(subjectId);
+  if (!subj) throw new Error('Subject not found');
+  const chap = subj.chapters.id(chapterId);
+  if (!chap) throw new Error('Chapter not found');
+  if (unitId) {
+    const unit = chap.units.id(unitId);
+    if (!unit) throw new Error('Unit not found');
+    unit.lectures.push({ name, link, notes: '', order: unit.lectures.length });
+  } else {
+    chap.lectures.push({ name, link, notes: '', order: chap.lectures.length });
+  }
+  await batch.save();
+}
+
 // ── Admin verification using Telegram initData + OWNER_ID ────────────────────
 function verifyAdmin(req, res, next) {
   const initData = req.headers["x-tg-init-data"];
@@ -527,6 +552,56 @@ async function getChannelInfo(chatId, botToken) {
     return { title: '', username: '', photoUrl: null, redirectLink: null, cachedAt: now };
   }
 }
+
+// ── Auto-Lecture API (admin only) ─────────────────────────────────────────────
+
+// GET /api/auto-lecture/status — current session state
+router.get('/auto-lecture/status', verifyAdmin, (req, res) => {
+  res.json(autoLectureSession);
+});
+
+// POST /api/auto-lecture/start — body: { batchId, subjectId, chapterId, unitId?, batchName, subjectName, chapterName, unitName }
+router.post('/auto-lecture/start', verifyAdmin, async (req, res) => {
+  const { batchId, subjectId, chapterId, unitId, batchName, subjectName, chapterName, unitName } = req.body;
+  if (!batchId || !subjectId || !chapterId) return res.status(400).json({ error: 'batchId, subjectId, chapterId required' });
+  try {
+    const batch = await Batch.findById(batchId);
+    const subj = batch && batch.subjects.id(subjectId);
+    const chap = subj && subj.chapters.id(chapterId);
+    if (!chap) return res.status(404).json({ error: 'Chapter not found' });
+    // Count existing lectures so numbering continues correctly
+    let existingCount;
+    if (unitId) {
+      const unit = chap.units.id(unitId);
+      existingCount = unit ? unit.lectures.length : 0;
+    } else {
+      existingCount = chap.lectures.length;
+    }
+    Object.assign(autoLectureSession, {
+      active: true,
+      batchId, subjectId, chapterId,
+      unitId: unitId || null,
+      lectureCount: existingCount,
+      batchName: batchName || '', subjectName: subjectName || '',
+      chapterName: chapterName || '', unitName: unitName || '',
+    });
+    res.json({ success: true, session: autoLectureSession });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /api/auto-lecture/stop — stops session
+router.post('/auto-lecture/stop', verifyAdmin, (req, res) => {
+  const totalAdded = autoLectureSession.lectureCount;
+  Object.assign(autoLectureSession, {
+    active: false, batchId: null, subjectId: null, chapterId: null, unitId: null,
+    lectureCount: 0, batchName: '', subjectName: '', chapterName: '', unitName: '',
+  });
+  res.json({ success: true, totalAdded });
+});
+
+// Export helpers so server.js (bot) can use them directly
+router.autoLectureSession = autoLectureSession;
+router.autoAddLecture = autoAddLecture;
 
 router.post('/force-join/check', async (req, res) => {
   const { userId } = req.body;
