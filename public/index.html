@@ -1887,35 +1887,29 @@ function _claimsDotRow() {
   '</div>';
 }
 
-// ── Helper: 3 ad buttons ──────────────────────────────────────────────────────
+// ── Helper: single Watch Ad button (format chosen randomly inside watchAd) ────
 function _adButtonsHTML() {
   if (claimsToday >= 3) {
     return '<div style="padding:14px 16px;text-align:center;font-size:13px;color:var(--text2)">' +
       '✅ Aaj ke 3/3 claims ho gaye!<br><span style="font-size:11px">Kal wapas aao.</span></div>';
   }
-  return '<div style="display:flex;flex-direction:column;gap:8px;padding:0 16px 16px">' +
-    '<div style="font-size:11px;color:var(--text2);text-align:center;margin-bottom:2px">Koi bhi ek ad dekho — 8h access milega</div>' +
-    '<button class="watch-ad-btn" id="adBtnRewarded" onclick="watchAd(&apos;rewarded&apos;)" style="background:linear-gradient(135deg,var(--accent),var(--accent2))">' +
-      '<i class="ti ti-player-play"></i> Rewarded Ad (+8h)' +
-    '</button>' +
-    '<button class="watch-ad-btn" id="adBtnPop" onclick="watchAd(&apos;pop&apos;)" style="background:linear-gradient(135deg,#7c3aed,#4f46e5)">' +
-      '<i class="ti ti-gift"></i> Pop Reward (+8h)' +
-    '</button>' +
-    '<button class="watch-ad-btn" id="adBtnInterstitial" onclick="watchAd(&apos;interstitial&apos;)" style="background:linear-gradient(135deg,#0f766e,#0891b2)">' +
-      '<i class="ti ti-device-tv"></i> Interstitial (+8h)' +
+  return '<div style="padding:0 16px 16px">' +
+    '<button class="watch-ad-btn" id="adBtnMain" onclick="watchAd()">' +
+      '<i class="ti ti-player-play"></i> Watch Ad — Get +8h Access' +
     '</button>' +
   '</div>';
 }
 
-// ── Helper: disable/enable all ad buttons while ad is loading ─────────────────
+// ── Helper: disable/enable the watch ad button ────────────────────────────────
 function _setAdBtns(loading) {
-  ['adBtnRewarded','adBtnPop','adBtnInterstitial'].forEach(function(id) {
-    var b = document.getElementById(id);
-    if (!b) return;
-    b.disabled = loading;
-    if (loading) b.style.opacity = '0.6';
-    else b.style.opacity = '';
-  });
+  var b = document.getElementById('adBtnMain');
+  if (!b) return;
+  b.disabled = loading;
+  if (loading) {
+    b.innerHTML = '<i class="ti ti-loader-2" style="animation:spin 0.8s linear infinite;display:inline-block"></i> Loading Ad...';
+  } else {
+    b.innerHTML = '<i class="ti ti-player-play"></i> Watch Ad — Get +8h Access';
+  }
 }
 
 function renderAccessCard() {
@@ -1954,7 +1948,7 @@ function renderAccessCard() {
     var pct = Math.min(100, Math.round((t.ms / t.total) * 100));
     var extendSection = claimsToday < 3
       ? '<div style="border-top:1px solid var(--border);padding-top:6px">' +
-          '<div style="padding:10px 16px 4px;font-size:12px;font-weight:600;color:var(--text2)">⚡ Aur extend karo (+8h each)</div>' +
+          '<div style="padding:10px 16px 4px;font-size:12px;font-weight:600;color:var(--text2)">⚡ Aur extend karo</div>' +
           _adButtonsHTML() +
         '</div>'
       : '<div style="padding:12px 16px;text-align:center;font-size:12px;color:var(--text2)">' +
@@ -2025,9 +2019,10 @@ function startCountdown() {
 var _adToken = null;
 var _adActuallyShown = false;
 
-// format: 'rewarded' | 'pop' | 'interstitial'
-async function watchAd(format) {
-  format = format || 'rewarded';
+async function watchAd() {
+  // Randomly pick one of three Monetag formats
+  var formats = ['rewarded', 'pop', 'interstitial'];
+  var format = formats[Math.floor(Math.random() * formats.length)];
 
   if (_adWatching) return; // already playing an ad
   if (claimsToday >= 3) {
