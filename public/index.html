@@ -365,7 +365,7 @@ body.ready{transition:none}
     <div id="lockedMsg" style="display:none;text-align:center;padding:40px 20px;color:var(--text2)">
       <i class="ti ti-lock" style="font-size:40px;color:var(--text3);display:block;margin-bottom:12px"></i>
       <div style="font-size:15px;font-weight:600;margin-bottom:6px">Access Required</div>
-      <div style="font-size:13px">Watch an ad to unlock lectures for 8 hours (3 times/day).</div>
+      <div style="font-size:13px">Watch an ad to get 8h free access (up to 3 times/day).</div>
     </div>
     <div id="batchSection">
       <div class="sec-label">All Batches</div>
@@ -1754,8 +1754,8 @@ var accessExpiresAt = null;
 var countdownTimer = null;
 var currentTab = 'home';
 var userId = null;
-var claimsToday = 0;   // how many ads claimed today (0-3)
-var _adWatching = false; // prevent double-click
+var claimsToday = 0;    // 0-3 claims today
+var _adWatching = false; // prevent double-click while ad loads
 
 function getUserId() {
   var tgUser = tg && tg.initDataUnsafe && tg.initDataUnsafe.user;
@@ -1872,32 +1872,50 @@ function switchNavTab(tab) {
 
 var adWatched = false;
 
+// ── Helper: 3-dot progress indicator ─────────────────────────────────────────
+function _claimsDotRow() {
+  var dots = '';
+  for (var i = 0; i < 3; i++) {
+    var filled = i < claimsToday;
+    dots += '<div style="width:13px;height:13px;border-radius:50%;background:' +
+      (filled ? 'var(--green)' : 'var(--surface3)') +
+      ';border:1.5px solid ' + (filled ? 'var(--green)' : 'var(--border)') + '"></div>';
+  }
+  return '<div style="display:flex;align-items:center;justify-content:center;gap:8px;padding:10px 16px 6px">' +
+    dots +
+    '<span style="font-size:11px;color:var(--text2);margin-left:6px">' + claimsToday + '/3 claimed today</span>' +
+  '</div>';
+}
+
+// ── Helper: 3 ad buttons ──────────────────────────────────────────────────────
 function _adButtonsHTML() {
-  var left = 3 - claimsToday;
-  if (left <= 0) return '<div style="padding:12px;text-align:center;font-size:13px;color:var(--text2)">✅ Aaj ke 3 claims ho gaye. Kal wapas aao!</div>';
+  if (claimsToday >= 3) {
+    return '<div style="padding:14px 16px;text-align:center;font-size:13px;color:var(--text2)">' +
+      '✅ Aaj ke 3/3 claims ho gaye!<br><span style="font-size:11px">Kal wapas aao.</span></div>';
+  }
   return '<div style="display:flex;flex-direction:column;gap:8px;padding:0 16px 16px">' +
     '<div style="font-size:11px;color:var(--text2);text-align:center;margin-bottom:2px">Koi bhi ek ad dekho — 8h access milega</div>' +
     '<button class="watch-ad-btn" id="adBtnRewarded" onclick="watchAd('rewarded')" style="background:linear-gradient(135deg,var(--accent),var(--accent2))">' +
-      '<i class="ti ti-player-play"></i> Rewarded Ad dekho (+8h)' +
+      '<i class="ti ti-player-play"></i> Rewarded Ad (+8h)' +
     '</button>' +
     '<button class="watch-ad-btn" id="adBtnPop" onclick="watchAd('pop')" style="background:linear-gradient(135deg,#7c3aed,#4f46e5)">' +
-      '<i class="ti ti-gift"></i> Pop Reward dekho (+8h)' +
+      '<i class="ti ti-gift"></i> Pop Reward (+8h)' +
     '</button>' +
     '<button class="watch-ad-btn" id="adBtnInterstitial" onclick="watchAd('interstitial')" style="background:linear-gradient(135deg,#0f766e,#0891b2)">' +
-      '<i class="ti ti-device-tv"></i> Interstitial dekho (+8h)' +
+      '<i class="ti ti-device-tv"></i> Interstitial (+8h)' +
     '</button>' +
   '</div>';
 }
 
-function _claimsDotRow() {
-  var dots = '';
-  for (var i = 0; i < 3; i++) {
-    dots += '<div style="width:14px;height:14px;border-radius:50%;background:' + (i < claimsToday ? 'var(--green)' : 'var(--surface3)') + ';border:1.5px solid ' + (i < claimsToday ? 'var(--green)' : 'var(--border)') + '"></div>';
-  }
-  return '<div style="display:flex;align-items:center;justify-content:center;gap:8px;padding:10px 16px 4px">' +
-    dots +
-    '<span style="font-size:11px;color:var(--text2);margin-left:6px">' + claimsToday + '/3 claimed today</span>' +
-  '</div>';
+// ── Helper: disable/enable all ad buttons while ad is loading ─────────────────
+function _setAdBtns(loading) {
+  ['adBtnRewarded','adBtnPop','adBtnInterstitial'].forEach(function(id) {
+    var b = document.getElementById(id);
+    if (!b) return;
+    b.disabled = loading;
+    if (loading) b.style.opacity = '0.6';
+    else b.style.opacity = '';
+  });
 }
 
 function renderAccessCard() {
@@ -1914,13 +1932,13 @@ function renderAccessCard() {
   var dot = document.getElementById('accessDot');
   if (dot) dot.style.background = locked ? 'var(--red)' : 'var(--green)';
 
+  // ── State 1: Ad watched — show claim button ───────────────────────────────
   if (adWatched) {
-    // Ad dekh liya — Claim button dikhao
     card.innerHTML =
       '<div class="access-card-header">' +
         '<i class="ti ti-circle-check" style="font-size:48px;display:block;margin-bottom:12px;color:var(--green)"></i>' +
         '<h2 style="color:var(--green)">Ad Complete! 🎉</h2>' +
-        '<p>Ad dekh liya. Ab claim karo — ' + (hasAccess() ? 'present access ke saath' : '') + ' 8h add ho jaayega.</p>' +
+        '<p>Ad dekh liya! Ab claim karo' + (hasAccess() ? ' — present access ke saath 8h aur add hoga.' : '.') + '</p>' +
       '</div>' +
       _claimsDotRow() +
       '<div class="access-action">' +
@@ -1931,15 +1949,17 @@ function renderAccessCard() {
     return;
   }
 
+  // ── State 2: Access active ────────────────────────────────────────────────
   if (!locked && t) {
-    // Access active
     var pct = Math.min(100, Math.round((t.ms / t.total) * 100));
     var extendSection = claimsToday < 3
-      ? '<div style="border-top:1px solid var(--border);padding-top:4px">' +
-          '<div style="padding:12px 16px 4px;font-size:12px;font-weight:600;color:var(--text2)">⚡ Aur extend karo</div>' +
+      ? '<div style="border-top:1px solid var(--border);padding-top:6px">' +
+          '<div style="padding:10px 16px 4px;font-size:12px;font-weight:600;color:var(--text2)">⚡ Aur extend karo (+8h each)</div>' +
           _adButtonsHTML() +
         '</div>'
-      : '<div style="padding:12px 16px;text-align:center;font-size:12px;color:var(--text2)">✅ Aaj ke 3/3 claims ho gaye. Kal aur mil sakte hain!</div>';
+      : '<div style="padding:12px 16px;text-align:center;font-size:12px;color:var(--text2)">' +
+          '✅ Aaj ke 3/3 claims ho gaye! Kal aur milenge.' +
+        '</div>';
     card.innerHTML =
       '<div class="access-card-header">' +
         '<i class="ti ti-shield-check status-unlocked"></i>' +
@@ -1956,16 +1976,14 @@ function renderAccessCard() {
     return;
   }
 
-  // Locked
+  // ── State 3: Locked ───────────────────────────────────────────────────────
   card.innerHTML =
     '<div class="access-card-header">' +
       '<i class="ti ti-lock status-locked"></i>' +
       '<h2>Unlock Lectures</h2>' +
-      '<p>Ad dekho — <strong>8h free access</strong> milega. Din mein <strong>3 baar</strong> claim kar sakte ho!</p>' +
+      '<p>Ad dekho aur <strong>8h free access</strong> pao!<br>Din mein <strong>3 baar</strong> claim kar sakte ho.</p>' +
     '</div>' +
-    '<div style="padding:14px 16px 0">' +
-      _claimsDotRow() +
-    '</div>' +
+    _claimsDotRow() +
     _adButtonsHTML();
 }
 
@@ -2010,20 +2028,22 @@ var _adActuallyShown = false;
 // format: 'rewarded' | 'pop' | 'interstitial'
 async function watchAd(format) {
   format = format || 'rewarded';
-  if (_adWatching) return;
+
+  if (_adWatching) return; // already playing an ad
   if (claimsToday >= 3) {
     toast('Aaj ke 3 claims ho gaye! Kal wapas aao. 🕐', 'error');
     return;
   }
 
   _adWatching = true;
-  _setAdBtns(true, format);
+  _setAdBtns(true);
 
+  // Get one-time token from server
   try {
     userId = getUserId();
     var r = await fetch('/api/access/token/' + userId, { method: 'POST' });
     var data = await r.json();
-    if (data.claimsToday !== undefined) claimsToday = data.claimsToday;
+    if (typeof data.claimsToday === 'number') claimsToday = data.claimsToday;
     if (!data.token) throw new Error(data.error || 'No token');
     _adToken = data.token;
   } catch(e) {
@@ -2045,6 +2065,7 @@ async function watchAd(format) {
 
   var uid = tg && tg.initDataUnsafe && tg.initDataUnsafe.user ? String(tg.initDataUnsafe.user.id) : 'unknown';
 
+  // Pick Monetag ad format
   var adPromise;
   if (format === 'pop') {
     adPromise = show_11011844('pop');          // Rewarded Popup
@@ -2076,17 +2097,6 @@ async function watchAd(format) {
         toast('Ad abhi available nahi. Thodi der baad try karo.', 'error');
       }
     });
-}
-
-function _setAdBtns(loading, format) {
-  ['adBtnRewarded','adBtnPop','adBtnInterstitial'].forEach(function(id) {
-    var b = document.getElementById(id);
-    if (!b) return;
-    b.disabled = loading;
-    if (loading && b.id === 'adBtn' + (format ? format.charAt(0).toUpperCase() + format.slice(1) : '')) {
-      b.innerHTML = '<i class="ti ti-loader-2" style="animation:spin 0.8s linear infinite;display:inline-block"></i> Loading...';
-    }
-  });
 }
 
 async function claimAccess() {
@@ -2130,11 +2140,11 @@ async function claimAccess() {
     startCountdown();
     var dot = document.getElementById('accessDot');
     if (dot) dot.style.background = 'var(--green)';
-    var left = data.claimsLeft || 0;
-    toast('✅ 8h access add hua! ' + (left > 0 ? left + ' claim aur baki aaj.' : 'Aaj ke sab claims ho gaye.'), 'success');
+    var left = typeof data.claimsLeft === 'number' ? data.claimsLeft : 0;
+    toast('✅ +8h access add hua! ' + (left > 0 ? left + ' claim aur baki aaj.' : 'Aaj ke sab 3 claims ho gaye.'), 'success');
   } catch(e) {
     toast('Claim failed: ' + (e.message || 'Please try again.'), 'error');
-    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-gift"></i> Claim 8h Access'; }
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-gift"></i> Claim +8h Access'; }
   }
 }
 
