@@ -40,7 +40,30 @@ function isGroupChat(msg) {
 // ── MongoDB connect ──────────────────────────────────────────────────────────
 mongoose
   .connect(MONGO_URI)
-  .then(() => console.log("MongoDB connected"))
+  .then(async () => {
+    console.log("MongoDB connected");
+
+    // ── One-time migration: fix old records that had expires_at set ──────────
+    // Drop the TTL index so MongoDB stops auto-deleting records.
+    try {
+      await mongoose.connection.collection("filerecords").dropIndex("expires_at_1");
+      console.log("Migration: TTL index dropped from filerecords.");
+    } catch (e) {
+      if (e.codeName !== "IndexNotFound") console.warn("dropIndex warning:", e.message);
+    }
+
+    // Null-out expires_at on any existing records so old links work again.
+    try {
+      const result = await mongoose.connection.collection("filerecords").updateMany(
+        { expires_at: { $ne: null } },
+        { $set: { expires_at: null } }
+      );
+      if (result.modifiedCount > 0)
+        console.log(`Migration: Reset expires_at on ${result.modifiedCount} old file record(s). Old links restored.`);
+    } catch (e) {
+      console.error("Migration error (expires_at reset):", e.message);
+    }
+  })
   .catch((err) => { console.error("MongoDB error:", err.message); process.exit(1); });
 
 // ─── Schemas ─────────────────────────────────────────────────────────────────
@@ -56,10 +79,7 @@ const fileSchema = new mongoose.Schema({
   delivered_to: [{ type: Number }],
   created_at: { type: Date, default: Date.now },
 });
-fileSchema.index(
-  { expires_at: 1 },
-  { expireAfterSeconds: 0, partialFilterExpression: { expires_at: { $type: "date" } } }
-);
+// TTL index removed — links are permanent. expires_at field kept for schema compatibility.
 const FileRecord = mongoose.model("FileRecord", fileSchema);
 
 const bulkBatchSchema = new mongoose.Schema({
