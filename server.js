@@ -15,7 +15,8 @@ const STORAGE_CHANNEL_ID = process.env.STORAGE_CHANNEL_ID
 const UPI_ID = process.env.UPI_ID || "";
 const PAYMENT_GROUP_ID = process.env.PAYMENT_GROUP_ID ? parseInt(process.env.PAYMENT_GROUP_ID) : null;
 
-let BOT_USERNAME = ""; // Telegram numeric user ID
+let BOT_USERNAME = "";
+let bot = null; // global bot instance
 
 if (!TOKEN || !MONGO_URI || !WEB_URL || !OWNER_ID) {
   console.error("Missing env: BOT_TOKEN, MONGO_URI, WEB_URL, OWNER_ID are required.");
@@ -332,7 +333,6 @@ async function startBot() {
   }
 
   // Bot init with retry
-  let bot;
   for (let attempt = 1; attempt <= 5; attempt++) {
     try {
       bot = new TelegramBot(TOKEN, {
