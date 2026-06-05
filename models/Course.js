@@ -6,6 +6,7 @@ const lectureSchema = new mongoose.Schema({
   notes: { type: String, default: "" }, // optional class notes link
   order: { type: Number, default: 0 },
   comingSoon: { type: Boolean, default: false },
+  isDemo: { type: Boolean, default: false }, // demo lecture — accessible to all without access
 });
 
 const unitSchema = new mongoose.Schema({
