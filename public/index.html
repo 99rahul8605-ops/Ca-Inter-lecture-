@@ -1173,9 +1173,11 @@ function _batchCard(b, isPremiumLocked) {
     ? '<button class="batch-buy-btn" data-bid="' + b._id + '" onclick="event.stopPropagation();buyBatch(this.dataset.bid)"><i class="ti ti-shopping-cart" style="font-size:12px"></i> Buy Access</button>'
     : '';
   var demoLectures = _getAllDemoLectures(b);
-  var viewBtn = demoLectures.length
-    ? '<button class="batch-view-btn" data-bid="' + b._id + '" onclick="event.stopPropagation();openDemoModal(this.dataset.bid)"><i class="ti ti-player-play" style="font-size:12px"></i> View Demo</button>'
-    : '';
+  var viewBtn = (!isPremiumLocked && b.isPremium)
+    ? '' // purchased user — full access, no need for demo
+    : (demoLectures.length
+        ? '<button class="batch-view-btn" data-bid="' + b._id + '" onclick="event.stopPropagation();openDemoModal(this.dataset.bid)"><i class="ti ti-player-play" style="font-size:12px"></i> View Demo</button>'
+        : '');
   var actionBtns = (buyBtn || viewBtn)
     ? '<div style="display:flex;gap:6px;flex-wrap:wrap">' + viewBtn + buyBtn + '</div>'
     : '';
