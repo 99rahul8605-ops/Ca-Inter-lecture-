@@ -93,6 +93,8 @@ body.ready{transition:none}
 .batch-tab i{font-size:15px}
 .batch-card-premium{border-color:rgba(245,158,11,0.35) !important}
 .batch-card-premium .batch-meta{color:#f59e0b}
+.batch-buy-btn{display:inline-flex;align-items:center;gap:5px;margin-top:8px;padding:6px 14px;border-radius:20px;border:none;background:linear-gradient(135deg,#f59e0b,#d97706);color:#fff;font-size:11px;font-weight:700;cursor:pointer;transition:opacity 0.15s;-webkit-tap-highlight-color:transparent}
+.batch-buy-btn:active{opacity:0.8}
 .premium-lock-overlay{position:absolute;inset:0;background:rgba(10,14,26,0.55);backdrop-filter:blur(2px);display:flex;align-items:center;justify-content:center;z-index:5;border-radius:0}
 .premium-badge{position:absolute;top:6px;right:6px;background:linear-gradient(135deg,#f59e0b,#d97706);color:#fff;font-size:9px;font-weight:800;padding:3px 7px;border-radius:20px;letter-spacing:0.5px;z-index:6;display:flex;align-items:center;gap:3px}
 .premium-locked-msg{position:absolute;bottom:0;left:0;right:0;background:linear-gradient(transparent,rgba(0,0,0,0.85));padding:8px 10px 6px;z-index:6}
@@ -1147,6 +1149,9 @@ function _batchCard(b, isPremiumLocked) {
     : '';
   var cardStyle = (isAdmin && b.isPublic !== true) ? 'opacity:0.6;border-style:dashed;' : '';
   if (b.isPremium) cardStyle += 'border-color:rgba(245,158,11,0.35);';
+  var buyBtn = isPremiumLocked
+    ? '<button class="batch-buy-btn" onclick="event.stopPropagation();buyBatch('' + b._id + '','' + b.name.replace(/'/g, "\''") + '')"><i class="ti ti-shopping-cart" style="font-size:12px"></i> Buy Access</button>'
+    : '';
   return `<div class="batch-card${b.isPremium ? ' batch-card-premium' : ''}" onclick="openBatch('${b._id}')" style="${cardStyle}">
     <div class="batch-img" style="position:relative;overflow:hidden">
       ${b.pic ? `<img src="${b.pic}">` : '🎓'}
@@ -1156,6 +1161,7 @@ function _batchCard(b, isPremiumLocked) {
       <div class="batch-name">${b.name}</div>
       ${b.description ? `<div class="batch-desc">${b.description}</div>` : ''}
       <div class="batch-meta">${b.subjects.length} subjects${isPremiumLocked ? ' · <span style="color:#f59e0b">🔒 Locked</span>' : ''}</div>
+      ${buyBtn}
     </div>
   </div>`;
 }
@@ -1852,6 +1858,19 @@ async function saveEdit() {
 }
 
 async function delBatch(bid){if(!confirm('Batch delete?'))return;try{await apiFetch(`/api/batches/${bid}`,'DELETE');batches=batches.filter(x=>x._id!==bid);renderBatches(batches);populateAllSelects();_renderManageLevel();toast('Deleted!','success');}catch(e){toast('Error','error');}}
+
+// ── Buy Batch ─────────────────────────────────────────────────────────────────
+function buyBatch(bid, batchName) {
+  var msg = encodeURIComponent('Hi, I would like to purchase access to the "' + batchName + '" premium batch. Please guide me on how to proceed.');
+  var botUrl = 'https://t.me/' + (window._botUsername || '') + '?start=buy_' + bid;
+  // Open contact bot with pre-filled message via Telegram share
+  var contactUrl = 'https://t.me/team_secret_cont_bot?text=' + msg;
+  if (tg && tg.openLink) {
+    tg.openLink(contactUrl, { try_instant_view: false });
+  } else {
+    window.open(contactUrl, '_blank');
+  }
+}
 
 // ── Premium Users Management ──────────────────────────────────────────────────
 var _puBatchId = null;
