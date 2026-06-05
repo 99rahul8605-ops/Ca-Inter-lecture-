@@ -3,17 +3,12 @@ const mongoose = require("mongoose");
 const express = require("express");
 const path = require("path");
 const crypto = require("crypto");
-const QRCode = require("qrcode");
 
 const TOKEN = process.env.BOT_TOKEN;
 const MONGO_URI = process.env.MONGO_URI;
 const WEB_URL = process.env.WEB_URL;
 const PORT = process.env.PORT || 3000;
 const OWNER_ID = parseInt(process.env.OWNER_ID || "0");
-const PAYMENT_GROUP_ID = process.env.PAYMENT_GROUP_ID
-  ? parseInt(process.env.PAYMENT_GROUP_ID)
-  : null; // Group where payment requests are sent for approval
-const UPI_ID = process.env.UPI_ID || ""; // your UPI ID e.g. name@upi
 // Storage channel ID where all new files will be forwarded for bot-independent storage.
 // Format: -100xxxxxxxxxx (supergroup/channel numeric ID)
 // If not set, files will be saved with direct file_id (old behavior).
@@ -119,19 +114,7 @@ const userSchema = new mongoose.Schema({
 });
 const User = mongoose.model("User", userSchema);
 
-// ── Payment Request Schema ────────────────────────────────────────────────────
-const paymentRequestSchema = new mongoose.Schema({
-  userId:    { type: String, required: true },
-  userName:  { type: String, default: "" },
-  firstName: { type: String, default: "" },
-  batchId:   { type: String, required: true },
-  batchName: { type: String, default: "" },
-  amount:    { type: Number, default: 0 },
-  status:    { type: String, default: "pending" }, // pending | approved | rejected
-  groupMsgId: { type: Number, default: null }, // message id in payment group
-  createdAt: { type: Date, default: Date.now },
-});
-const PaymentRequest = mongoose.model("PaymentRequest", paymentRequestSchema);
+// ── Express app ──────────────────────────────────────────────────────────────
 const app = express();
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true, limit: "10mb" }));
@@ -408,55 +391,49 @@ async function startBot() {
         return;
       }
 
-      // ── Buy batch — show UPI QR ─────────────────────────────────────────
+      // buy_ param — premium batch purchase request
       if (param.startsWith("buy_")) {
         const batchId = param.replace("buy_", "");
-        try {
-          const Batch = require("./models/Course");
-          const batch = await Batch.findById(batchId);
-          if (!batch || !batch.isPremium) {
-            return bot.sendMessage(chatId, "❌ Batch not found or not a premium batch.");
-          }
-          if (batch.premiumUsers && batch.premiumUsers.includes(String(userId))) {
-            return bot.sendMessage(chatId,
-              `✅ You already have access to *${batch.name}*!\n\nOpen the app to start learning.`,
-              { parse_mode: "Markdown", reply_markup: { inline_keyboard: [[{ text: "📚 Open App", web_app: { url: WEB_URL } }]] } }
+        const firstName = msg.from?.first_name || "User";
+        const lastName = msg.from?.last_name ? " " + msg.from.last_name : "";
+        const username = msg.from?.username ? "@" + msg.from.username : "no username";
+        const uid = String(userId || chatId);
+
+        // Helper: escape HTML special chars to prevent parse error
+        const esc = (s) => String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+
+        // Notify user
+        bot.sendMessage(chatId,
+          `✅ <b>Purchase Request Received!</b>\n\nWe've notified the admin about your interest in this batch.\n\nWe'll contact you soon! 🚀`,
+          { parse_mode: "HTML" }
+        );
+
+        // Notify payment group if configured
+        const PAYMENT_GROUP_ID = process.env.PAYMENT_GROUP_ID ? parseInt(process.env.PAYMENT_GROUP_ID) : null;
+        if (PAYMENT_GROUP_ID) {
+          try {
+            const Batch = require("./models/Course");
+            const batch = await Batch.findById(batchId).catch(() => null);
+            const batchName = batch ? batch.name : batchId;
+            const price = batch?.price ? `₹${batch.price}` : "N/A";
+            await bot.sendMessage(PAYMENT_GROUP_ID,
+              `🛒 <b>New Purchase Request!</b>\n\n` +
+              `👤 Name: <b>${esc(firstName + lastName)}</b>\n` +
+              `🆔 UID: <code>${esc(uid)}</code>\n` +
+              `📱 Username: ${esc(username)}\n\n` +
+              `📚 Batch: <b>${esc(batchName)}</b>\n` +
+              `💰 Price: <b>${esc(price)}</b>`,
+              { parse_mode: "HTML" }
             );
+          } catch (err) {
+            console.error("Payment group notify error:", err.message);
           }
-          const price = batch.price || 0;
-          const upiLink = `upi://pay?pa=${UPI_ID}&pn=EduBot&am=${price}&cu=INR&tn=${encodeURIComponent(batch.name)}`;
-          const qrBuffer = await QRCode.toBuffer(upiLink, { width: 400, margin: 2 });
-
-          await bot.sendPhoto(chatId, qrBuffer, {
-            caption:
-              `🎓 *${batch.name}*\n\n` +
-              `💰 Amount: *₹${price}*\n\n` +
-              `📲 *How to pay:*\n` +
-              `1. Scan the QR code with any UPI app\n` +
-              `2. Pay ₹${price} — amount is pre-filled\n` +
-              `3. After payment, send your *UTR/Transaction ID* here\n\n` +
-              `UPI ID: \`${UPI_ID}\``,
-            parse_mode: "Markdown",
-          });
-
-          await PaymentRequest.create({
-            userId: String(userId),
-            userName: msg.from?.username || "",
-            firstName: msg.from?.first_name || "",
-            batchId: batchId,
-            batchName: batch.name,
-            amount: price,
-            status: "pending",
-          });
-
-        } catch (err) {
-          console.error("Buy flow error:", err.message);
-          bot.sendMessage(chatId, "❌ Something went wrong. Please try again.");
         }
         return;
       }
 
       if (param.startsWith("B")) {
+        // Bulk batch
         try {
           const batch = await BulkBatch.findOne({ batch_code: param });
           if (!batch) return bot.sendMessage(chatId, `File not found. Link may be invalid or expired.`);
@@ -708,89 +685,11 @@ async function startBot() {
 
   // ── Inline button callback for pagination ────────────────────────────────────
   bot.on("callback_query", async (query) => {
-    const userId = query.from?.id;
-    const data = query.data || "";
-
-    // ── Payment approve/reject (group — any admin can click) ──────────────────
-    if (data.startsWith("pay_approve_") || data.startsWith("pay_reject_")) {
-      const isApprove = data.startsWith("pay_approve_");
-      const reqId = data.replace("pay_approve_", "").replace("pay_reject_", "");
-
-      try {
-        const Batch = require("./models/Course");
-        const payReq = await PaymentRequest.findById(reqId);
-        if (!payReq) return bot.answerCallbackQuery(query.id, { text: "Request not found!" });
-        if (payReq.status === "approved" || payReq.status === "rejected") {
-          return bot.answerCallbackQuery(query.id, { text: `Already ${payReq.status}!` });
-        }
-
-        if (isApprove) {
-          // Add user to premiumUsers of the batch
-          await Batch.findByIdAndUpdate(payReq.batchId, {
-            $addToSet: { premiumUsers: payReq.userId }
-          });
-          payReq.status = "approved";
-          await payReq.save();
-
-          // Notify user
-          bot.sendMessage(parseInt(payReq.userId),
-            `🎉 *Payment Approved!*\n\n` +
-            `You now have full access to *${payReq.batchName}*!\n\n` +
-            `Tap below to open the app and start learning 📚`,
-            {
-              parse_mode: "Markdown",
-              reply_markup: { inline_keyboard: [[{ text: "📚 Open App", web_app: { url: WEB_URL } }]] }
-            }
-          ).catch(() => {});
-
-          // Update group message
-          if (query.message) {
-            bot.editMessageReplyMarkup({ inline_keyboard: [] }, {
-              chat_id: query.message.chat.id,
-              message_id: query.message.message_id
-            }).catch(() => {});
-            bot.editMessageText(
-              query.message.text + `\n\n✅ *APPROVED* by ${query.from.first_name}`,
-              { chat_id: query.message.chat.id, message_id: query.message.message_id, parse_mode: "Markdown" }
-            ).catch(() => {});
-          }
-          bot.answerCallbackQuery(query.id, { text: "✅ Approved! User notified." });
-
-        } else {
-          payReq.status = "rejected";
-          await payReq.save();
-
-          // Notify user
-          bot.sendMessage(parseInt(payReq.userId),
-            `❌ *Payment Rejected*\n\n` +
-            `Your payment for *${payReq.batchName}* could not be verified.\n\n` +
-            `Please contact support if you believe this is an error.`,
-            { parse_mode: "Markdown" }
-          ).catch(() => {});
-
-          if (query.message) {
-            bot.editMessageReplyMarkup({ inline_keyboard: [] }, {
-              chat_id: query.message.chat.id,
-              message_id: query.message.message_id
-            }).catch(() => {});
-            bot.editMessageText(
-              query.message.text + `\n\n❌ *REJECTED* by ${query.from.first_name}`,
-              { chat_id: query.message.chat.id, message_id: query.message.message_id, parse_mode: "Markdown" }
-            ).catch(() => {});
-          }
-          bot.answerCallbackQuery(query.id, { text: "❌ Rejected. User notified." });
-        }
-      } catch (err) {
-        console.error("Payment callback error:", err.message);
-        bot.answerCallbackQuery(query.id, { text: "Error occurred!" });
-      }
-      return;
-    }
-
-    // ── Existing: myfiles pagination (owner only) ─────────────────────────────
     if (query.message && isGroupChat(query.message)) return bot.answerCallbackQuery(query.id);
+    const userId = query.from?.id;
     if (!isOwner(userId)) return bot.answerCallbackQuery(query.id);
 
+    const data = query.data;
     if (data && data.startsWith("myfiles_page_")) {
       const page = parseInt(data.replace("myfiles_page_", ""), 10);
       await sendMyFilesPage(query.message.chat.id, userId, page, query.message.message_id);
@@ -954,55 +853,6 @@ async function startBot() {
   }
 
   // ── File upload handler (Owner only) ────────────────────────────────────────
-  // ── UTR / Transaction ID handler — user sends after payment ─────────────────
-  bot.onText(/^[A-Z0-9]{10,25}$/i, async (msg) => {
-    if (isGroupChat(msg)) return;
-    const chatId = msg.chat.id;
-    const userId = String(msg.from?.id);
-    const utrText = msg.text.trim().toUpperCase();
-
-    // Find pending payment request for this user
-    const pending = await PaymentRequest.findOne({ userId, status: "pending" }).sort({ createdAt: -1 });
-    if (!pending) return; // No pending payment — ignore
-
-    // Mark as waiting verification
-    pending.status = "waiting";
-    await pending.save();
-
-    await bot.sendMessage(chatId,
-      `✅ UTR received: *${utrText}*\n\nYour payment is being verified. You will be notified once approved! 🙏`,
-      { parse_mode: "Markdown" }
-    );
-
-    // Send to payment group
-    if (PAYMENT_GROUP_ID) {
-      try {
-        const userName = msg.from?.username ? `@${msg.from.username}` : msg.from?.first_name || "User";
-        const groupMsg = await bot.sendMessage(PAYMENT_GROUP_ID,
-          `💳 *New Payment Request*\n\n` +
-          `👤 User: ${userName} (ID: \`${userId}\`)\n` +
-          `🎓 Batch: *${pending.batchName}*\n` +
-          `💰 Amount: *₹${pending.amount}*\n` +
-          `🔖 UTR: \`${utrText}\`\n` +
-          `📅 Time: ${new Date().toLocaleString("en-IN")}`,
-          {
-            parse_mode: "Markdown",
-            reply_markup: {
-              inline_keyboard: [[
-                { text: "✅ Approve", callback_data: `pay_approve_${pending._id}` },
-                { text: "❌ Reject",  callback_data: `pay_reject_${pending._id}` },
-              ]]
-            }
-          }
-        );
-        pending.groupMsgId = groupMsg.message_id;
-        await pending.save();
-      } catch (err) {
-        console.error("Payment group notify error:", err.message);
-      }
-    }
-  });
-
   bot.on("message", (msg) => {
     if (isGroupChat(msg)) return; // Ignore all group messages
     if (msg.text && TG_LINK_RE.test(msg.text)) return; // Already handled above
