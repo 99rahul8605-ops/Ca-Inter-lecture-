@@ -79,6 +79,18 @@ body.ready{transition:none}
 .publish-btn.public{border-color:var(--green);color:var(--green)}
 .publish-btn:active{opacity:0.7}
 
+/* Premium batch styles */
+.batch-section-label{padding:14px 16px 6px;font-size:11px;font-weight:700;color:var(--text2);letter-spacing:1.2px;text-transform:uppercase;display:flex;align-items:center;gap:6px}
+.batch-section-label .label-badge{font-size:9px;padding:2px 7px;border-radius:20px;font-weight:700;letter-spacing:0.5px}
+.label-badge-free{background:rgba(34,197,94,0.15);color:var(--green);border:1px solid rgba(34,197,94,0.3)}
+.label-badge-premium{background:rgba(245,158,11,0.15);color:#f59e0b;border:1px solid rgba(245,158,11,0.3)}
+.batch-card-premium{border-color:rgba(245,158,11,0.35) !important}
+.batch-card-premium .batch-meta{color:#f59e0b}
+.premium-lock-overlay{position:absolute;inset:0;background:rgba(10,14,26,0.55);backdrop-filter:blur(2px);display:flex;align-items:center;justify-content:center;z-index:5;border-radius:0}
+.premium-badge{position:absolute;top:6px;right:6px;background:linear-gradient(135deg,#f59e0b,#d97706);color:#fff;font-size:9px;font-weight:800;padding:3px 7px;border-radius:20px;letter-spacing:0.5px;z-index:6;display:flex;align-items:center;gap:3px}
+.premium-locked-msg{position:absolute;bottom:0;left:0;right:0;background:linear-gradient(transparent,rgba(0,0,0,0.85));padding:8px 10px 6px;z-index:6}
+.premium-locked-text{font-size:10px;font-weight:600;color:#f59e0b;text-align:center}
+
 /* List rows */
 .list{padding:0 16px 16px;display:flex;flex-direction:column;gap:8px}
 .row{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);display:flex;align-items:center;padding:13px 14px;gap:12px;cursor:pointer;transition:background 0.15s}
@@ -368,8 +380,24 @@ body.ready{transition:none}
       <div style="font-size:13px">Watch an ad to get 8h free access (up to 3 times/day).</div>
     </div>
     <div id="batchSection">
-      <div class="sec-label">All Batches</div>
-      <div class="batch-grid" id="batchGrid"><div class="loading" style="grid-column:1/-1"><i class="ti ti-loader-2"></i>Loading...</div></div>
+      <!-- Free Batches -->
+      <div id="freeBatchSection">
+        <div class="batch-section-label">
+          <i class="ti ti-school" style="color:var(--green)"></i>
+          Free Batches
+          <span class="label-badge label-badge-free">FREE</span>
+        </div>
+        <div class="batch-grid" id="freeBatchGrid"><div class="loading" style="grid-column:1/-1"><i class="ti ti-loader-2"></i>Loading...</div></div>
+      </div>
+      <!-- Premium Batches -->
+      <div id="premiumBatchSection" style="display:none">
+        <div class="batch-section-label" style="margin-top:4px">
+          <i class="ti ti-crown" style="color:#f59e0b"></i>
+          Premium Batches
+          <span class="label-badge label-badge-premium">PREMIUM</span>
+        </div>
+        <div class="batch-grid" id="premiumBatchGrid"></div>
+      </div>
     </div>
   </div>
 </div>
@@ -523,6 +551,14 @@ body.ready{transition:none}
       </div>
       <div class="form-group"><label class="form-label">Batch Name</label><input class="form-input" id="bName" placeholder="e.g. JEE 2025 Batch"></div>
       <div class="form-group"><label class="form-label">Description (optional)</label><input class="form-input" id="bDesc" placeholder="e.g. Complete preparation batch"></div>
+      <div class="form-group" style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:linear-gradient(135deg,rgba(245,158,11,0.08),rgba(217,119,6,0.05));border:1px solid rgba(245,158,11,0.25);border-radius:var(--radius-sm)">
+        <input type="checkbox" id="bIsPremium" style="width:18px;height:18px;cursor:pointer;accent-color:#f59e0b" onchange="document.getElementById('bPremiumNote').style.display=this.checked?'block':'none'">
+        <label for="bIsPremium" style="font-size:13px;font-weight:600;cursor:pointer;color:var(--text);display:flex;align-items:center;gap:6px">
+          <i class="ti ti-crown" style="color:#f59e0b;font-size:15px"></i> Mark as Premium Batch
+          <span style="font-size:10px;color:#f59e0b;font-weight:700;background:rgba(245,158,11,0.15);border:1px solid rgba(245,158,11,0.3);border-radius:20px;padding:1px 7px">PREMIUM</span>
+        </label>
+      </div>
+      <div id="bPremiumNote" style="display:none;font-size:11px;color:#f59e0b;padding:4px 2px;margin-top:-6px">⚠️ Premium batch — sirf allowed UIDs wale hi content access kar sakte hain.</div>
       <button class="btn-add" id="btnBatch" onclick="addBatch()"><i class="ti ti-plus"></i> Add Batch</button>
     </div>
 
@@ -1062,31 +1098,75 @@ async function load() {
     localStorage.setItem('edubot_batches', JSON.stringify(fresh));
   } catch(e) {
     if (!batches.length) {
-      document.getElementById('batchGrid').innerHTML = '<div class="empty" style="grid-column:1/-1"><i class="ti ti-wifi-off"></i>Load failed</div>';
+      var fg = document.getElementById('freeBatchGrid');
+      if (fg) fg.innerHTML = '<div class="empty" style="grid-column:1/-1"><i class="ti ti-wifi-off"></i>Load failed</div>';
     }
   }
 }
 
+function _batchCard(b, isPremiumLocked) {
+  // isPremiumLocked = user does not have access to this premium batch
+  var adminDraftBadge = (isAdmin && b.isPublic !== true)
+    ? '<div style="position:absolute;top:6px;left:6px;background:rgba(0,0,0,0.7);border-radius:6px;padding:3px 7px;font-size:10px;font-weight:700;color:#aaa;display:flex;align-items:center;gap:4px"><i class="ti ti-lock" style="font-size:10px"></i>Private</div>'
+    : '';
+  var premiumBadge = b.isPremium
+    ? '<div class="premium-badge"><i class="ti ti-crown" style="font-size:9px"></i>PREMIUM</div>'
+    : '';
+  var lockOverlay = isPremiumLocked
+    ? '<div class="premium-lock-overlay"><i class="ti ti-lock" style="font-size:26px;color:#f59e0b"></i></div>' +
+      '<div class="premium-locked-msg"><div class="premium-locked-text">🔒 Premium — Access Required</div></div>'
+    : '';
+  var cardStyle = (isAdmin && b.isPublic !== true) ? 'opacity:0.6;border-style:dashed;' : '';
+  if (b.isPremium) cardStyle += 'border-color:rgba(245,158,11,0.35);';
+  return `<div class="batch-card${b.isPremium ? ' batch-card-premium' : ''}" onclick="openBatch('${b._id}')" style="${cardStyle}">
+    <div class="batch-img" style="position:relative;overflow:hidden">
+      ${b.pic ? `<img src="${b.pic}">` : '🎓'}
+      ${adminDraftBadge}${premiumBadge}${lockOverlay}
+    </div>
+    <div class="batch-body">
+      <div class="batch-name">${b.name}</div>
+      ${b.description ? `<div class="batch-desc">${b.description}</div>` : ''}
+      <div class="batch-meta">${b.subjects.length} subjects${isPremiumLocked ? ' · <span style="color:#f59e0b">🔒 Locked</span>' : ''}</div>
+    </div>
+  </div>`;
+}
+
 function renderBatches(list) {
-  var el = document.getElementById('batchGrid');
-  // Non-admin users: show only public batches
+  // Determine which batches are visible
   var visible = isAdmin ? list : list.filter(b => b.isPublic === true);
-  if (!visible || !visible.length) {
-    el.innerHTML = '<div class="empty" style="grid-column:1/-1"><i class="ti ti-school"></i>No batches yet</div>';
-    return;
+
+  // Split into free and premium
+  var free = visible.filter(b => !b.isPremium);
+  var premium = visible.filter(b => b.isPremium === true);
+
+  // Free section
+  var freeEl = document.getElementById('freeBatchGrid');
+  var freeSec = document.getElementById('freeBatchSection');
+  if (freeEl) {
+    if (!free.length) {
+      freeEl.innerHTML = '<div class="empty" style="grid-column:1/-1"><i class="ti ti-school"></i>No free batches yet</div>';
+    } else {
+      freeEl.innerHTML = free.map(b => _batchCard(b, false)).join('');
+    }
   }
-  el.innerHTML = visible.map(b => `
-    <div class="batch-card" onclick="openBatch('${b._id}')" style="${b.isPublic !== true ? 'opacity:0.6;border-style:dashed' : ''}">
-      <div class="batch-img" style="position:relative">
-        ${b.pic ? `<img src="${b.pic}">` : '🎓'}
-        ${b.isPublic !== true ? '<div style="position:absolute;top:6px;left:6px;background:rgba(0,0,0,0.7);border-radius:6px;padding:3px 7px;font-size:10px;font-weight:700;color:#aaa;display:flex;align-items:center;gap:4px"><i class="ti ti-lock" style="font-size:10px"></i>Private</div>' : ''}
-      </div>
-      <div class="batch-body">
-        <div class="batch-name">${b.name}</div>
-        ${b.description ? `<div class="batch-desc">${b.description}</div>` : ''}
-        <div class="batch-meta">${b.subjects.length} subjects</div>
-      </div>
-    </div>`).join('');
+
+  // Premium section
+  var premEl = document.getElementById('premiumBatchGrid');
+  var premSec = document.getElementById('premiumBatchSection');
+  if (premSec) premSec.style.display = premium.length ? '' : 'none';
+  if (premEl && premium.length) {
+    var curUid = getUserId();
+    premEl.innerHTML = premium.map(b => {
+      // Admin always unlocked; otherwise check premiumUsers list
+      var locked = !isAdmin && !(b.premiumUsers && b.premiumUsers.includes(String(curUid)));
+      return _batchCard(b, locked);
+    }).join('');
+  }
+}
+
+function handleSearch(q) {
+  q = q.toLowerCase().trim();
+  renderBatches(!q ? batches : batches.filter(b => b.name.toLowerCase().includes(q)));
 }
 
 function handleSearch(q) {
@@ -1272,13 +1352,16 @@ function setLoading(id, on, label) {
 async function addBatch() {
   var name = document.getElementById('bName').value.trim();
   var desc = document.getElementById('bDesc').value.trim();
+  var isPremium = document.getElementById('bIsPremium').checked;
   if (!name) return toast('Please enter a batch name!','error');
   setLoading('btnBatch',true);
   try {
-    var newBatch = await apiFetch('/api/batches','POST',{name, description:desc, pic:picBase64});
+    var newBatch = await apiFetch('/api/batches','POST',{name, description:desc, pic:picBase64, isPremium});
     batches.push(newBatch);
     renderBatches(batches); populateAllSelects();
     document.getElementById('bName').value=''; document.getElementById('bDesc').value='';
+    document.getElementById('bIsPremium').checked = false;
+    document.getElementById('bPremiumNote').style.display = 'none';
     document.getElementById('imgPreview').innerHTML='<div class="img-preview-label"><i class="ti ti-camera" style="font-size:24px;display:block;margin-bottom:6px;color:var(--text3)"></i>Tap to select image</div>';
     picBase64='';
     toast('Batch added!','success');
@@ -1452,13 +1535,16 @@ function _renderManageLevel() {
       var pub = b.isPublic === true;
       var pubLabel = pub ? '<i class="ti ti-eye-off" style="font-size:11px"></i> Unpublish' : '<i class="ti ti-send" style="font-size:11px"></i> Publish';
       var pubClass = pub ? 'publish-btn public' : 'publish-btn';
+      var premTag = b.isPremium ? '<span style="font-size:9px;background:rgba(245,158,11,0.2);color:#f59e0b;border:1px solid rgba(245,158,11,0.4);border-radius:20px;padding:1px 6px;font-weight:700;margin-left:4px">👑 PREMIUM</span>' : '';
+      var manageUsersBtn = b.isPremium ? `<button class="edit-btn" title="Manage Premium Users" onclick="openPremiumUsers('${b._id}')" style="border-color:rgba(245,158,11,0.4);color:#f59e0b"><i class="ti ti-users"></i></button>` : '';
       html += `<div class="manage-item">
         <span class="manage-item-icon">🎓</span>
         <div class="manage-item-info" style="cursor:pointer" onclick="_mDrill('subjects','${b._id}')">
-          <div class="manage-item-name">${b.name}</div>
+          <div class="manage-item-name">${b.name}${premTag}</div>
           <div class="manage-item-sub">${b.subjects.length} subjects · ${pub ? '🟢 Public' : '🔒 Private'}</div>
         </div>
         <button class="${pubClass}" onclick="togglePublish('${b._id}')">${pubLabel}</button>
+        ${manageUsersBtn}
         <button class="edit-btn" onclick="openEdit('batch','${b._id}')"><i class="ti ti-pencil"></i></button>
         <button class="del-btn" onclick="delBatch('${b._id}')"><i class="ti ti-trash"></i></button>
       </div>`;
@@ -1605,7 +1691,11 @@ function openEdit(type, bid, sid, cid, uid, lid) {
     var b = batches.find(x => x._id === bid);
     title = 'Edit Batch';
     body = `<div class="form-group"><label class="form-label">Batch Name</label><input class="form-input" id="ei_name" value="${b.name}"></div>
-            <div class="form-group"><label class="form-label">Description</label><input class="form-input" id="ei_desc" value="${b.description||''}"></div>`;
+            <div class="form-group"><label class="form-label">Description</label><input class="form-input" id="ei_desc" value="${b.description||''}"></div>
+            <div class="form-group" style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:linear-gradient(135deg,rgba(245,158,11,0.08),rgba(217,119,6,0.05));border:1px solid rgba(245,158,11,0.25);border-radius:var(--radius-sm)">
+              <input type="checkbox" id="ei_isPremium" ${b.isPremium?'checked':''} style="width:18px;height:18px;cursor:pointer;accent-color:#f59e0b">
+              <label for="ei_isPremium" style="font-size:13px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:6px"><i class="ti ti-crown" style="color:#f59e0b"></i> Premium Batch</label>
+            </div>`;
   } else if (type === 'subject') {
     var b = batches.find(x => x._id === bid);
     var s = b && b.subjects.find(x => x._id === sid);
@@ -1676,7 +1766,8 @@ async function saveEdit() {
     if (type === 'batch') {
       updated = await apiFetch(`/api/batches/${bid}/edit`, 'PATCH', {
         name: document.getElementById('ei_name').value.trim(),
-        description: document.getElementById('ei_desc').value.trim()
+        description: document.getElementById('ei_desc').value.trim(),
+        isPremium: document.getElementById('ei_isPremium').checked
       });
       var idx = batches.findIndex(x => x._id === bid);
       if (idx >= 0) batches[idx] = updated;
@@ -1727,6 +1818,83 @@ async function saveEdit() {
 }
 
 async function delBatch(bid){if(!confirm('Batch delete?'))return;try{await apiFetch(`/api/batches/${bid}`,'DELETE');batches=batches.filter(x=>x._id!==bid);renderBatches(batches);populateAllSelects();_renderManageLevel();toast('Deleted!','success');}catch(e){toast('Error','error');}}
+
+// ── Premium Users Management ──────────────────────────────────────────────────
+var _puBatchId = null;
+
+async function openPremiumUsers(bid) {
+  _puBatchId = bid;
+  var b = batches.find(x => x._id === bid);
+  var el = document.getElementById('puModalTitle');
+  if (el) el.textContent = (b ? b.name : 'Batch') + ' — Premium Users';
+  document.getElementById('puUidInput').value = '';
+  document.getElementById('premiumUsersModal').classList.add('show');
+  await _loadPremiumUsers();
+}
+
+function closePremiumUsers() {
+  document.getElementById('premiumUsersModal').classList.remove('show');
+  _puBatchId = null;
+}
+function closePremiumUsersOutside(e) { if (e.target.id === 'premiumUsersModal') closePremiumUsers(); }
+
+async function _loadPremiumUsers() {
+  var listEl = document.getElementById('puUserList');
+  if (!listEl || !_puBatchId) return;
+  listEl.innerHTML = '<div style="text-align:center;padding:16px;color:var(--text3);font-size:13px"><i class="ti ti-loader-2" style="animation:spin 0.8s linear infinite;display:inline-block"></i> Loading...</div>';
+  try {
+    var r = await apiFetch('/api/batches/' + _puBatchId + '/premium-users');
+    var users = r.premiumUsers || [];
+    // Also update local batch cache
+    var b = batches.find(x => x._id === _puBatchId);
+    if (b) b.premiumUsers = users;
+    if (!users.length) {
+      listEl.innerHTML = '<div style="text-align:center;padding:16px;color:var(--text3);font-size:13px">Koi user nahi. Upar UID dalo.</div>';
+      return;
+    }
+    listEl.innerHTML = users.map(uid => `
+      <div class="manage-item" style="gap:10px">
+        <div style="width:32px;height:32px;border-radius:50%;background:linear-gradient(135deg,#f59e0b,#d97706);display:flex;align-items:center;justify-content:center;font-size:13px;flex-shrink:0">👤</div>
+        <div class="manage-item-info">
+          <div class="manage-item-name" style="font-family:monospace;font-size:13px">${uid}</div>
+          <div class="manage-item-sub">Telegram UID</div>
+        </div>
+        <button class="del-btn" onclick="removePremiumUser('${uid}')" title="Remove"><i class="ti ti-trash"></i></button>
+      </div>`).join('');
+  } catch(e) {
+    listEl.innerHTML = '<div style="text-align:center;padding:16px;color:var(--red);font-size:13px">Load failed: ' + e.message + '</div>';
+  }
+}
+
+async function addPremiumUser() {
+  var uid = document.getElementById('puUidInput').value.trim();
+  if (!uid) return toast('UID dalo!', 'error');
+  if (!_puBatchId) return;
+  var btn = document.getElementById('puAddBtn');
+  btn.disabled = true;
+  try {
+    var r = await apiFetch('/api/batches/' + _puBatchId + '/premium-users', 'POST', { userId: uid });
+    var b = batches.find(x => x._id === _puBatchId);
+    if (b) b.premiumUsers = r.premiumUsers;
+    document.getElementById('puUidInput').value = '';
+    await _loadPremiumUsers();
+    renderBatches(batches);
+    toast('✅ User add kiya!', 'success');
+  } catch(e) { toast('Error: ' + e.message, 'error'); }
+  btn.disabled = false;
+}
+
+async function removePremiumUser(uid) {
+  if (!_puBatchId) return;
+  try {
+    var r = await apiFetch('/api/batches/' + _puBatchId + '/premium-users/' + uid, 'DELETE');
+    var b = batches.find(x => x._id === _puBatchId);
+    if (b) b.premiumUsers = r.premiumUsers;
+    await _loadPremiumUsers();
+    renderBatches(batches);
+    toast('User remove kiya!', 'success');
+  } catch(e) { toast('Error: ' + e.message, 'error'); }
+}
 async function delSubject(bid,sid){if(!confirm('Subject delete?'))return;try{await apiFetch(`/api/batches/${bid}/subjects/${sid}`,'DELETE');var b=batches.find(x=>x._id===bid);if(b)b.subjects=b.subjects.filter(x=>x._id!==sid);populateAllSelects();_renderManageLevel();toast('Deleted!','success');}catch(e){toast('Error','error');}}
 async function delChapter(bid,sid,cid){if(!confirm('Chapter delete?'))return;try{await apiFetch(`/api/batches/${bid}/subjects/${sid}/chapters/${cid}`,'DELETE');var b=batches.find(x=>x._id===bid);var s=b&&b.subjects.find(x=>x._id===sid);if(s)s.chapters=s.chapters.filter(x=>x._id!==cid);populateAllSelects();_renderManageLevel();toast('Deleted!','success');}catch(e){toast('Error','error');}}
 async function delUnit(bid,sid,cid,uid){if(!confirm('Unit delete?'))return;try{await apiFetch(`/api/batches/${bid}/subjects/${sid}/chapters/${cid}/units/${uid}`,'DELETE');var b=batches.find(x=>x._id===bid);var s=b&&b.subjects.find(x=>x._id===sid);var c=s&&s.chapters.find(x=>x._id===cid);if(c)c.units=c.units.filter(x=>x._id!==uid);populateAllSelects();_renderManageLevel();toast('Deleted!','success');}catch(e){toast('Error','error');}}
@@ -2146,6 +2314,16 @@ async function claimAccess() {
 // Batch open pe access check
 var _origOpenBatch = openBatch;
 openBatch = function(bid) {
+  var b = batches.find(x => x._id === bid);
+  // Premium batch — check if user is in premiumUsers
+  if (b && b.isPremium && !isAdmin) {
+    var curUid = String(getUserId());
+    var hasP = b.premiumUsers && b.premiumUsers.includes(curUid);
+    if (!hasP) {
+      toast('🔒 Yeh premium batch hai! Admin se access maango.', 'error');
+      return;
+    }
+  }
   if (!hasAccess()) {
     toast('Watch an ad to unlock access!', 'error');
     switchNavTab('access');
@@ -2568,7 +2746,22 @@ body.light-mode .lec-mini-notes{background:var(--surface2);color:var(--text)}
 </style>
 
 
-<!-- Edit Modal -->
+<!-- Premium Users Modal -->
+<div class="modal-overlay" id="premiumUsersModal" onclick="closePremiumUsersOutside(event)">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <button class="modal-close" onclick="closePremiumUsers()"><i class="ti ti-x"></i></button>
+    <div class="modal-title"><i class="ti ti-crown" style="color:#f59e0b"></i><span id="puModalTitle">Premium Users</span></div>
+    <div style="font-size:12px;color:var(--text2);margin-bottom:12px;line-height:1.5">Neeche UID dalo jis user ko is batch ka access dena hai. Bas wahi user unlock kar payega.</div>
+    <div style="display:flex;gap:8px;margin-bottom:12px">
+      <input class="form-input" id="puUidInput" placeholder="Telegram User ID (e.g. 123456789)" style="flex:1">
+      <button class="btn-add" onclick="addPremiumUser()" id="puAddBtn" style="width:auto;padding:0 16px;margin-top:0"><i class="ti ti-plus"></i></button>
+    </div>
+    <div id="puUserList" style="display:flex;flex-direction:column;gap:6px;max-height:220px;overflow-y:auto">
+      <div style="text-align:center;padding:16px;color:var(--text3);font-size:13px">Loading...</div>
+    </div>
+  </div>
+</div>
 <div class="modal-overlay" id="editModal" onclick="closeEditOutside(event)">
   <div class="modal">
     <div class="modal-handle"></div>
