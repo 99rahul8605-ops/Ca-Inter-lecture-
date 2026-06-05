@@ -36,6 +36,8 @@ const batchSchema = new mongoose.Schema({
   description: { type: String, default: "" },
   order: { type: Number, default: 0 },
   isPublic: { type: Boolean, default: false }, // private by default; owner publishes when ready
+  isPremium: { type: Boolean, default: false }, // premium batch — locked for non-allowed users
+  premiumUsers: { type: [String], default: [] }, // Telegram user IDs allowed to access this batch
   subjects: [subjectSchema],
 });
 
