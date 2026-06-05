@@ -324,7 +324,7 @@ body.ready{transition:none}
   <div class="vs-bar"><div class="vs-fill" id="vsFill"></div></div>
   <div style="margin-top:32px;text-align:center">
     <div style="font-size:11px;color:var(--text3);margin-bottom:10px">Having trouble? Contact us</div>
-    <button onclick="if(tg){tg.openLink('https://t.me/team_secret_cont_bot',{try_instant_view:false});}else{window.open('https://t.me/team_secret_cont_bot','_blank');}" style="display:inline-flex;align-items:center;gap:7px;background:var(--surface2);border:1px solid var(--border);color:var(--text2);padding:9px 18px;border-radius:20px;font-size:13px;font-weight:600;cursor:pointer;">
+    <button onclick="var _bu=window._botUsername||'';if(tg){tg.openLink('https://t.me/'+_bu,{try_instant_view:false});}else{window.open('https://t.me/'+_bu,'_blank');}" style="display:inline-flex;align-items:center;gap:7px;background:var(--surface2);border:1px solid var(--border);color:var(--text2);padding:9px 18px;border-radius:20px;font-size:13px;font-weight:600;cursor:pointer;">
       📩 Contact Support
     </button>
   </div>
@@ -1947,17 +1947,11 @@ function closeDemoOutside(e) { if (e.target.id === 'demoModal') closeDemoModal()
 
 // ── Buy Batch ─────────────────────────────────────────────────────────────────
 function buyBatch(bid) {
-  var b = batches.find(x => x._id === bid);
-  var batchName = b ? b.name : 'this batch';
-  // Open bot with buy_ deep link — bot will show UPI QR
-  var botUrl = 'https://t.me/' + (window._botUsername || '') + '?start=buy_' + bid;
-  if (tg && tg.openTelegramLink) {
-    tg.openTelegramLink(botUrl);
-  } else if (tg && tg.openLink) {
-    tg.openLink(botUrl);
-  } else {
-    window.open(botUrl, '_blank');
-  }
+  var username = window._botUsername || '';
+  var botUrl = 'https://t.me/' + username + '?start=buy_' + bid;
+  if (tg && tg.openTelegramLink) tg.openTelegramLink(botUrl);
+  else if (tg && tg.openLink) tg.openLink(botUrl);
+  else window.open(botUrl, '_blank');
 }
 
 // ── Premium Users Management ──────────────────────────────────────────────────
@@ -2974,8 +2968,9 @@ function handleContact(){
     _contactTimer=setTimeout(collapseContact, 4000);
   } else {
     clearTimeout(_contactTimer);
-    if(tg){tg.openLink('https://t.me/team_secret_cont_bot',{try_instant_view:false});}
-    else{window.open('https://t.me/team_secret_cont_bot','_blank');}
+    var _bu=window._botUsername||'';
+    if(tg){tg.openLink('https://t.me/'+_bu,{try_instant_view:false});}
+    else{window.open('https://t.me/'+_bu,'_blank');}
     collapseContact();
   }
 }
