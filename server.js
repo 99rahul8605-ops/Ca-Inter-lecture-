@@ -146,7 +146,6 @@ app.post("/api/pay-request", express.json({ limit: "10mb" }), async (req, res) =
     const { batchId, userId, firstName, lastName, username, txnId, screenshotBase64 } = req.body;
     if (!batchId || !txnId) return res.status(400).json({ error: "Missing fields" });
 
-    const esc = (s) => String(s||'').replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
     const Batch = require("./models/Course");
     const batch = await Batch.findById(batchId).catch(() => null);
     const batchName = batch ? batch.name : batchId;
@@ -163,18 +162,28 @@ app.post("/api/pay-request", express.json({ limit: "10mb" }), async (req, res) =
 
     if (!PAYMENT_GROUP_ID) return res.status(500).json({ error: "PAYMENT_GROUP_ID not configured" });
 
+    const inlineKeyboard = {
+      inline_keyboard: [[
+        { text: "✅ Approve", callback_data: `pay_approve_${batchId}_${userId}` },
+        { text: "❌ Reject",  callback_data: `pay_reject_${batchId}_${userId}`  },
+      ]]
+    };
+
     // Send screenshot + caption OR just text if no screenshot
     if (screenshotBase64) {
-      // base64 → buffer
       const base64Data = screenshotBase64.replace(/^data:image\/\w+;base64,/, "");
       const buffer = Buffer.from(base64Data, "base64");
       await bot.sendPhoto(PAYMENT_GROUP_ID, buffer, {
         caption,
         parse_mode: "HTML",
         filename: `payment_${userId}_${Date.now()}.jpg`,
+        reply_markup: inlineKeyboard,
       });
     } else {
-      await bot.sendMessage(PAYMENT_GROUP_ID, caption, { parse_mode: "HTML" });
+      await bot.sendMessage(PAYMENT_GROUP_ID, caption, {
+        parse_mode: "HTML",
+        reply_markup: inlineKeyboard,
+      });
     }
 
     res.json({ success: true });
@@ -190,6 +199,9 @@ app.get("*", (req, res) => {
 });
 
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+
+// ── Helper: escape HTML ──────────────────────────────────────────────────────
+const esc = (s) => String(s||'').replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
 
 // ─── File Store Helpers ───────────────────────────────────────────────────────
 
@@ -700,11 +712,71 @@ async function startBot() {
 
   // ── Inline button callback for pagination ────────────────────────────────────
   bot.on("callback_query", async (query) => {
-    if (query.message && isGroupChat(query.message)) return bot.answerCallbackQuery(query.id);
     const userId = query.from?.id;
+    const data = query.data || '';
+    const chatId = query.message?.chat?.id;
+    const msgId = query.message?.message_id;
+
+    // ── Payment Approve/Reject (only owner, works in group too) ──────────────
+    if (data.startsWith("pay_approve_") || data.startsWith("pay_reject_")) {
+      if (!isOwner(userId)) return bot.answerCallbackQuery(query.id, { text: "❌ Not authorized" });
+
+      const isApprove = data.startsWith("pay_approve_");
+      const parts = data.replace("pay_approve_", "").replace("pay_reject_", "").split("_");
+      const batchId = parts[0];
+      const targetUserId = parts[1];
+
+      if (isApprove) {
+        try {
+          const Batch = require("./models/Course");
+          const batch = await Batch.findById(batchId);
+          if (batch) {
+            if (!batch.premiumUsers) batch.premiumUsers = [];
+            if (!batch.premiumUsers.includes(String(targetUserId))) {
+              batch.premiumUsers.push(String(targetUserId));
+              await batch.save();
+            }
+          }
+          // Notify user
+          bot.sendMessage(parseInt(targetUserId),
+            `✅ <b>Payment Approved!</b>\n\nYour access to <b>${esc(batch?.name || 'the batch')}</b> has been unlocked. Open the app to start learning! 🚀`,
+            { parse_mode: "HTML", reply_markup: { inline_keyboard: [[{ text: "📚 Open App", web_app: { url: WEB_URL } }]] } }
+          ).catch(() => {});
+          // Update group message
+          await bot.editMessageCaption(
+            `${query.message.caption || ''}\n\n✅ <b>APPROVED</b> by ${esc(query.from.first_name || 'Admin')}`,
+            { chat_id: chatId, message_id: msgId, parse_mode: "HTML", reply_markup: { inline_keyboard: [] } }
+          ).catch(() => bot.editMessageText(
+            `${query.message.text || ''}\n\n✅ <b>APPROVED</b> by ${esc(query.from.first_name || 'Admin')}`,
+            { chat_id: chatId, message_id: msgId, parse_mode: "HTML", reply_markup: { inline_keyboard: [] } }
+          ).catch(() => {}));
+          await bot.answerCallbackQuery(query.id, { text: "✅ Approved & unlocked!" });
+        } catch (err) {
+          console.error("Approve error:", err.message);
+          await bot.answerCallbackQuery(query.id, { text: "❌ Error: " + err.message });
+        }
+      } else {
+        // Reject — notify user and update message
+        bot.sendMessage(parseInt(targetUserId),
+          `❌ <b>Payment Rejected</b>\n\nYour payment could not be verified. Please contact support or try again.`,
+          { parse_mode: "HTML" }
+        ).catch(() => {});
+        await bot.editMessageCaption(
+          `${query.message.caption || ''}\n\n❌ <b>REJECTED</b> by ${esc(query.from.first_name || 'Admin')}`,
+          { chat_id: chatId, message_id: msgId, parse_mode: "HTML", reply_markup: { inline_keyboard: [] } }
+        ).catch(() => bot.editMessageText(
+          `${query.message.text || ''}\n\n❌ <b>REJECTED</b> by ${esc(query.from.first_name || 'Admin')}`,
+          { chat_id: chatId, message_id: msgId, parse_mode: "HTML", reply_markup: { inline_keyboard: [] } }
+        ).catch(() => {}));
+        await bot.answerCallbackQuery(query.id, { text: "❌ Rejected" });
+      }
+      return;
+    }
+
+    // ── Other callbacks (owner only, DM only) ────────────────────────────────
+    if (query.message && isGroupChat(query.message)) return bot.answerCallbackQuery(query.id);
     if (!isOwner(userId)) return bot.answerCallbackQuery(query.id);
 
-    const data = query.data;
     if (data && data.startsWith("myfiles_page_")) {
       const page = parseInt(data.replace("myfiles_page_", ""), 10);
       await sendMyFilesPage(query.message.chat.id, userId, page, query.message.message_id);
