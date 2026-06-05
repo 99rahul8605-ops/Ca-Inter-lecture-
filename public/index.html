@@ -1193,7 +1193,7 @@ function _batchCard(b, isPremiumLocked) {
     <div class="batch-body">
       <div class="batch-name">${b.name}</div>
       ${b.description ? `<div class="batch-desc">${b.description}</div>` : ''}
-      <div class="batch-meta">${b.subjects.length} subjects${isPremiumLocked ? ' · <span style="color:#f59e0b">🔒 Locked</span>' : ''}</div>
+      <div class="batch-meta">${b.subjects.length} subjects${isPremiumLocked ? ' · <span style="color:#f59e0b">🔒 Locked</span>' : ''}${b.price ? ' · <span style="color:#22c55e;font-weight:700">₹' + b.price + '</span>' : ''}</div>
       ${actionBtns}
     </div>
   </div>`;
