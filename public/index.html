@@ -95,6 +95,17 @@ body.ready{transition:none}
 .batch-card-premium .batch-meta{color:#f59e0b}
 .batch-buy-btn{display:inline-flex;align-items:center;gap:5px;margin-top:8px;padding:6px 14px;border-radius:20px;border:none;background:linear-gradient(135deg,#f59e0b,#d97706);color:#fff;font-size:11px;font-weight:700;cursor:pointer;transition:opacity 0.15s;-webkit-tap-highlight-color:transparent}
 .batch-buy-btn:active{opacity:0.8}
+.batch-view-btn{display:inline-flex;align-items:center;gap:5px;margin-top:8px;padding:6px 14px;border-radius:20px;border:none;background:var(--surface2);border:1px solid var(--border);color:var(--text);font-size:11px;font-weight:700;cursor:pointer;transition:opacity 0.15s;-webkit-tap-highlight-color:transparent}
+.batch-view-btn:active{opacity:0.8}
+/* Demo Modal */
+.demo-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:400;align-items:flex-end;justify-content:center}
+.demo-overlay.show{display:flex}
+.demo-modal{background:var(--surface);border-radius:20px 20px 0 0;width:100%;max-width:480px;max-height:80vh;overflow-y:auto;padding-bottom:24px}
+.demo-modal-handle{width:40px;height:4px;background:var(--border);border-radius:2px;margin:16px auto 0;display:block}
+.demo-modal-header{padding:14px 16px 10px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border)}
+.demo-modal-title{font-size:15px;font-weight:700;display:flex;align-items:center;gap:7px}
+.demo-modal-close{background:var(--surface2);border:none;color:var(--text2);width:30px;height:30px;border-radius:50%;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:15px}
+.demo-badge{display:inline-flex;align-items:center;gap:3px;font-size:9px;font-weight:700;color:#fff;background:linear-gradient(135deg,var(--accent),var(--accent2));border-radius:20px;padding:2px 7px;letter-spacing:0.3px}
 .premium-lock-overlay{position:absolute;inset:0;background:rgba(10,14,26,0.55);backdrop-filter:blur(2px);display:flex;align-items:center;justify-content:center;z-index:5;border-radius:0}
 .premium-badge{position:absolute;top:6px;right:6px;background:linear-gradient(135deg,#f59e0b,#d97706);color:#fff;font-size:9px;font-weight:800;padding:3px 7px;border-radius:20px;letter-spacing:0.5px;z-index:6;display:flex;align-items:center;gap:3px}
 .premium-locked-msg{position:absolute;bottom:0;left:0;right:0;background:linear-gradient(transparent,rgba(0,0,0,0.85));padding:8px 10px 6px;z-index:6}
@@ -612,6 +623,13 @@ body.ready{transition:none}
       <div class="form-group"><label class="form-label">Lecture Name</label><input class="form-input" id="lName" placeholder="e.g. Introduction to Limits"></div>
       <div class="form-group"><label class="form-label">Bot Link</label><input class="form-input" id="lLink" placeholder="https://t.me/YourBot?start=CODE"></div>
       <div class="form-group"><label class="form-label">Class Notes Link <span style="color:var(--text3);font-weight:400">(optional)</span></label><input class="form-input" id="lNotes" placeholder="https://t.me/YourBot?start=NOTES_CODE"></div>
+      <div class="form-group" style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:linear-gradient(135deg,rgba(79,142,247,0.08),rgba(124,92,191,0.05));border:1px solid rgba(79,142,247,0.25);border-radius:var(--radius-sm)">
+        <input type="checkbox" id="lIsDemo" style="width:18px;height:18px;cursor:pointer;accent-color:var(--accent)">
+        <label for="lIsDemo" style="font-size:13px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:6px">
+          <i class="ti ti-player-play" style="color:var(--accent);font-size:14px"></i> Mark as Demo Lecture
+          <span class="demo-badge">DEMO</span>
+        </label>
+      </div>
       <button class="btn-add" id="btnLecture" onclick="addLecture()"><i class="ti ti-plus"></i> Add Lecture</button>
 
       <!-- ── Auto Mode ─────────────────────────────────────────────────── -->
@@ -994,6 +1012,7 @@ function openChapter(bid, sid, cid) {
             ${l.comingSoon
               ? '<div style="margin-top:6px"><span class="coming-soon-badge">🔜 Coming Soon</span></div>'
               : `<div class="lec-mini-btns">
+                  ${l.isDemo ? '<span class="demo-badge" style="margin-right:4px">DEMO</span>' : ''}
                   <button class="lec-mini-btn lec-mini-watch" onclick="openLink('${l.link}','lecture')"><i class="ti ti-player-play-filled"></i> Lecture</button>
                   ${l.notes ? `<button class="lec-mini-btn lec-mini-notes" onclick="openLink('${l.notes}','notes')"><i class="ti ti-notes"></i> Notes</button>` : ''}
                 </div>`}
@@ -1046,6 +1065,7 @@ function openUnit(bid, sid, cid, uid) {
           ${l.comingSoon
             ? '<div style="margin-top:6px"><span class="coming-soon-badge">🔜 Coming Soon</span></div>'
             : `<div class="lec-mini-btns">
+                ${l.isDemo ? '<span class="demo-badge" style="margin-right:4px">DEMO</span>' : ''}
                 <button class="lec-mini-btn lec-mini-watch" onclick="openLink('${l.link}','lecture')"><i class="ti ti-player-play-filled"></i> Lecture</button>
                 ${l.notes ? `<button class="lec-mini-btn lec-mini-notes" onclick="openLink('${l.notes}','notes')"><i class="ti ti-notes"></i> Notes</button>` : ''}
               </div>`}
@@ -1152,6 +1172,13 @@ function _batchCard(b, isPremiumLocked) {
   var buyBtn = isPremiumLocked
     ? '<button class="batch-buy-btn" data-bid="' + b._id + '" onclick="event.stopPropagation();buyBatch(this.dataset.bid)"><i class="ti ti-shopping-cart" style="font-size:12px"></i> Buy Access</button>'
     : '';
+  var demoLectures = _getAllDemoLectures(b);
+  var viewBtn = demoLectures.length
+    ? '<button class="batch-view-btn" data-bid="' + b._id + '" onclick="event.stopPropagation();openDemoModal(this.dataset.bid)"><i class="ti ti-player-play" style="font-size:12px"></i> View Demo</button>'
+    : '';
+  var actionBtns = (buyBtn || viewBtn)
+    ? '<div style="display:flex;gap:6px;flex-wrap:wrap">' + viewBtn + buyBtn + '</div>'
+    : '';
   return `<div class="batch-card${b.isPremium ? ' batch-card-premium' : ''}" onclick="openBatch('${b._id}')" style="${cardStyle}">
     <div class="batch-img" style="position:relative;overflow:hidden">
       ${b.pic ? `<img src="${b.pic}">` : '🎓'}
@@ -1161,7 +1188,7 @@ function _batchCard(b, isPremiumLocked) {
       <div class="batch-name">${b.name}</div>
       ${b.description ? `<div class="batch-desc">${b.description}</div>` : ''}
       <div class="batch-meta">${b.subjects.length} subjects${isPremiumLocked ? ' · <span style="color:#f59e0b">🔒 Locked</span>' : ''}</div>
-      ${buyBtn}
+      ${actionBtns}
     </div>
   </div>`;
 }
@@ -1455,10 +1482,12 @@ async function addLecture() {
   try {
     var url = uid ? `/api/batches/${bid}/subjects/${sid}/chapters/${cid}/units/${uid}/lectures` : `/api/batches/${bid}/subjects/${sid}/chapters/${cid}/lectures`;
     var notes = document.getElementById('lNotes').value.trim();
-    var updated = await apiFetch(url,'POST',{name,link,notes});
+    var isDemo = document.getElementById('lIsDemo').checked;
+    var updated = await apiFetch(url,'POST',{name,link,notes,isDemo});
     var idx = batches.findIndex(x=>x._id===bid); if(idx>=0) batches[idx]=updated;
     populateAllSelects();
     document.getElementById('lName').value=''; document.getElementById('lLink').value=''; document.getElementById('lNotes').value='';
+    document.getElementById('lIsDemo').checked = false;
     toast('Lecture added!','success');
   } catch(e){toast('Error: '+(e.message||'Something went wrong'),'error');} finally {
     setLoading('btnLecture',false,'<i class="ti ti-plus"></i> Add Lecture'); }
@@ -1647,7 +1676,7 @@ function _renderManageLevel() {
       html += '<div style="font-size:11px;font-weight:600;color:var(--text2);letter-spacing:1px;text-transform:uppercase;padding:12px 0 6px">Lectures (in units)</div>';
       ch.units.forEach(u => {
         u.lectures.forEach(l => {
-          var lcs = l.comingSoon ? '<span class="coming-soon-badge">🔜</span>' : '';
+          var lcs = l.isDemo ? '<span class="demo-badge" style="margin-left:4px">DEMO</span>' : '';
           html += `<div class="manage-item">
             <span class="manage-item-icon" style="font-size:13px">▶</span>
             <div class="manage-item-info">
@@ -1664,7 +1693,7 @@ function _renderManageLevel() {
     if (ch.lectures && ch.lectures.length) {
       html += '<div style="font-size:11px;font-weight:600;color:var(--text2);letter-spacing:1px;text-transform:uppercase;padding:12px 0 6px">Direct Lectures</div>';
       ch.lectures.forEach(l => {
-        var lcs = l.comingSoon ? '<span class="coming-soon-badge">🔜</span>' : '';
+        var lcs = l.isDemo ? '<span class="demo-badge" style="margin-left:4px">DEMO</span>' : '';
         html += `<div class="manage-item">
           <span class="manage-item-icon" style="font-size:13px">▶</span>
           <div class="manage-item-info">
@@ -1781,9 +1810,9 @@ function openEdit(type, bid, sid, cid, uid, lid) {
     body = `<div class="form-group"><label class="form-label">Lecture Name</label><input class="form-input" id="ei_name" value="${lec.name}"></div>
             <div class="form-group"><label class="form-label">Bot Link</label><input class="form-input" id="ei_link" value="${lec.link||''}"></div>
             <div class="form-group"><label class="form-label">Notes Link <span style="color:var(--text3)">(optional)</span></label><input class="form-input" id="ei_notes" value="${lec.notes||''}"></div>
-            <div class="form-group" style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--surface2);border-radius:var(--radius-sm)">
-              <input type="checkbox" id="ei_comingSoon" ${lec.comingSoon?'checked':''} style="width:18px;height:18px;cursor:pointer;accent-color:var(--accent)">
-              <label for="ei_comingSoon" style="font-size:13px;font-weight:500;cursor:pointer">Mark as Coming Soon 🔜</label>
+            <div class="form-group" style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:linear-gradient(135deg,rgba(79,142,247,0.08),rgba(124,92,191,0.05));border:1px solid rgba(79,142,247,0.25);border-radius:var(--radius-sm)">
+              <input type="checkbox" id="ei_isDemo" ${lec.isDemo?'checked':''} style="width:18px;height:18px;cursor:pointer;accent-color:var(--accent)">
+              <label for="ei_isDemo" style="font-size:13px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:6px"><i class="ti ti-player-play" style="color:var(--accent);font-size:14px"></i> Mark as Demo Lecture <span class="demo-badge">DEMO</span></label>
             </div>`;
   }
 
@@ -1840,7 +1869,7 @@ async function saveEdit() {
         name: document.getElementById('ei_name').value.trim(),
         link: document.getElementById('ei_link').value.trim(),
         notes: document.getElementById('ei_notes').value.trim(),
-        comingSoon: document.getElementById('ei_comingSoon').checked
+        isDemo: document.getElementById('ei_isDemo').checked
       });
       var idx = batches.findIndex(x => x._id === bid);
       if (idx >= 0) batches[idx] = updated;
@@ -1858,6 +1887,49 @@ async function saveEdit() {
 }
 
 async function delBatch(bid){if(!confirm('Batch delete?'))return;try{await apiFetch(`/api/batches/${bid}`,'DELETE');batches=batches.filter(x=>x._id!==bid);renderBatches(batches);populateAllSelects();_renderManageLevel();toast('Deleted!','success');}catch(e){toast('Error','error');}}
+
+// ── Demo Lectures ─────────────────────────────────────────────────────────────
+function _getAllDemoLectures(batch) {
+  var demos = [];
+  (batch.subjects || []).forEach(s => {
+    (s.chapters || []).forEach(c => {
+      (c.lectures || []).forEach(l => { if (l.isDemo) demos.push({...l, _subj: s.name, _chap: c.name}); });
+      (c.units || []).forEach(u => {
+        (u.lectures || []).forEach(l => { if (l.isDemo) demos.push({...l, _subj: s.name, _chap: c.name, _unit: u.name}); });
+      });
+    });
+  });
+  return demos;
+}
+
+function openDemoModal(bid) {
+  var b = batches.find(x => x._id === bid);
+  if (!b) return;
+  var demos = _getAllDemoLectures(b);
+  var modal = document.getElementById('demoModal');
+  document.getElementById('demoModalTitle').textContent = b.name + ' — Demo Lectures';
+  var listEl = document.getElementById('demoLecList');
+  if (!demos.length) {
+    listEl.innerHTML = '<div class="empty"><i class="ti ti-video"></i>No demo lectures yet</div>';
+  } else {
+    listEl.innerHTML = demos.map((l, i) => `
+      <div class="lec-row">
+        <div class="lec-num">${i+1}</div>
+        <div class="lec-info">
+          <div class="lec-name">${l.name} <span class="demo-badge" style="margin-left:4px">DEMO</span></div>
+          <div class="lec-sub" style="font-size:10px;color:var(--text2);margin-top:2px">${l._subj} · ${l._chap}${l._unit ? ' · ' + l._unit : ''}</div>
+          <div class="lec-mini-btns" style="margin-top:6px">
+            <button class="lec-mini-btn lec-mini-watch" onclick="openLink('${l.link}','lecture')"><i class="ti ti-player-play-filled"></i> Watch</button>
+            ${l.notes ? `<button class="lec-mini-btn lec-mini-notes" onclick="openLink('${l.notes}','notes')"><i class="ti ti-notes"></i> Notes</button>` : ''}
+          </div>
+        </div>
+      </div>`).join('');
+  }
+  modal.classList.add('show');
+}
+
+function closeDemoModal() { document.getElementById('demoModal').classList.remove('show'); }
+function closeDemoOutside(e) { if (e.target.id === 'demoModal') closeDemoModal(); }
 
 // ── Buy Batch ─────────────────────────────────────────────────────────────────
 function buyBatch(bid) {
@@ -2376,6 +2448,9 @@ openBatch = function(bid) {
       toast('🔒 Yeh premium batch hai! Admin se access maango.', 'error');
       return;
     }
+    // Premium user — ads not required, open directly
+    _origOpenBatch(bid);
+    return;
   }
   if (!hasAccess()) {
     toast('Watch an ad to unlock access!', 'error');
@@ -2798,6 +2873,18 @@ body.light-mode .lec-mini-notes{background:var(--surface2);color:var(--text)}
 #contactInner.expanded #contactText{max-width:140px;opacity:1}
 </style>
 
+
+<!-- Demo Lectures Modal -->
+<div class="demo-overlay" id="demoModal" onclick="closeDemoOutside(event)">
+  <div class="demo-modal">
+    <span class="demo-modal-handle"></span>
+    <div class="demo-modal-header">
+      <div class="demo-modal-title"><i class="ti ti-player-play" style="color:var(--accent)"></i><span id="demoModalTitle">Demo Lectures</span></div>
+      <button class="demo-modal-close" onclick="closeDemoModal()"><i class="ti ti-x"></i></button>
+    </div>
+    <div id="demoLecList" style="padding:8px 12px"></div>
+  </div>
+</div>
 
 <!-- Premium Users Modal -->
 <div class="modal-overlay" id="premiumUsersModal" onclick="closePremiumUsersOutside(event)">
