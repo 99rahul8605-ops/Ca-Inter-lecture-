@@ -344,7 +344,7 @@ router.post("/batches/:bid/subjects/:sid/chapters/:cid/lectures", verifyAdmin, a
     const subj = batch && batch.subjects.id(req.params.sid);
     const chap = subj && subj.chapters.id(req.params.cid);
     if (!chap) return res.status(404).json({ error: "Not found" });
-    chap.lectures.push({ name: req.body.name, link: req.body.link, notes: req.body.notes || "", order: chap.lectures.length });
+    chap.lectures.push({ name: req.body.name, link: req.body.link, notes: req.body.notes || "", order: chap.lectures.length, isDemo: req.body.isDemo === true });
     await batch.save();
     res.json(batch);
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -374,6 +374,7 @@ router.patch("/batches/:bid/subjects/:sid/chapters/:cid/lectures/:lid/edit", ver
     if (req.body.link !== undefined) lec.link = req.body.link;
     if (req.body.notes !== undefined) lec.notes = req.body.notes;
     if (req.body.comingSoon !== undefined) lec.comingSoon = req.body.comingSoon;
+    if (req.body.isDemo !== undefined) lec.isDemo = req.body.isDemo;
     await batch.save(); res.json(batch);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -387,7 +388,7 @@ router.post("/batches/:bid/subjects/:sid/chapters/:cid/units/:uid/lectures", ver
     const chap = subj && subj.chapters.id(req.params.cid);
     const unit = chap && chap.units.id(req.params.uid);
     if (!unit) return res.status(404).json({ error: "Not found" });
-    unit.lectures.push({ name: req.body.name, link: req.body.link, notes: req.body.notes || "", order: unit.lectures.length });
+    unit.lectures.push({ name: req.body.name, link: req.body.link, notes: req.body.notes || "", order: unit.lectures.length, isDemo: req.body.isDemo === true });
     await batch.save();
     res.json(batch);
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -419,6 +420,7 @@ router.patch("/batches/:bid/subjects/:sid/chapters/:cid/units/:uid/lectures/:lid
     if (req.body.link !== undefined) lec.link = req.body.link;
     if (req.body.notes !== undefined) lec.notes = req.body.notes;
     if (req.body.comingSoon !== undefined) lec.comingSoon = req.body.comingSoon;
+    if (req.body.isDemo !== undefined) lec.isDemo = req.body.isDemo;
     await batch.save(); res.json(batch);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
