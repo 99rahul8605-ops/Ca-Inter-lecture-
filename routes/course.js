@@ -141,6 +141,8 @@ router.post("/batches", verifyAdmin, async (req, res) => {
       description: req.body.description || "",
       order: count,
       isPublic: false,
+      isPremium: req.body.isPremium === true,
+      premiumUsers: [],
     }));
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -169,7 +171,56 @@ router.patch("/batches/:bid/edit", verifyAdmin, async (req, res) => {
     if (!batch) return res.status(404).json({ error: "Batch not found" });
     if (req.body.name) batch.name = req.body.name;
     if (req.body.description !== undefined) batch.description = req.body.description;
+    if (req.body.isPremium !== undefined) batch.isPremium = req.body.isPremium;
     await batch.save(); res.json(batch);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Premium User Management ───────────────────────────────────────────────────
+
+// GET premium users list for a batch
+router.get("/batches/:bid/premium-users", verifyAdmin, async (req, res) => {
+  try {
+    const batch = await Batch.findById(req.params.bid);
+    if (!batch) return res.status(404).json({ error: "Batch not found" });
+    res.json({ premiumUsers: batch.premiumUsers || [] });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST add a premium user to a batch
+router.post("/batches/:bid/premium-users", verifyAdmin, async (req, res) => {
+  try {
+    const batch = await Batch.findById(req.params.bid);
+    if (!batch) return res.status(404).json({ error: "Batch not found" });
+    const uid = String(req.body.userId || '').trim();
+    if (!uid) return res.status(400).json({ error: "userId required" });
+    if (!batch.premiumUsers) batch.premiumUsers = [];
+    if (!batch.premiumUsers.includes(uid)) {
+      batch.premiumUsers.push(uid);
+      await batch.save();
+    }
+    res.json({ success: true, premiumUsers: batch.premiumUsers });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// DELETE remove a premium user from a batch
+router.delete("/batches/:bid/premium-users/:uid", verifyAdmin, async (req, res) => {
+  try {
+    const batch = await Batch.findById(req.params.bid);
+    if (!batch) return res.status(404).json({ error: "Batch not found" });
+    batch.premiumUsers = (batch.premiumUsers || []).filter(u => u !== req.params.uid);
+    await batch.save();
+    res.json({ success: true, premiumUsers: batch.premiumUsers });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// GET check if a user has premium access to a batch (public — used by frontend)
+router.get("/batches/:bid/premium-check/:userId", async (req, res) => {
+  try {
+    const batch = await Batch.findById(req.params.bid);
+    if (!batch) return res.status(404).json({ error: "Batch not found" });
+    const hasAccess = (batch.premiumUsers || []).includes(String(req.params.userId));
+    res.json({ hasAccess, isPremium: batch.isPremium === true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
