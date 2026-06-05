@@ -115,12 +115,60 @@ function isAdminRequest(req) {
 
 // ── Batches ───────────────────────────────────────────────────────────────────
 
+// Helper: get requesting user's Telegram ID from initData (no admin check)
+function getRequestUserId(req) {
+  const initData = req.headers["x-tg-init-data"];
+  if (!initData) return null;
+  try {
+    const params = new URLSearchParams(initData);
+    const hash = params.get("hash");
+    params.delete("hash");
+    const dataCheckString = Array.from(params.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([k, v]) => `${k}=${v}`)
+      .join("\n");
+    const secretKey = crypto.createHmac("sha256", "WebAppData").update(BOT_TOKEN).digest();
+    const expectedHash = crypto.createHmac("sha256", secretKey).update(dataCheckString).digest("hex");
+    if (expectedHash !== hash) return null;
+    const user = JSON.parse(params.get("user") || "{}");
+    return user.id ? String(user.id) : null;
+  } catch (e) { return null; }
+}
+
+// Helper: strip lecture links from a batch for unauthorized premium users
+function stripPremiumLinks(batch) {
+  const b = batch.toObject();
+  b.subjects = b.subjects.map(s => ({
+    ...s,
+    chapters: s.chapters.map(c => ({
+      ...c,
+      lectures: c.lectures.map(l => ({ ...l, link: l.isDemo ? l.link : '', notes: l.isDemo ? l.notes : '' })),
+      units: c.units.map(u => ({
+        ...u,
+        lectures: u.lectures.map(l => ({ ...l, link: l.isDemo ? l.link : '', notes: l.isDemo ? l.notes : '' }))
+      }))
+    }))
+  }));
+  return b;
+}
+
 router.get("/batches", async (req, res) => {
   try {
     const admin = isAdminRequest(req);
-    // Admin sees all; users see public OR legacy batches (isPublic: false = old data, show those too)
     const filter = admin ? {} : { $or: [{ isPublic: true }, { isPublic: { $exists: false } }, { isPublic: false }] };
-    res.json(await Batch.find(filter).sort({ order: 1 }));
+    const batches = await Batch.find(filter).sort({ order: 1 });
+
+    if (admin) return res.json(batches);
+
+    // For non-admin: verify user identity, strip links from premium batches they don't have access to
+    const userId = getRequestUserId(req);
+    const result = batches.map(b => {
+      if (!b.isPremium) return b; // free batch — send as-is
+      const hasAccess = userId && (b.premiumUsers || []).includes(userId);
+      return hasAccess ? b : stripPremiumLinks(b); // strip links if no access
+    });
+
+    res.json(result);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -178,7 +226,6 @@ router.patch("/batches/:bid/edit", verifyAdmin, async (req, res) => {
 
 // ── Premium User Management ───────────────────────────────────────────────────
 
-// GET premium users list for a batch
 router.get("/batches/:bid/premium-users", verifyAdmin, async (req, res) => {
   try {
     const batch = await Batch.findById(req.params.bid);
@@ -187,7 +234,6 @@ router.get("/batches/:bid/premium-users", verifyAdmin, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// POST add a premium user to a batch
 router.post("/batches/:bid/premium-users", verifyAdmin, async (req, res) => {
   try {
     const batch = await Batch.findById(req.params.bid);
@@ -203,7 +249,6 @@ router.post("/batches/:bid/premium-users", verifyAdmin, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// DELETE remove a premium user from a batch
 router.delete("/batches/:bid/premium-users/:uid", verifyAdmin, async (req, res) => {
   try {
     const batch = await Batch.findById(req.params.bid);
@@ -214,7 +259,6 @@ router.delete("/batches/:bid/premium-users/:uid", verifyAdmin, async (req, res) 
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// GET check if a user has premium access to a batch (public — used by frontend)
 router.get("/batches/:bid/premium-check/:userId", async (req, res) => {
   try {
     const batch = await Batch.findById(req.params.bid);
