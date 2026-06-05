@@ -1150,7 +1150,7 @@ function _batchCard(b, isPremiumLocked) {
   var cardStyle = (isAdmin && b.isPublic !== true) ? 'opacity:0.6;border-style:dashed;' : '';
   if (b.isPremium) cardStyle += 'border-color:rgba(245,158,11,0.35);';
   var buyBtn = isPremiumLocked
-    ? '<button class="batch-buy-btn" onclick="event.stopPropagation();buyBatch('' + b._id + '','' + b.name.replace(/'/g, "\''") + '')"><i class="ti ti-shopping-cart" style="font-size:12px"></i> Buy Access</button>'
+    ? '<button class="batch-buy-btn" onclick="event.stopPropagation();buyBatch('' + b._id + '')"><i class="ti ti-shopping-cart" style="font-size:12px"></i> Buy Access</button>'
     : '';
   return `<div class="batch-card${b.isPremium ? ' batch-card-premium' : ''}" onclick="openBatch('${b._id}')" style="${cardStyle}">
     <div class="batch-img" style="position:relative;overflow:hidden">
@@ -1860,10 +1860,10 @@ async function saveEdit() {
 async function delBatch(bid){if(!confirm('Batch delete?'))return;try{await apiFetch(`/api/batches/${bid}`,'DELETE');batches=batches.filter(x=>x._id!==bid);renderBatches(batches);populateAllSelects();_renderManageLevel();toast('Deleted!','success');}catch(e){toast('Error','error');}}
 
 // ── Buy Batch ─────────────────────────────────────────────────────────────────
-function buyBatch(bid, batchName) {
+function buyBatch(bid) {
+  var b = batches.find(x => x._id === bid);
+  var batchName = b ? b.name : 'this batch';
   var msg = encodeURIComponent('Hi, I would like to purchase access to the "' + batchName + '" premium batch. Please guide me on how to proceed.');
-  var botUrl = 'https://t.me/' + (window._botUsername || '') + '?start=buy_' + bid;
-  // Open contact bot with pre-filled message via Telegram share
   var contactUrl = 'https://t.me/team_secret_cont_bot?text=' + msg;
   if (tg && tg.openLink) {
     tg.openLink(contactUrl, { try_instant_view: false });
