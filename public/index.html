@@ -571,13 +571,17 @@ body.ready{transition:none}
       <div class="form-group"><label class="form-label">Batch Name</label><input class="form-input" id="bName" placeholder="e.g. JEE 2025 Batch"></div>
       <div class="form-group"><label class="form-label">Description (optional)</label><input class="form-input" id="bDesc" placeholder="e.g. Complete preparation batch"></div>
       <div class="form-group" style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:linear-gradient(135deg,rgba(245,158,11,0.08),rgba(217,119,6,0.05));border:1px solid rgba(245,158,11,0.25);border-radius:var(--radius-sm)">
-        <input type="checkbox" id="bIsPremium" style="width:18px;height:18px;cursor:pointer;accent-color:#f59e0b" onchange="document.getElementById('bPremiumNote').style.display=this.checked?'block':'none'">
+        <input type="checkbox" id="bIsPremium" style="width:18px;height:18px;cursor:pointer;accent-color:#f59e0b" onchange="document.getElementById('bPremiumNote').style.display=this.checked?'block':'none';document.getElementById('bPriceGroup').style.display=this.checked?'flex':'none'">
         <label for="bIsPremium" style="font-size:13px;font-weight:600;cursor:pointer;color:var(--text);display:flex;align-items:center;gap:6px">
           <i class="ti ti-crown" style="color:#f59e0b;font-size:15px"></i> Mark as Premium Batch
           <span style="font-size:10px;color:#f59e0b;font-weight:700;background:rgba(245,158,11,0.15);border:1px solid rgba(245,158,11,0.3);border-radius:20px;padding:1px 7px">PREMIUM</span>
         </label>
       </div>
       <div id="bPremiumNote" style="display:none;font-size:11px;color:#f59e0b;padding:4px 2px;margin-top:-6px">⚠️ Premium batch — sirf allowed UIDs wale hi content access kar sakte hain.</div>
+      <div id="bPriceGroup" class="form-group" style="display:none;align-items:center;gap:10px">
+        <label class="form-label" style="white-space:nowrap;margin:0">💰 Price (₹)</label>
+        <input class="form-input" id="bPrice" type="number" placeholder="e.g. 999" min="0" style="flex:1">
+      </div>
       <button class="btn-add" id="btnBatch" onclick="addBatch()"><i class="ti ti-plus"></i> Add Batch</button>
     </div>
 
@@ -1170,7 +1174,7 @@ function _batchCard(b, isPremiumLocked) {
   var cardStyle = (isAdmin && b.isPublic !== true) ? 'opacity:0.6;border-style:dashed;' : '';
   if (b.isPremium) cardStyle += 'border-color:rgba(245,158,11,0.35);';
   var buyBtn = isPremiumLocked
-    ? '<button class="batch-buy-btn" data-bid="' + b._id + '" onclick="event.stopPropagation();buyBatch(this.dataset.bid)"><i class="ti ti-shopping-cart" style="font-size:12px"></i> Buy Access</button>'
+    ? '<button class="batch-buy-btn" data-bid="' + b._id + '" onclick="event.stopPropagation();buyBatch(this.dataset.bid)"><i class="ti ti-shopping-cart" style="font-size:12px"></i> Buy' + (b.price ? ' ₹' + b.price : '') + '</button>'
     : '';
   var demoLectures = _getAllDemoLectures(b);
   var viewBtn = (!isPremiumLocked && b.isPremium)
@@ -1422,15 +1426,18 @@ async function addBatch() {
   var name = document.getElementById('bName').value.trim();
   var desc = document.getElementById('bDesc').value.trim();
   var isPremium = document.getElementById('bIsPremium').checked;
+  var price = parseInt(document.getElementById('bPrice').value) || 0;
   if (!name) return toast('Please enter a batch name!','error');
   setLoading('btnBatch',true);
   try {
-    var newBatch = await apiFetch('/api/batches','POST',{name, description:desc, pic:picBase64, isPremium});
+    var newBatch = await apiFetch('/api/batches','POST',{name, description:desc, pic:picBase64, isPremium, price});
     batches.push(newBatch);
     renderBatches(batches); populateAllSelects();
     document.getElementById('bName').value=''; document.getElementById('bDesc').value='';
     document.getElementById('bIsPremium').checked = false;
     document.getElementById('bPremiumNote').style.display = 'none';
+    document.getElementById('bPriceGroup').style.display = 'none';
+    document.getElementById('bPrice').value = '';
     document.getElementById('imgPreview').innerHTML='<div class="img-preview-label"><i class="ti ti-camera" style="font-size:24px;display:block;margin-bottom:6px;color:var(--text3)"></i>Tap to select image</div>';
     picBase64='';
     toast('Batch added!','success');
@@ -1766,6 +1773,10 @@ function openEdit(type, bid, sid, cid, uid, lid) {
             <div class="form-group" style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:linear-gradient(135deg,rgba(245,158,11,0.08),rgba(217,119,6,0.05));border:1px solid rgba(245,158,11,0.25);border-radius:var(--radius-sm)">
               <input type="checkbox" id="ei_isPremium" ${b.isPremium?'checked':''} style="width:18px;height:18px;cursor:pointer;accent-color:#f59e0b">
               <label for="ei_isPremium" style="font-size:13px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:6px"><i class="ti ti-crown" style="color:#f59e0b"></i> Premium Batch</label>
+            </div>
+            <div class="form-group" style="display:flex;align-items:center;gap:10px">
+              <label class="form-label" style="white-space:nowrap;margin:0">💰 Price (₹)</label>
+              <input class="form-input" id="ei_price" type="number" value="${b.price||0}" min="0" style="flex:1">
             </div>`;
   } else if (type === 'subject') {
     var b = batches.find(x => x._id === bid);
@@ -1838,7 +1849,8 @@ async function saveEdit() {
       updated = await apiFetch(`/api/batches/${bid}/edit`, 'PATCH', {
         name: document.getElementById('ei_name').value.trim(),
         description: document.getElementById('ei_desc').value.trim(),
-        isPremium: document.getElementById('ei_isPremium').checked
+        isPremium: document.getElementById('ei_isPremium').checked,
+        price: parseInt(document.getElementById('ei_price').value) || 0
       });
       var idx = batches.findIndex(x => x._id === bid);
       if (idx >= 0) batches[idx] = updated;
@@ -1937,12 +1949,14 @@ function closeDemoOutside(e) { if (e.target.id === 'demoModal') closeDemoModal()
 function buyBatch(bid) {
   var b = batches.find(x => x._id === bid);
   var batchName = b ? b.name : 'this batch';
-  var msg = encodeURIComponent('Hi, I would like to purchase access to the "' + batchName + '" premium batch. Please guide me on how to proceed.');
-  var contactUrl = 'https://t.me/team_secret_cont_bot?text=' + msg;
-  if (tg && tg.openLink) {
-    tg.openLink(contactUrl, { try_instant_view: false });
+  // Open bot with buy_ deep link — bot will show UPI QR
+  var botUrl = 'https://t.me/' + (window._botUsername || '') + '?start=buy_' + bid;
+  if (tg && tg.openTelegramLink) {
+    tg.openTelegramLink(botUrl);
+  } else if (tg && tg.openLink) {
+    tg.openLink(botUrl);
   } else {
-    window.open(contactUrl, '_blank');
+    window.open(botUrl, '_blank');
   }
 }
 
