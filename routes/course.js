@@ -191,6 +191,7 @@ router.post("/batches", verifyAdmin, async (req, res) => {
       isPublic: false,
       isPremium: req.body.isPremium === true,
       premiumUsers: [],
+      price: req.body.price ? Number(req.body.price) : 0,
     }));
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -220,6 +221,7 @@ router.patch("/batches/:bid/edit", verifyAdmin, async (req, res) => {
     if (req.body.name) batch.name = req.body.name;
     if (req.body.description !== undefined) batch.description = req.body.description;
     if (req.body.isPremium !== undefined) batch.isPremium = req.body.isPremium;
+    if (req.body.price !== undefined) batch.price = Number(req.body.price) || 0;
     await batch.save(); res.json(batch);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
