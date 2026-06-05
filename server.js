@@ -9,12 +9,11 @@ const MONGO_URI = process.env.MONGO_URI;
 const WEB_URL = process.env.WEB_URL;
 const PORT = process.env.PORT || 3000;
 const OWNER_ID = parseInt(process.env.OWNER_ID || "0");
-// Storage channel ID where all new files will be forwarded for bot-independent storage.
-// Format: -100xxxxxxxxxx (supergroup/channel numeric ID)
-// If not set, files will be saved with direct file_id (old behavior).
 const STORAGE_CHANNEL_ID = process.env.STORAGE_CHANNEL_ID
   ? parseInt(process.env.STORAGE_CHANNEL_ID)
   : null;
+const UPI_ID = process.env.UPI_ID || "";
+const PAYMENT_GROUP_ID = process.env.PAYMENT_GROUP_ID ? parseInt(process.env.PAYMENT_GROUP_ID) : null;
 
 let BOT_USERNAME = ""; // Telegram numeric user ID
 
@@ -131,6 +130,7 @@ app.get("/api/config", (req, res) => {
     ownerId: OWNER_ID,
     botUsername: BOT_USERNAME || '',
     forceJoinRequired: forceJoinChannels.length > 0,
+    upiId: UPI_ID || '',
   });
 });
 
@@ -138,6 +138,50 @@ const courseRoutes = require("./routes/course");
 app.use("/api", courseRoutes);
 const autoLectureSession = courseRoutes.autoLectureSession;
 const autoAddLecture     = courseRoutes.autoAddLecture;
+
+// ── Payment Request API ───────────────────────────────────────────────────────
+app.post("/api/pay-request", express.json({ limit: "10mb" }), async (req, res) => {
+  try {
+    const { batchId, userId, firstName, lastName, username, txnId, screenshotBase64 } = req.body;
+    if (!batchId || !txnId) return res.status(400).json({ error: "Missing fields" });
+
+    const esc = (s) => String(s||'').replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+    const Batch = require("./models/Course");
+    const batch = await Batch.findById(batchId).catch(() => null);
+    const batchName = batch ? batch.name : batchId;
+    const price = batch?.price ? `₹${batch.price}` : "N/A";
+
+    const caption =
+      `💸 <b>New Payment Request!</b>\n\n` +
+      `👤 <b>${esc(firstName)}${lastName ? ' ' + esc(lastName) : ''}</b>\n` +
+      `🆔 UID: <code>${esc(userId)}</code>\n` +
+      `📱 Username: ${username ? '@' + esc(username) : 'N/A'}\n\n` +
+      `📚 Batch: <b>${esc(batchName)}</b>\n` +
+      `💰 Amount: <b>${esc(price)}</b>\n` +
+      `🔖 Txn ID: <code>${esc(txnId)}</code>`;
+
+    if (!PAYMENT_GROUP_ID) return res.status(500).json({ error: "PAYMENT_GROUP_ID not configured" });
+
+    // Send screenshot + caption OR just text if no screenshot
+    if (screenshotBase64) {
+      // base64 → buffer
+      const base64Data = screenshotBase64.replace(/^data:image\/\w+;base64,/, "");
+      const buffer = Buffer.from(base64Data, "base64");
+      await bot.sendPhoto(PAYMENT_GROUP_ID, buffer, {
+        caption,
+        parse_mode: "HTML",
+        filename: `payment_${userId}_${Date.now()}.jpg`,
+      });
+    } else {
+      await bot.sendMessage(PAYMENT_GROUP_ID, caption, { parse_mode: "HTML" });
+    }
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error("Payment request error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
 
 app.use(express.static(path.join(__dirname, "public")));
 app.get("*", (req, res) => {
@@ -391,44 +435,15 @@ async function startBot() {
         return;
       }
 
-      // buy_ param — premium batch purchase request
+      // buy_ param — redirect to web app (payment handled in web app)
       if (param.startsWith("buy_")) {
-        const batchId = param.replace("buy_", "");
-        const firstName = msg.from?.first_name || "User";
-        const lastName = msg.from?.last_name ? " " + msg.from.last_name : "";
-        const username = msg.from?.username ? "@" + msg.from.username : "no username";
-        const uid = String(userId || chatId);
-
-        // Helper: escape HTML special chars to prevent parse error
-        const esc = (s) => String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
-
-        // Notify user
         bot.sendMessage(chatId,
-          `✅ <b>Purchase Request Received!</b>\n\nWe've notified the admin about your interest in this batch.\n\nWe'll contact you soon! 🚀`,
-          { parse_mode: "HTML" }
-        );
-
-        // Notify payment group if configured
-        const PAYMENT_GROUP_ID = process.env.PAYMENT_GROUP_ID ? parseInt(process.env.PAYMENT_GROUP_ID) : null;
-        if (PAYMENT_GROUP_ID) {
-          try {
-            const Batch = require("./models/Course");
-            const batch = await Batch.findById(batchId).catch(() => null);
-            const batchName = batch ? batch.name : batchId;
-            const price = batch?.price ? `₹${batch.price}` : "N/A";
-            await bot.sendMessage(PAYMENT_GROUP_ID,
-              `🛒 <b>New Purchase Request!</b>\n\n` +
-              `👤 Name: <b>${esc(firstName + lastName)}</b>\n` +
-              `🆔 UID: <code>${esc(uid)}</code>\n` +
-              `📱 Username: ${esc(username)}\n\n` +
-              `📚 Batch: <b>${esc(batchName)}</b>\n` +
-              `💰 Price: <b>${esc(price)}</b>`,
-              { parse_mode: "HTML" }
-            );
-          } catch (err) {
-            console.error("Payment group notify error:", err.message);
+          `💳 <b>Complete your payment in the app!</b>\n\nTap below to open and complete your purchase.`,
+          {
+            parse_mode: "HTML",
+            reply_markup: { inline_keyboard: [[{ text: "💳 Pay Now", web_app: { url: WEB_URL } }]] }
           }
-        }
+        );
         return;
       }
 
