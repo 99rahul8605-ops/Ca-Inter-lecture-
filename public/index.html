@@ -84,6 +84,13 @@ body.ready{transition:none}
 .batch-section-label .label-badge{font-size:9px;padding:2px 7px;border-radius:20px;font-weight:700;letter-spacing:0.5px}
 .label-badge-free{background:rgba(34,197,94,0.15);color:var(--green);border:1px solid rgba(34,197,94,0.3)}
 .label-badge-premium{background:rgba(245,158,11,0.15);color:#f59e0b;border:1px solid rgba(245,158,11,0.3)}
+
+/* ── Batch Type Tabs ─────────────────────────────── */
+.batch-tabs{display:flex;gap:8px;padding:14px 16px 8px;flex-shrink:0}
+.batch-tab{flex:1;display:flex;align-items:center;justify-content:center;gap:6px;padding:9px 12px;border-radius:10px;border:1.5px solid var(--border);background:var(--surface);color:var(--text2);font-size:13px;font-weight:600;cursor:pointer;transition:all 0.18s}
+.batch-tab.active-free{background:rgba(34,197,94,0.1);border-color:var(--green);color:var(--green)}
+.batch-tab.active-premium{background:rgba(245,158,11,0.1);border-color:#f59e0b;color:#f59e0b}
+.batch-tab i{font-size:15px}
 .batch-card-premium{border-color:rgba(245,158,11,0.35) !important}
 .batch-card-premium .batch-meta{color:#f59e0b}
 .premium-lock-overlay{position:absolute;inset:0;background:rgba(10,14,26,0.55);backdrop-filter:blur(2px);display:flex;align-items:center;justify-content:center;z-index:5;border-radius:0}
@@ -380,22 +387,21 @@ body.ready{transition:none}
       <div style="font-size:13px">Watch an ad to get 8h free access (up to 3 times/day).</div>
     </div>
     <div id="batchSection">
+      <!-- Tabs -->
+      <div class="batch-tabs">
+        <button class="batch-tab active-free" id="tabFreeBtn" onclick="switchBatchTab('free')">
+          <i class="ti ti-school"></i> Free
+        </button>
+        <button class="batch-tab" id="tabPremiumBtn" onclick="switchBatchTab('premium')">
+          <i class="ti ti-crown"></i> Premium
+        </button>
+      </div>
       <!-- Free Batches -->
       <div id="freeBatchSection">
-        <div class="batch-section-label">
-          <i class="ti ti-school" style="color:var(--green)"></i>
-          Free Batches
-          <span class="label-badge label-badge-free">FREE</span>
-        </div>
         <div class="batch-grid" id="freeBatchGrid"><div class="loading" style="grid-column:1/-1"><i class="ti ti-loader-2"></i>Loading...</div></div>
       </div>
       <!-- Premium Batches -->
       <div id="premiumBatchSection" style="display:none">
-        <div class="batch-section-label" style="margin-top:4px">
-          <i class="ti ti-crown" style="color:#f59e0b"></i>
-          Premium Batches
-          <span class="label-badge label-badge-premium">PREMIUM</span>
-        </div>
         <div class="batch-grid" id="premiumBatchGrid"></div>
       </div>
     </div>
@@ -1104,6 +1110,29 @@ async function load() {
   }
 }
 
+// ── Batch Tabs ────────────────────────────────────────────────────────────────
+var _activeBatchTab = 'free'; // 'free' | 'premium'
+
+function switchBatchTab(tab) {
+  _activeBatchTab = tab;
+  var freeBtn = document.getElementById('tabFreeBtn');
+  var premBtn = document.getElementById('tabPremiumBtn');
+  var freeSec = document.getElementById('freeBatchSection');
+  var premSec = document.getElementById('premiumBatchSection');
+
+  if (tab === 'free') {
+    freeBtn.className = 'batch-tab active-free';
+    premBtn.className = 'batch-tab';
+    freeSec.style.display = '';
+    premSec.style.display = 'none';
+  } else {
+    freeBtn.className = 'batch-tab';
+    premBtn.className = 'batch-tab active-premium';
+    freeSec.style.display = 'none';
+    premSec.style.display = '';
+  }
+}
+
 function _batchCard(b, isPremiumLocked) {
   // isPremiumLocked = user does not have access to this premium batch
   var adminDraftBadge = (isAdmin && b.isPublic !== true)
@@ -1139,28 +1168,33 @@ function renderBatches(list) {
   var free = visible.filter(b => !b.isPremium);
   var premium = visible.filter(b => b.isPremium === true);
 
+  // Show/hide premium tab button based on whether any premium batches exist
+  var premBtn = document.getElementById('tabPremiumBtn');
+  if (premBtn) premBtn.style.display = premium.length ? '' : 'none';
+
+  // If currently on premium tab but no premium batches, switch to free
+  if (_activeBatchTab === 'premium' && !premium.length) {
+    switchBatchTab('free');
+  }
+
   // Free section
   var freeEl = document.getElementById('freeBatchGrid');
-  var freeSec = document.getElementById('freeBatchSection');
   if (freeEl) {
-    if (!free.length) {
-      freeEl.innerHTML = '<div class="empty" style="grid-column:1/-1"><i class="ti ti-school"></i>No free batches yet</div>';
-    } else {
-      freeEl.innerHTML = free.map(b => _batchCard(b, false)).join('');
-    }
+    freeEl.innerHTML = free.length
+      ? free.map(b => _batchCard(b, false)).join('')
+      : '<div class="empty" style="grid-column:1/-1"><i class="ti ti-school"></i>No free batches yet</div>';
   }
 
   // Premium section
   var premEl = document.getElementById('premiumBatchGrid');
-  var premSec = document.getElementById('premiumBatchSection');
-  if (premSec) premSec.style.display = premium.length ? '' : 'none';
   if (premEl && premium.length) {
     var curUid = getUserId();
     premEl.innerHTML = premium.map(b => {
-      // Admin always unlocked; otherwise check premiumUsers list
       var locked = !isAdmin && !(b.premiumUsers && b.premiumUsers.includes(String(curUid)));
       return _batchCard(b, locked);
     }).join('');
+  } else if (premEl) {
+    premEl.innerHTML = '<div class="empty" style="grid-column:1/-1"><i class="ti ti-crown"></i>No premium batches yet</div>';
   }
 }
 
