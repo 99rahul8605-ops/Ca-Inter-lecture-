@@ -85,7 +85,31 @@ body.ready{transition:none}
 .label-badge-free{background:rgba(34,197,94,0.15);color:var(--green);border:1px solid rgba(34,197,94,0.3)}
 .label-badge-premium{background:rgba(245,158,11,0.15);color:#f59e0b;border:1px solid rgba(245,158,11,0.3)}
 
-/* ── Batch Type Tabs ─────────────────────────────── */
+/* ── Payment Modal ───────────────────────────────── */
+.pay-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:500;align-items:flex-end;justify-content:center}
+.pay-overlay.show{display:flex}
+.pay-modal{background:var(--surface);border-radius:20px 20px 0 0;width:100%;max-width:480px;max-height:90vh;overflow-y:auto;padding-bottom:28px}
+.pay-modal-handle{width:40px;height:4px;background:var(--border);border-radius:2px;margin:14px auto 0;display:block}
+.pay-modal-header{padding:14px 16px 10px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border)}
+.pay-modal-title{font-size:15px;font-weight:700;display:flex;align-items:center;gap:7px}
+.pay-modal-close{background:var(--surface2);border:none;color:var(--text2);width:30px;height:30px;border-radius:50%;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:15px}
+.pay-body{padding:14px 16px}
+.pay-batch-info{background:linear-gradient(135deg,rgba(245,158,11,0.1),rgba(217,119,6,0.05));border:1px solid rgba(245,158,11,0.3);border-radius:12px;padding:12px 14px;margin-bottom:14px;display:flex;justify-content:space-between;align-items:center}
+.pay-batch-name{font-size:13px;font-weight:700;color:var(--text)}
+.pay-amount{font-size:20px;font-weight:800;color:#f59e0b}
+.pay-qr-wrap{display:flex;flex-direction:column;align-items:center;gap:8px;margin-bottom:14px;padding:14px;background:var(--surface2);border-radius:12px;border:1px solid var(--border)}
+.pay-qr-img{width:160px;height:160px;border-radius:10px;object-fit:contain;background:#fff;padding:6px}
+.pay-upi-row{display:flex;align-items:center;gap:8px;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:8px 12px;width:100%}
+.pay-upi-id{font-size:13px;font-weight:600;font-family:monospace;color:var(--text);flex:1}
+.pay-copy-btn{background:var(--accent);border:none;color:#fff;border-radius:6px;padding:4px 10px;font-size:11px;font-weight:700;cursor:pointer}
+.pay-steps{font-size:11px;color:var(--text2);line-height:1.8;margin-bottom:14px;padding:10px 12px;background:var(--surface2);border-radius:10px}
+.pay-steps b{color:var(--text)}
+.pay-ss-box{border:2px dashed var(--border);border-radius:12px;padding:16px;text-align:center;cursor:pointer;margin-bottom:12px;transition:border-color 0.2s}
+.pay-ss-box.has-img{border-color:var(--green);border-style:solid}
+.pay-ss-preview{width:100%;max-height:160px;object-fit:contain;border-radius:8px;display:none}
+.pay-ss-label{font-size:12px;color:var(--text2);display:flex;flex-direction:column;align-items:center;gap:6px}
+.pay-submit-btn{width:100%;padding:13px;border-radius:12px;border:none;background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff;font-size:14px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;margin-top:4px}
+.pay-submit-btn:disabled{opacity:0.6}
 .batch-tabs{display:flex;gap:8px;padding:14px 16px 8px;flex-shrink:0}
 .batch-tab{flex:1;display:flex;align-items:center;justify-content:center;gap:6px;padding:9px 12px;border-radius:10px;border:1.5px solid var(--border);background:var(--surface);color:var(--text2);font-size:13px;font-weight:600;cursor:pointer;transition:all 0.18s}
 .batch-tab.active-free{background:rgba(34,197,94,0.1);border-color:var(--green);color:var(--green)}
@@ -1292,6 +1316,7 @@ async function checkAdminAccess() {
     var config = await (await fetch('/api/config')).json();
     var ownerId = config.ownerId;
     if (config.botUsername) window._botUsername = config.botUsername;
+    if (config.upiId) window._upiId = config.upiId;
     // Store force-join requirement
     _fjRequired = !!config.forceJoinRequired;
     if (!ownerId) return;
@@ -1946,12 +1971,110 @@ function closeDemoModal() { document.getElementById('demoModal').classList.remov
 function closeDemoOutside(e) { if (e.target.id === 'demoModal') closeDemoModal(); }
 
 // ── Buy Batch ─────────────────────────────────────────────────────────────────
+// ── Payment Modal ─────────────────────────────────────────────────────────────
+var _payBatchId = null;
+var _paySsBase64 = null;
+
 function buyBatch(bid) {
-  var username = window._botUsername || '';
-  var botUrl = 'https://t.me/' + username + '?start=buy_' + bid;
-  if (tg && tg.openTelegramLink) tg.openTelegramLink(botUrl);
-  else if (tg && tg.openLink) tg.openLink(botUrl);
-  else window.open(botUrl, '_blank');
+  var b = batches.find(x => x._id === bid);
+  if (!b) return;
+  _payBatchId = bid;
+  _paySsBase64 = null;
+
+  // Set batch info
+  document.getElementById('payBatchName').textContent = b.name;
+  document.getElementById('payAmount').textContent = b.price ? '₹' + b.price : 'Contact Admin';
+
+  // Set UPI ID
+  var upi = window._upiId || '';
+  document.getElementById('payUpiId').textContent = upi || 'Not configured';
+
+  // Generate QR using api.qrserver.com
+  if (upi && b.price) {
+    var upiStr = 'upi://pay?pa=' + encodeURIComponent(upi) + '&am=' + b.price + '&cu=INR&tn=' + encodeURIComponent(b.name);
+    document.getElementById('payQrImg').src = 'https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=' + encodeURIComponent(upiStr);
+  } else if (upi) {
+    document.getElementById('payQrImg').src = 'https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=' + encodeURIComponent(upi);
+  } else {
+    document.getElementById('payQrImg').src = '';
+  }
+
+  // Reset form
+  document.getElementById('payTxnId').value = '';
+  document.getElementById('paySsPreview').style.display = 'none';
+  document.getElementById('paySsLabel').style.display = 'flex';
+  document.getElementById('paySsBox').classList.remove('has-img');
+  document.getElementById('paySubmitBtn').disabled = false;
+  document.getElementById('paySubmitBtn').innerHTML = '<i class="ti ti-send"></i> Submit Payment Proof';
+
+  document.getElementById('payModal').classList.add('show');
+}
+
+function closePayModal() {
+  document.getElementById('payModal').classList.remove('show');
+  _payBatchId = null; _paySsBase64 = null;
+}
+function closePayOutside(e) { if (e.target.id === 'payModal') closePayModal(); }
+
+function copyUpi() {
+  var upi = window._upiId || '';
+  if (!upi) return toast('UPI ID not set', 'error');
+  navigator.clipboard.writeText(upi).then(() => toast('UPI ID copied!', 'success')).catch(() => {
+    var el = document.createElement('textarea');
+    el.value = upi; document.body.appendChild(el); el.select(); document.execCommand('copy');
+    document.body.removeChild(el); toast('UPI ID copied!', 'success');
+  });
+}
+
+function handleSsUpload(e) {
+  var file = e.target.files[0];
+  if (!file) return;
+  var reader = new FileReader();
+  reader.onload = function(ev) {
+    _paySsBase64 = ev.target.result;
+    document.getElementById('paySsPreview').src = _paySsBase64;
+    document.getElementById('paySsPreview').style.display = 'block';
+    document.getElementById('paySsLabel').style.display = 'none';
+    document.getElementById('paySsBox').classList.add('has-img');
+  };
+  reader.readAsDataURL(file);
+}
+
+async function submitPayment() {
+  var txnId = document.getElementById('payTxnId').value.trim();
+  if (!txnId) return toast('Transaction ID daalo!', 'error');
+  if (!_paySsBase64) return toast('Screenshot upload karo!', 'error');
+  if (!_payBatchId) return;
+
+  var btn = document.getElementById('paySubmitBtn');
+  btn.disabled = true;
+  btn.innerHTML = '<i class="ti ti-loader-2" style="animation:spin 0.8s linear infinite;display:inline-block"></i> Submitting...';
+
+  try {
+    var tgUser = tg && tg.initDataUnsafe && tg.initDataUnsafe.user;
+    var payload = {
+      batchId: _payBatchId,
+      userId: tgUser ? String(tgUser.id) : '',
+      firstName: tgUser ? (tgUser.first_name || '') : '',
+      lastName: tgUser ? (tgUser.last_name || '') : '',
+      username: tgUser ? (tgUser.username || '') : '',
+      txnId: txnId,
+      screenshotBase64: _paySsBase64,
+    };
+    var r = await fetch('/api/pay-request', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    var d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'Failed');
+    toast('✅ Payment submitted! Admin will verify soon.', 'success');
+    closePayModal();
+  } catch(e) {
+    toast('Error: ' + e.message, 'error');
+    btn.disabled = false;
+    btn.innerHTML = '<i class="ti ti-send"></i> Submit Payment Proof';
+  }
 }
 
 // ── Premium Users Management ──────────────────────────────────────────────────
@@ -2883,6 +3006,63 @@ body.light-mode .lec-mini-notes{background:var(--surface2);color:var(--text)}
 #contactInner.expanded #contactText{max-width:140px;opacity:1}
 </style>
 
+
+<!-- Payment Modal -->
+<div class="pay-overlay" id="payModal" onclick="closePayOutside(event)">
+  <div class="pay-modal">
+    <span class="pay-modal-handle"></span>
+    <div class="pay-modal-header">
+      <div class="pay-modal-title"><i class="ti ti-credit-card" style="color:#f59e0b"></i> Complete Payment</div>
+      <button class="pay-modal-close" onclick="closePayModal()"><i class="ti ti-x"></i></button>
+    </div>
+    <div class="pay-body">
+      <!-- Batch info -->
+      <div class="pay-batch-info">
+        <div>
+          <div style="font-size:10px;color:var(--text2);margin-bottom:2px">Purchasing</div>
+          <div class="pay-batch-name" id="payBatchName">—</div>
+        </div>
+        <div class="pay-amount" id="payAmount">—</div>
+      </div>
+      <!-- QR + UPI -->
+      <div class="pay-qr-wrap">
+        <img class="pay-qr-img" id="payQrImg" src="" alt="QR Code">
+        <div class="pay-upi-row">
+          <span class="pay-upi-id" id="payUpiId">—</span>
+          <button class="pay-copy-btn" onclick="copyUpi()">Copy</button>
+        </div>
+      </div>
+      <!-- Steps -->
+      <div class="pay-steps">
+        <b>How to pay:</b><br>
+        1️⃣ Scan QR or copy UPI ID<br>
+        2️⃣ Pay the exact amount shown above<br>
+        3️⃣ Take a screenshot of payment confirmation<br>
+        4️⃣ Enter Transaction ID &amp; upload screenshot below<br>
+        5️⃣ Submit — admin will verify &amp; unlock your batch
+      </div>
+      <!-- Transaction ID -->
+      <div class="form-group" style="margin-bottom:10px">
+        <label class="form-label">Transaction ID / UTR Number</label>
+        <input class="form-input" id="payTxnId" placeholder="e.g. 4234XXXXXXXX">
+      </div>
+      <!-- Screenshot upload -->
+      <div class="pay-ss-box" id="paySsBox" onclick="document.getElementById('paySsInput').click()">
+        <img class="pay-ss-preview" id="paySsPreview">
+        <div class="pay-ss-label" id="paySsLabel">
+          <i class="ti ti-upload" style="font-size:22px;color:var(--text3)"></i>
+          <span>Tap to upload payment screenshot</span>
+          <span style="font-size:10px;color:var(--text3)">JPG, PNG supported</span>
+        </div>
+      </div>
+      <input type="file" id="paySsInput" accept="image/*" style="display:none" onchange="handleSsUpload(event)">
+      <!-- Submit -->
+      <button class="pay-submit-btn" id="paySubmitBtn" onclick="submitPayment()">
+        <i class="ti ti-send"></i> Submit Payment Proof
+      </button>
+    </div>
+  </div>
+</div>
 
 <!-- Demo Lectures Modal -->
 <div class="demo-overlay" id="demoModal" onclick="closeDemoOutside(event)">
