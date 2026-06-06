@@ -280,12 +280,13 @@ async function saveToStorageChannel(bot, fileInfo) {
 
 async function sendFile(bot, chatId, record) {
   const caption = `📎 ${record.file_name}`;
+  const protect = !isOwner(chatId); // owner ko forward allow, baaki restrict
   switch (record.file_type) {
     case "photo":      return await bot.sendPhoto(chatId, record.file_id, { caption });
-    case "video":      return await bot.sendVideo(chatId, record.file_id, { caption, protect_content: true });
+    case "video":      return await bot.sendVideo(chatId, record.file_id, { caption, protect_content: protect });
     case "audio":      return await bot.sendAudio(chatId, record.file_id, { caption });
     case "voice":      return await bot.sendVoice(chatId, record.file_id, { caption });
-    case "video_note": return await bot.sendVideoNote(chatId, record.file_id, { protect_content: true });
+    case "video_note": return await bot.sendVideoNote(chatId, record.file_id, { protect_content: protect });
     default:           return await bot.sendDocument(chatId, record.file_id, { caption });
   }
 }
