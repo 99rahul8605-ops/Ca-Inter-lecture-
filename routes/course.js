@@ -136,16 +136,25 @@ function getRequestUserId(req) {
 }
 
 // Helper: strip lecture links from a batch for unauthorized premium users
+// Only keep link/notes for lectures explicitly marked isDemo: true
 function stripPremiumLinks(batch) {
-  const b = batch.toObject();
+  const b = batch.toObject ? batch.toObject() : { ...batch };
   b.subjects = b.subjects.map(s => ({
     ...s,
     chapters: s.chapters.map(c => ({
       ...c,
-      lectures: c.lectures.map(l => ({ ...l, link: l.isDemo ? l.link : '', notes: l.isDemo ? l.notes : '' })),
+      lectures: c.lectures.map(l => ({
+        ...l,
+        link:  l.isDemo === true ? l.link  : '',
+        notes: l.isDemo === true ? l.notes : '',
+      })),
       units: c.units.map(u => ({
         ...u,
-        lectures: u.lectures.map(l => ({ ...l, link: l.isDemo ? l.link : '', notes: l.isDemo ? l.notes : '' }))
+        lectures: u.lectures.map(l => ({
+          ...l,
+          link:  l.isDemo === true ? l.link  : '',
+          notes: l.isDemo === true ? l.notes : '',
+        }))
       }))
     }))
   }));
@@ -164,7 +173,8 @@ router.get("/batches", async (req, res) => {
     const userId = getRequestUserId(req);
     const result = batches.map(b => {
       if (!b.isPremium) return b; // free batch — send as-is
-      const hasAccess = userId && (b.premiumUsers || []).includes(userId);
+      // Use String() on both sides to avoid Number vs String mismatch in Mongoose array
+      const hasAccess = userId && (b.premiumUsers || []).some(u => String(u) === String(userId));
       return hasAccess ? b : stripPremiumLinks(b); // strip links if no access
     });
 
