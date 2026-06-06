@@ -175,7 +175,8 @@ router.get("/batches", async (req, res) => {
       if (!b.isPremium) return b; // free batch — send as-is
       // Use String() on both sides to avoid Number vs String mismatch in Mongoose array
       const hasAccess = userId && (b.premiumUsers || []).some(u => String(u) === String(userId));
-      return hasAccess ? b : stripPremiumLinks(b); // strip links if no access
+      // Always use toObject() so frontend gets a consistent plain object (not Mongoose Document)
+      return hasAccess ? b.toObject() : stripPremiumLinks(b);
     });
 
     res.json(result);
