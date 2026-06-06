@@ -302,26 +302,42 @@ async function wait(ms) {
   return new Promise((res) => setTimeout(res, ms));
 }
 
-// ── Apply rmWords: remove each word (case-insensitive) from a file name ──────
+// ── Apply rmWords: remove each phrase (case-insensitive) from a file name ─────
+// Uses indexOf — works with Unicode/special chars (Cherokee, bold Unicode, etc.)
 function cleanFileName(name) {
   if (!rmWords.length) return name;
-  let result = name;
+  // Strip extension first so it's never accidentally modified
+  const extMatch = name.match(/(\.[a-zA-Z0-9]{1,6})$/);
+  let result = extMatch ? name.slice(0, -extMatch[1].length) : name;
+
   for (const w of rmWords) {
-    // Escape special regex chars in the word, then match as whole word (boundary)
-    const escaped = w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const re = new RegExp(`\\b${escaped}\\b`, "gi");
-    result = result.replace(re, "");
+    const wLower = w.toLowerCase();
+    let lower = result.toLowerCase();
+    let idx;
+    while ((idx = lower.indexOf(wLower)) !== -1) {
+      result = result.slice(0, idx) + result.slice(idx + w.length);
+      lower  = result.toLowerCase();
+    }
   }
-  // Clean up extra spaces/dots/underscores/hyphens left after removal
+  // Collapse multiple separators (_, ., -, space, :) into single _
   result = result
-    .replace(/[\s._-]{2,}/g, " ") // collapse multiple separators
-    .replace(/^[\s._-]+|[\s._-]+$/g, "") // trim leading/trailing separators
+    .replace(/[_.\- :]{2,}/g, "_")
+    .replace(/^[_.\- :]+|[_.\- :]+$/g, "")
     .trim();
-  // Preserve extension if original had one
+  if (extMatch) result = result + extMatch[1];
+  return result || name;
+}
+  }
+  // Collapse multiple separators left after removal
+  result = result
+    .replace(/[_.\- ]{2,}/g, "_")
+    .replace(/^[_.\- ]+|[_.\- ]+$/g, "")
+    .trim();
+  // Re-attach extension if it got stripped
   const extMatch = name.match(/(\.[a-zA-Z0-9]{1,6})$/);
   const resExt   = result.match(/(\.[a-zA-Z0-9]{1,6})$/);
-  if (extMatch && !resExt) result = result + extMatch[1]; // re-attach extension if stripped
-  return result || name; // fallback to original if result is empty
+  if (extMatch && !resExt) result = result + extMatch[1];
+  return result || name;
 }
 
 async function scheduleDelete(bot, chatId, messageId, deleteAt) {
