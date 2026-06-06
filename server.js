@@ -287,7 +287,9 @@ async function sendFile(bot, chatId, record) {
     case "audio":      return await bot.sendAudio(chatId, record.file_id, { caption });
     case "voice":      return await bot.sendVoice(chatId, record.file_id, { caption });
     case "video_note": return await bot.sendVideoNote(chatId, record.file_id, { protect_content: protect });
-    default:           return await bot.sendDocument(chatId, record.file_id, { caption });
+    default:
+      // document: pass filename explicitly so Telegram shows the clean name on download
+      return await bot.sendDocument(chatId, record.file_id, { caption, filename: record.file_name });
   }
 }
 
