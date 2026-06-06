@@ -294,8 +294,34 @@ async function sendFile(bot, chatId, record) {
 const bulkSessions = new Map();
 const BULK_TIMEOUT_MS = 5 * 60 * 1000;
 
+// ── Words to auto-remove from file names on save ─────────────────────────────
+// Stored as lowercase; matching is case-insensitive, whole-word.
+let rmWords = [];
+
 async function wait(ms) {
   return new Promise((res) => setTimeout(res, ms));
+}
+
+// ── Apply rmWords: remove each word (case-insensitive) from a file name ──────
+function cleanFileName(name) {
+  if (!rmWords.length) return name;
+  let result = name;
+  for (const w of rmWords) {
+    // Escape special regex chars in the word, then match as whole word (boundary)
+    const escaped = w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const re = new RegExp(`\\b${escaped}\\b`, "gi");
+    result = result.replace(re, "");
+  }
+  // Clean up extra spaces/dots/underscores/hyphens left after removal
+  result = result
+    .replace(/[\s._-]{2,}/g, " ") // collapse multiple separators
+    .replace(/^[\s._-]+|[\s._-]+$/g, "") // trim leading/trailing separators
+    .trim();
+  // Preserve extension if original had one
+  const extMatch = name.match(/(\.[a-zA-Z0-9]{1,6})$/);
+  const resExt   = result.match(/(\.[a-zA-Z0-9]{1,6})$/);
+  if (extMatch && !resExt) result = result + extMatch[1]; // re-attach extension if stripped
+  return result || name; // fallback to original if result is empty
 }
 
 async function scheduleDelete(bot, chatId, messageId, deleteAt) {
@@ -520,6 +546,7 @@ async function startBot() {
         `/bulk — start bulk upload mode\n` +
         `/myfiles — view your saved files\n` +
         `/delete <code> — delete a file\n` +
+        `/rmword '<word>' — auto-remove word from file names\n` +
         `/cancel — cancel bulk mode\n\n` +
         `📡 Broadcast:\n` +
         `/broadcast <text> — text to all users\n` +
@@ -811,6 +838,64 @@ async function startBot() {
     }
   });
 
+  // ── /rmword — manage words auto-removed from file names on save ──────────────
+  // Usage:
+  //   /rmword '<word>'   — add a word to the remove list
+  //   /rmword list       — show current list
+  //   /rmword clear      — clear all words
+  bot.onText(/\/rmword(.*)/, async (msg, match) => {
+    if (isGroupChat(msg)) return;
+    const userId = msg.from?.id;
+    if (!isOwner(userId)) return;
+
+    const chatId = msg.chat.id;
+    const arg = (match[1] || "").trim();
+
+    // /rmword list
+    if (arg.toLowerCase() === "list") {
+      if (!rmWords.length) return bot.sendMessage(chatId, `📋 No words in the remove list.`);
+      return bot.sendMessage(chatId,
+        `📋 <b>Words removed from file names:</b>\n${rmWords.map((w, i) => `${i + 1}. <code>${esc(w)}</code>`).join("\n")}`,
+        { parse_mode: "HTML" }
+      );
+    }
+
+    // /rmword clear
+    if (arg.toLowerCase() === "clear") {
+      const count = rmWords.length;
+      rmWords = [];
+      return bot.sendMessage(chatId, `🗑️ Cleared ${count} word(s) from the remove list.`);
+    }
+
+    // /rmword '<word>' — extract word from quotes or plain arg
+    const quoted = arg.match(/^['"](.+?)['"]$/) || arg.match(/^'(.+?)'$/) || arg.match(/^"(.+?)"$/);
+    const word = quoted ? quoted[1].trim() : arg.replace(/^['"]|['"]$/g, "").trim();
+
+    if (!word) {
+      return bot.sendMessage(chatId,
+        `ℹ️ <b>Usage:</b>\n` +
+        `• <code>/rmword 'word'</code> — add word to auto-remove list\n` +
+        `• <code>/rmword list</code> — show current list\n` +
+        `• <code>/rmword clear</code> — clear all words\n\n` +
+        `<i>Words are removed from file names whenever you save a file.</i>`,
+        { parse_mode: "HTML" }
+      );
+    }
+
+    const wordLower = word.toLowerCase();
+    if (rmWords.includes(wordLower)) {
+      return bot.sendMessage(chatId, `⚠️ <code>${esc(word)}</code> is already in the list.`, { parse_mode: "HTML" });
+    }
+
+    rmWords.push(wordLower);
+    return bot.sendMessage(chatId,
+      `✅ Added <code>${esc(word)}</code> to remove list.\n` +
+      `📋 Total words: ${rmWords.length}\n\n` +
+      `<i>This word will be stripped from all file names on save.</i>`,
+      { parse_mode: "HTML" }
+    );
+  });
+
   // ── Telegram message link fetch (Owner only) ─────────────────────────────────
   const TG_LINK_RE = /https?:\/\/t\.me\/(c\/(\d+)|([a-zA-Z][a-zA-Z0-9_]{3,}))\/(\d+)/;
 
@@ -857,6 +942,7 @@ async function startBot() {
 
       // Non-bulk: send to storage channel to get a stable channel file_id
       const storedFileInfo = await saveToStorageChannel(bot, fileInfo);
+      storedFileInfo.file_name = cleanFileName(storedFileInfo.file_name);
 
       const code = await getUniqueCode();
       await FileRecord.create({
@@ -975,6 +1061,7 @@ async function startBot() {
         // This way even if this bot is replaced, the new bot can serve files
         // as long as it is an admin of the same storage channel.
         const storedFileInfo = await saveToStorageChannel(bot, fileInfo);
+        storedFileInfo.file_name = cleanFileName(storedFileInfo.file_name);
 
         const code = await getUniqueCode();
         await FileRecord.create({
