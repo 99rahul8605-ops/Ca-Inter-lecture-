@@ -1827,7 +1827,7 @@ function _renderBreadcrumb() {
 // ── Edit Modal ────────────────────────────────────────────────────────────────
 var _editCtx = {};
 
-function openEdit(type, bid, sid, cid, uid, lid) {
+async function openEdit(type, bid, sid, cid, uid, lid) {
   _editCtx = { type, bid, sid, cid, uid, lid };
   var body = '';
   var title = '';
@@ -1880,12 +1880,14 @@ function openEdit(type, bid, sid, cid, uid, lid) {
     title = 'Edit Unit';
     body = `<div class="form-group"><label class="form-label">Unit Name</label><input class="form-input" id="ei_name" value="${u.name}"></div>`;
   } else if (type === 'lecture') {
-    var b = batches.find(x => x._id === bid);
-    var s = b && b.subjects.find(x => x._id === sid);
-    var c = s && s.chapters.find(x => x._id === cid);
+    // Fetch fresh batch data directly — cached batches may have stripped links for premium batches
+    var freshBatch = await apiFetch(`/api/batches/${bid}`).catch(() => null);
+    var fb = freshBatch || batches.find(x => x._id === bid);
+    var s = fb && (fb.subjects || []).find(x => x._id === sid);
+    var c = s && (s.chapters || []).find(x => x._id === cid);
     var lec = uid
-      ? (c && c.units.find(x => x._id === uid) && c.units.find(x => x._id === uid).lectures.find(x => x._id === lid))
-      : (c && c.lectures.find(x => x._id === lid));
+      ? (c && (c.units||[]).find(x => x._id === uid) && (c.units||[]).find(x => x._id === uid).lectures.find(x => x._id === lid))
+      : (c && (c.lectures||[]).find(x => x._id === lid));
     title = 'Edit Lecture';
     body = `<div class="form-group"><label class="form-label">Lecture Name</label><input class="form-input" id="ei_name" value="${lec.name}"></div>
             <div class="form-group"><label class="form-label">Bot Link</label><input class="form-input" id="ei_link" value="${lec.link||''}"></div>
