@@ -13,7 +13,6 @@ const STORAGE_CHANNEL_ID = process.env.STORAGE_CHANNEL_ID
   ? parseInt(process.env.STORAGE_CHANNEL_ID)
   : null;
 const UPI_ID = process.env.UPI_ID || "";
-const SUPPORT_USERNAME = process.env.SUPPORT_USERNAME || "";
 const PAYMENT_GROUP_ID = process.env.PAYMENT_GROUP_ID ? parseInt(process.env.PAYMENT_GROUP_ID) : null;
 
 let BOT_USERNAME = "";
@@ -78,6 +77,7 @@ const fileSchema = new mongoose.Schema({
   uploaded_by: { type: Number },
   expires_at: { type: Date, default: null },
   delivered_to: [{ type: Number }],
+  channel_message_id: { type: Number, default: null }, // for bot-change-safe re-fetch
   created_at: { type: Date, default: Date.now },
 });
 // TTL index removed — links are permanent. expires_at field kept for schema compatibility.
@@ -133,7 +133,6 @@ app.get("/api/config", (req, res) => {
     botUsername: BOT_USERNAME || '',
     forceJoinRequired: forceJoinChannels.length > 0,
     upiId: UPI_ID || '',
-    supportUsername: SUPPORT_USERNAME || '',
   });
 });
 
@@ -145,9 +144,8 @@ const autoAddLecture     = courseRoutes.autoAddLecture;
 // ── Payment Request API ───────────────────────────────────────────────────────
 app.post("/api/pay-request", express.json({ limit: "10mb" }), async (req, res) => {
   try {
-    const { batchId, userId, firstName, lastName, username, giftCardCode, screenshotBase64 } = req.body;
-    if (!batchId || !giftCardCode) return res.status(400).json({ error: "Missing fields" });
-    if (!screenshotBase64) return res.status(400).json({ error: "Screenshot required" });
+    const { batchId, userId, firstName, lastName, username, txnId, screenshotBase64 } = req.body;
+    if (!batchId || !txnId) return res.status(400).json({ error: "Missing fields" });
 
     const Batch = require("./models/Course");
     const batch = await Batch.findById(batchId).catch(() => null);
@@ -155,13 +153,13 @@ app.post("/api/pay-request", express.json({ limit: "10mb" }), async (req, res) =
     const price = batch?.price ? `₹${batch.price}` : "N/A";
 
     const caption =
-      `🎁 <b>Amazon Pay Gift Card Request!</b>\n\n` +
+      `💸 <b>New Payment Request!</b>\n\n` +
       `👤 <b>${esc(firstName)}${lastName ? ' ' + esc(lastName) : ''}</b>\n` +
       `🆔 UID: <code>${esc(userId)}</code>\n` +
       `📱 Username: ${username ? '@' + esc(username) : 'N/A'}\n\n` +
       `📚 Batch: <b>${esc(batchName)}</b>\n` +
       `💰 Amount: <b>${esc(price)}</b>\n` +
-      `🔑 Gift Card Code: <code>${esc(giftCardCode)}</code>`;
+      `🔖 Txn ID: <code>${esc(txnId)}</code>`;
 
     if (!PAYMENT_GROUP_ID) return res.status(500).json({ error: "PAYMENT_GROUP_ID not configured" });
 
@@ -172,15 +170,22 @@ app.post("/api/pay-request", express.json({ limit: "10mb" }), async (req, res) =
       ]]
     };
 
-    // Screenshot is mandatory — always send as photo
-    const base64Data = screenshotBase64.replace(/^data:image\/\w+;base64,/, "");
-    const buffer = Buffer.from(base64Data, "base64");
-    await bot.sendPhoto(PAYMENT_GROUP_ID, buffer, {
-      caption,
-      parse_mode: "HTML",
-      filename: `giftcard_${userId}_${Date.now()}.jpg`,
-      reply_markup: inlineKeyboard,
-    });
+    // Send screenshot + caption OR just text if no screenshot
+    if (screenshotBase64) {
+      const base64Data = screenshotBase64.replace(/^data:image\/\w+;base64,/, "");
+      const buffer = Buffer.from(base64Data, "base64");
+      await bot.sendPhoto(PAYMENT_GROUP_ID, buffer, {
+        caption,
+        parse_mode: "HTML",
+        filename: `payment_${userId}_${Date.now()}.jpg`,
+        reply_markup: inlineKeyboard,
+      });
+    } else {
+      await bot.sendMessage(PAYMENT_GROUP_ID, caption, {
+        parse_mode: "HTML",
+        reply_markup: inlineKeyboard,
+      });
+    }
 
     res.json({ success: true });
   } catch (err) {
@@ -263,7 +268,7 @@ async function saveToStorageChannel(bot, fileInfo) {
     const channelFileInfo = extractFileInfo(sentMsg);
     if (channelFileInfo) {
       // Keep the original file_name, use channel's file_id and file_type
-      return { ...channelFileInfo, file_name: fileInfo.file_name };
+      return { ...channelFileInfo, file_name: fileInfo.file_name, channel_message_id: sentMsg.message_id };
     }
 
     console.warn("saveToStorageChannel: could not extract file_id from channel response, using original.");
@@ -276,16 +281,39 @@ async function saveToStorageChannel(bot, fileInfo) {
 
 async function sendFile(bot, chatId, record) {
   const caption = `📎 ${record.file_name}`;
-  const protect = !isOwner(chatId); // owner ko forward allow, baaki restrict
-  switch (record.file_type) {
-    case "photo":      return await bot.sendPhoto(chatId, record.file_id, { caption });
-    case "video":      return await bot.sendVideo(chatId, record.file_id, { caption, protect_content: protect });
-    case "audio":      return await bot.sendAudio(chatId, record.file_id, { caption });
-    case "voice":      return await bot.sendVoice(chatId, record.file_id, { caption });
-    case "video_note": return await bot.sendVideoNote(chatId, record.file_id, { protect_content: protect });
-    default:
-      // document: pass filename explicitly so Telegram shows the clean name on download
-      return await bot.sendDocument(chatId, record.file_id, { caption, filename: record.file_name });
+  const protect = !isOwner(chatId);
+
+  async function trySend(file_id) {
+    switch (record.file_type) {
+      case "photo":      return await bot.sendPhoto(chatId, file_id, { caption });
+      case "video":      return await bot.sendVideo(chatId, file_id, { caption, protect_content: protect });
+      case "audio":      return await bot.sendAudio(chatId, file_id, { caption });
+      case "voice":      return await bot.sendVoice(chatId, file_id, { caption });
+      case "video_note": return await bot.sendVideoNote(chatId, file_id, { protect_content: protect });
+      default:           return await bot.sendDocument(chatId, file_id, { caption, filename: record.file_name });
+    }
+  }
+
+  try {
+    return await trySend(record.file_id);
+  } catch (err) {
+    // file_id invalid (bot change) — try re-fetching from storage channel
+    if (STORAGE_CHANNEL_ID && record.channel_message_id) {
+      console.log(`Re-fetching file from storage channel for record ${record.code}`);
+      try {
+        const fwd = await bot.forwardMessage(chatId, STORAGE_CHANNEL_ID, record.channel_message_id);
+        // Update DB with new file_id so next time it works directly
+        const refreshed = extractFileInfo(fwd);
+        if (refreshed) {
+          await FileRecord.updateOne({ _id: record._id }, { $set: { file_id: refreshed.file_id } });
+        }
+        return fwd;
+      } catch (fwdErr) {
+        console.error(`Re-fetch from channel also failed:`, fwdErr.message);
+        throw fwdErr;
+      }
+    }
+    throw err;
   }
 }
 
@@ -958,6 +986,7 @@ async function startBot() {
         file_name: storedFileInfo.file_name,
         uploaded_by: userId,
         expires_at: null,
+        channel_message_id: storedFileInfo.channel_message_id || null,
       });
       const link = `https://t.me/${BOT_USERNAME}?start=${code}`;
       await bot.deleteMessage(chatId, processing.message_id);
@@ -1358,6 +1387,58 @@ async function startBot() {
         `✅ Broadcast done — Sent: ${sent} | Blocked: ${blocked} | Failed: ${failed}`
       );
     }
+  });
+
+  // ── /migrate (Owner only) — fix broken file_ids after bot change ────────────
+  bot.onText(/\/migrate/, async (msg) => {
+    if (isGroupChat(msg)) return;
+    const userId = msg.from?.id;
+    if (!isOwner(userId)) return;
+    if (!STORAGE_CHANNEL_ID) return bot.sendMessage(msg.chat.id, '❌ STORAGE_CHANNEL_ID not set.');
+
+    const chatId = msg.chat.id;
+    const progress = await bot.sendMessage(chatId, '⏳ Migration starting...\nFetching records with channel_message_id...');
+
+    // Only migrate records that have channel_message_id saved
+    const records = await FileRecord.find({ channel_message_id: { $ne: null } }).lean();
+    if (!records.length) {
+      return bot.editMessageText(
+        '⚠️ No records with channel_message_id found.\n\nPurane records (bot change se pehle ke) fix nahi ho sakte automatically — unhe dobara upload karna hoga.',
+        { chat_id: chatId, message_id: progress.message_id }
+      );
+    }
+
+    let fixed = 0, failed = 0;
+    for (let i = 0; i < records.length; i++) {
+      const rec = records[i];
+      try {
+        // Forward from channel to get new file_id
+        const fwd = await bot.forwardMessage(chatId, STORAGE_CHANNEL_ID, rec.channel_message_id);
+        const refreshed = extractFileInfo(fwd);
+        if (refreshed) {
+          await FileRecord.updateOne({ _id: rec._id }, { $set: { file_id: refreshed.file_id } });
+          // Delete the forwarded message from chat (cleanup)
+          await bot.deleteMessage(chatId, fwd.message_id).catch(() => {});
+          fixed++;
+        } else { failed++; }
+      } catch (e) {
+        failed++;
+      }
+      // Rate limit
+      if ((i + 1) % 20 === 0) await wait(1000);
+      if ((i + 1) % 50 === 0) {
+        await bot.editMessageText(
+          `🔄 Migrating...\n✅ Fixed: ${fixed}\n❌ Failed: ${failed}\n⏳ Progress: ${i+1}/${records.length}`,
+          { chat_id: chatId, message_id: progress.message_id }
+        ).catch(() => {});
+      }
+    }
+
+    await bot.editMessageText(
+      `✅ <b>Migration Complete!</b>\n\n✅ Fixed: ${fixed}\n❌ Failed: ${failed}\n\n` +
+      (failed > 0 ? `Failed records ke files dobara upload karne honge.` : `Sab records update ho gaye!`),
+      { chat_id: chatId, message_id: progress.message_id, parse_mode: 'HTML' }
+    ).catch(() => {});
   });
 
   // ── /stats (Owner only) ──────────────────────────────────────────────────────
