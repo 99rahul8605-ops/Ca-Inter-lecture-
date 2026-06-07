@@ -136,25 +136,16 @@ function getRequestUserId(req) {
 }
 
 // Helper: strip lecture links from a batch for unauthorized premium users
-// Only keep link/notes for lectures explicitly marked isDemo: true
 function stripPremiumLinks(batch) {
-  const b = batch.toObject ? batch.toObject() : { ...batch };
+  const b = batch.toObject();
   b.subjects = b.subjects.map(s => ({
     ...s,
     chapters: s.chapters.map(c => ({
       ...c,
-      lectures: c.lectures.map(l => ({
-        ...l,
-        link:  l.isDemo === true ? l.link  : '',
-        notes: l.isDemo === true ? l.notes : '',
-      })),
+      lectures: c.lectures.map(l => ({ ...l, link: l.isDemo ? l.link : '', notes: l.isDemo ? l.notes : '' })),
       units: c.units.map(u => ({
         ...u,
-        lectures: u.lectures.map(l => ({
-          ...l,
-          link:  l.isDemo === true ? l.link  : '',
-          notes: l.isDemo === true ? l.notes : '',
-        }))
+        lectures: u.lectures.map(l => ({ ...l, link: l.isDemo ? l.link : '', notes: l.isDemo ? l.notes : '' }))
       }))
     }))
   }));
@@ -172,11 +163,9 @@ router.get("/batches", async (req, res) => {
     // For non-admin: verify user identity, strip links from premium batches they don't have access to
     const userId = getRequestUserId(req);
     const result = batches.map(b => {
-      if (!b.isPremium) return b; // free batch — send as-is
-      // Use String() on both sides to avoid Number vs String mismatch in Mongoose array
-      const hasAccess = userId && (b.premiumUsers || []).some(u => String(u) === String(userId));
-      // Always use toObject() so frontend gets a consistent plain object (not Mongoose Document)
-      return hasAccess ? b.toObject() : stripPremiumLinks(b);
+      if (!b.isPremium) return b.toObject(); // free batch — send as-is
+      const hasAccess = userId && (b.premiumUsers || []).includes(userId);
+      return hasAccess ? b.toObject() : stripPremiumLinks(b); // strip links if no access
     });
 
     res.json(result);
@@ -238,6 +227,19 @@ router.patch("/batches/:bid/edit", verifyAdmin, async (req, res) => {
 });
 
 // ── Premium User Management ───────────────────────────────────────────────────
+
+// Single batch GET — admin gets full data with links
+router.get("/batches/:bid", async (req, res) => {
+  try {
+    const admin = isAdminRequest(req);
+    const batch = await Batch.findById(req.params.bid);
+    if (!batch) return res.status(404).json({ error: "Not found" });
+    if (admin) return res.json(batch.toObject());
+    const userId = getRequestUserId(req);
+    const hasAccess = userId && (batch.premiumUsers || []).includes(userId);
+    res.json(batch.isPremium && !hasAccess ? stripPremiumLinks(batch) : batch.toObject());
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 
 router.get("/batches/:bid/premium-users", verifyAdmin, async (req, res) => {
   try {
