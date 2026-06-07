@@ -228,6 +228,19 @@ router.patch("/batches/:bid/edit", verifyAdmin, async (req, res) => {
 
 // ── Premium User Management ───────────────────────────────────────────────────
 
+// Single batch GET — admin gets full data with links
+router.get("/batches/:bid", async (req, res) => {
+  try {
+    const admin = isAdminRequest(req);
+    const batch = await Batch.findById(req.params.bid);
+    if (!batch) return res.status(404).json({ error: "Not found" });
+    if (admin) return res.json(batch.toObject());
+    const userId = getRequestUserId(req);
+    const hasAccess = userId && (batch.premiumUsers || []).includes(userId);
+    res.json(batch.isPremium && !hasAccess ? stripPremiumLinks(batch) : batch.toObject());
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 router.get("/batches/:bid/premium-users", verifyAdmin, async (req, res) => {
   try {
     const batch = await Batch.findById(req.params.bid);
