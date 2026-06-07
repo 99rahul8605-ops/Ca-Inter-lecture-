@@ -97,11 +97,14 @@ body.ready{transition:none}
 .pay-batch-info{background:linear-gradient(135deg,rgba(245,158,11,0.1),rgba(217,119,6,0.05));border:1px solid rgba(245,158,11,0.3);border-radius:12px;padding:12px 14px;margin-bottom:14px;display:flex;justify-content:space-between;align-items:center}
 .pay-batch-name{font-size:13px;font-weight:700;color:var(--text)}
 .pay-amount{font-size:20px;font-weight:800;color:#f59e0b}
-.pay-qr-wrap{display:flex;flex-direction:column;align-items:center;gap:8px;margin-bottom:14px;padding:14px;background:var(--surface2);border-radius:12px;border:1px solid var(--border)}
-.pay-qr-img{width:160px;height:160px;border-radius:10px;object-fit:contain;background:#fff;padding:6px}
-.pay-upi-row{display:flex;align-items:center;gap:8px;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:8px 12px;width:100%}
-.pay-upi-id{font-size:13px;font-weight:600;font-family:monospace;color:var(--text);flex:1}
-.pay-copy-btn{background:var(--accent);border:none;color:#fff;border-radius:6px;padding:4px 10px;font-size:11px;font-weight:700;cursor:pointer}
+.pay-gc-wrap{display:flex;flex-direction:column;align-items:center;gap:10px;margin-bottom:14px;padding:14px 16px;background:linear-gradient(135deg,rgba(255,153,0,0.08),rgba(255,153,0,0.03));border-radius:12px;border:1px solid rgba(255,153,0,0.3)}
+.pay-gc-logo{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:700;color:#ff9900}
+.pay-gc-logo span{font-size:22px}
+.pay-gc-note{font-size:11px;color:var(--text2);text-align:center;line-height:1.6}
+.pay-gc-input-wrap{margin-bottom:10px}
+.pay-gc-code-input{width:100%;background:var(--surface2);border:1.5px solid var(--border);color:var(--text);padding:11px 14px;border-radius:10px;font-size:15px;font-family:monospace;font-weight:600;outline:none;letter-spacing:1px;text-transform:uppercase}
+.pay-gc-code-input:focus{border-color:#ff9900}
+.pay-gc-code-input::placeholder{text-transform:none;font-weight:400;letter-spacing:0;font-size:13px}
 .pay-steps{font-size:11px;color:var(--text2);line-height:1.8;margin-bottom:14px;padding:10px 12px;background:var(--surface2);border-radius:10px}
 .pay-steps b{color:var(--text)}
 .pay-ss-box{border:2px dashed var(--border);border-radius:12px;padding:16px;text-align:center;cursor:pointer;margin-bottom:12px;transition:border-color 0.2s}
@@ -1356,6 +1359,7 @@ async function checkAdminAccess() {
     var ownerId = config.ownerId;
     if (config.botUsername) window._botUsername = config.botUsername;
     if (config.upiId) window._upiId = config.upiId;
+    if (config.gcEmail) window._gcEmail = config.gcEmail;
     // Store force-join requirement
     _fjRequired = !!config.forceJoinRequired;
     if (!ownerId) return;
@@ -2027,27 +2031,13 @@ function buyBatch(bid) {
   document.getElementById('payBatchName').textContent = b.name;
   document.getElementById('payAmount').textContent = b.price ? '₹' + b.price : 'Contact Admin';
 
-  // Set UPI ID
-  var upi = window._upiId || '';
-  document.getElementById('payUpiId').textContent = upi || 'Not configured';
-
-  // Generate QR using api.qrserver.com
-  if (upi && b.price) {
-    var upiStr = 'upi://pay?pa=' + encodeURIComponent(upi) + '&am=' + b.price + '&cu=INR&tn=' + encodeURIComponent(b.name);
-    document.getElementById('payQrImg').src = 'https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=' + encodeURIComponent(upiStr);
-  } else if (upi) {
-    document.getElementById('payQrImg').src = 'https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=' + encodeURIComponent(upi);
-  } else {
-    document.getElementById('payQrImg').src = '';
-  }
-
   // Reset form
-  document.getElementById('payTxnId').value = '';
+  document.getElementById('payGcCode').value = '';
   document.getElementById('paySsPreview').style.display = 'none';
   document.getElementById('paySsLabel').style.display = 'flex';
   document.getElementById('paySsBox').classList.remove('has-img');
   document.getElementById('paySubmitBtn').disabled = false;
-  document.getElementById('paySubmitBtn').innerHTML = '<i class="ti ti-send"></i> Submit Payment Proof';
+  document.getElementById('paySubmitBtn').innerHTML = '<i class="ti ti-gift"></i> Submit Gift Card';
 
   document.getElementById('payModal').classList.add('show');
 }
@@ -2057,16 +2047,6 @@ function closePayModal() {
   _payBatchId = null; _paySsBase64 = null;
 }
 function closePayOutside(e) { if (e.target.id === 'payModal') closePayModal(); }
-
-function copyUpi() {
-  var upi = window._upiId || '';
-  if (!upi) return toast('UPI ID not set', 'error');
-  navigator.clipboard.writeText(upi).then(() => toast('UPI ID copied!', 'success')).catch(() => {
-    var el = document.createElement('textarea');
-    el.value = upi; document.body.appendChild(el); el.select(); document.execCommand('copy');
-    document.body.removeChild(el); toast('UPI ID copied!', 'success');
-  });
-}
 
 function handleSsUpload(e) {
   var file = e.target.files[0];
@@ -2083,9 +2063,10 @@ function handleSsUpload(e) {
 }
 
 async function submitPayment() {
-  var txnId = document.getElementById('payTxnId').value.trim();
-  if (!txnId) return toast('Transaction ID daalo!', 'error');
-  if (!_paySsBase64) return toast('Screenshot upload karo!', 'error');
+  var gcCode = document.getElementById('payGcCode').value.trim();
+  if (!gcCode) return toast('Gift Card code daalo!', 'error');
+  if (gcCode.length < 8) return toast('Valid Gift Card code daalo!', 'error');
+  if (!_paySsBase64) return toast('Gift Card ka screenshot upload karo!', 'error');
   if (!_payBatchId) return;
 
   var btn = document.getElementById('paySubmitBtn');
@@ -2100,7 +2081,7 @@ async function submitPayment() {
       firstName: tgUser ? (tgUser.first_name || '') : '',
       lastName: tgUser ? (tgUser.last_name || '') : '',
       username: tgUser ? (tgUser.username || '') : '',
-      txnId: txnId,
+      giftCardCode: gcCode,
       screenshotBase64: _paySsBase64,
     };
     var r = await fetch('/api/pay-request', {
@@ -2110,12 +2091,12 @@ async function submitPayment() {
     });
     var d = await r.json();
     if (!r.ok) throw new Error(d.error || 'Failed');
-    toast('✅ Payment submitted! Admin will verify soon.', 'success');
+    toast('✅ Gift Card submitted! Admin verify karke batch unlock karega.', 'success');
     closePayModal();
   } catch(e) {
     toast('Error: ' + e.message, 'error');
     btn.disabled = false;
-    btn.innerHTML = '<i class="ti ti-send"></i> Submit Payment Proof';
+    btn.innerHTML = '<i class="ti ti-gift"></i> Submit Gift Card';
   }
 }
 
@@ -3066,41 +3047,38 @@ body.light-mode .lec-mini-notes{background:var(--surface2);color:var(--text)}
         </div>
         <div class="pay-amount" id="payAmount">—</div>
       </div>
-      <!-- QR + UPI -->
-      <div class="pay-qr-wrap">
-        <img class="pay-qr-img" id="payQrImg" src="" alt="QR Code">
-        <div class="pay-upi-row">
-          <span class="pay-upi-id" id="payUpiId">—</span>
-          <button class="pay-copy-btn" onclick="copyUpi()">Copy</button>
-        </div>
+      <!-- Amazon Pay Gift Card Section -->
+      <div class="pay-gc-wrap">
+        <div class="pay-gc-logo"><span>🎁</span> Amazon Pay Gift Card</div>
+        <div class="pay-gc-note">Amazon app se exact amount ka Gift Card kharido. Neeche card ka code aur screenshot submit karo — admin verify karke batch unlock karega.</div>
       </div>
       <!-- Steps -->
       <div class="pay-steps">
         <b>How to pay:</b><br>
-        1️⃣ Scan QR or copy UPI ID<br>
-        2️⃣ Pay the exact amount shown above<br>
-        3️⃣ Take a screenshot of payment confirmation<br>
-        4️⃣ Enter Transaction ID &amp; upload screenshot below<br>
-        5️⃣ Submit — admin will verify &amp; unlock your batch
+        1️⃣ Amazon app → Gift Cards → Buy a Gift Card<br>
+        2️⃣ Exact amount select karo jo upar dikh raha hai<br>
+        3️⃣ Gift Card ka <b>claim code</b> copy karo<br>
+        4️⃣ Gift Card ka screenshot lo<br>
+        5️⃣ Code aur screenshot neeche submit karo
       </div>
-      <!-- Transaction ID -->
-      <div class="form-group" style="margin-bottom:10px">
-        <label class="form-label">Transaction ID / UTR Number</label>
-        <input class="form-input" id="payTxnId" placeholder="e.g. 4234XXXXXXXX">
+      <!-- Gift Card Code -->
+      <div class="pay-gc-input-wrap">
+        <label class="form-label" style="font-size:12px;color:var(--text2);margin-bottom:6px;display:block">Amazon Pay Gift Card Code <span style="color:var(--red)">*</span></label>
+        <input class="pay-gc-code-input" id="payGcCode" placeholder="e.g. ABCD-EFGH-IJKL-MNOP" maxlength="24" oninput="this.value=this.value.toUpperCase()">
       </div>
-      <!-- Screenshot upload -->
+      <!-- Screenshot upload (mandatory) -->
       <div class="pay-ss-box" id="paySsBox" onclick="document.getElementById('paySsInput').click()">
         <img class="pay-ss-preview" id="paySsPreview">
         <div class="pay-ss-label" id="paySsLabel">
           <i class="ti ti-upload" style="font-size:22px;color:var(--text3)"></i>
-          <span>Tap to upload payment screenshot</span>
-          <span style="font-size:10px;color:var(--text3)">JPG, PNG supported</span>
+          <span>Gift Card ka screenshot upload karo <span style="color:var(--red)">*</span></span>
+          <span style="font-size:10px;color:var(--text3)">JPG, PNG — mandatory for verification</span>
         </div>
       </div>
       <input type="file" id="paySsInput" accept="image/*" style="display:none" onchange="handleSsUpload(event)">
       <!-- Submit -->
       <button class="pay-submit-btn" id="paySubmitBtn" onclick="submitPayment()">
-        <i class="ti ti-send"></i> Submit Payment Proof
+        <i class="ti ti-gift"></i> Submit Gift Card
       </button>
     </div>
   </div>
