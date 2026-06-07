@@ -952,6 +952,7 @@ if (tg) {
 
 // ── Open Batch ────────────────────────────────────────────────────────────────
 function openBatch(bid) {
+  _currentOpenBid = bid; _currentOpenSid = null; _currentOpenCid = null; _currentOpenUid = null;
   var b = batches.find(x => x._id === bid);
   if (!b) return;
   document.getElementById('subjPageTitle').textContent = b.name;
@@ -982,6 +983,7 @@ function openBatch(bid) {
 
 // ── Open Subject ──────────────────────────────────────────────────────────────
 function openSubject(bid, sid) {
+  _currentOpenBid = bid; _currentOpenSid = sid; _currentOpenCid = null; _currentOpenUid = null;
   var b = batches.find(x => x._id === bid);
   var s = b && b.subjects.find(x => x._id === sid);
   if (!s) return;
@@ -1003,6 +1005,7 @@ function openSubject(bid, sid) {
 
 // ── Open Chapter ──────────────────────────────────────────────────────────────
 function openChapter(bid, sid, cid) {
+  _currentOpenBid = bid; _currentOpenSid = sid; _currentOpenCid = cid; _currentOpenUid = null;
   var b = batches.find(x => x._id === bid);
   var s = b && b.subjects.find(x => x._id === sid);
   var c = s && s.chapters.find(x => x._id === cid);
@@ -1074,6 +1077,7 @@ function openChapter(bid, sid, cid) {
 
 // ── Open Unit ─────────────────────────────────────────────────────────────────
 function openUnit(bid, sid, cid, uid) {
+  _currentOpenBid = bid; _currentOpenSid = sid; _currentOpenCid = cid; _currentOpenUid = uid;
   var b = batches.find(x => x._id === bid);
   var s = b && b.subjects.find(x => x._id === sid);
   var c = s && s.chapters.find(x => x._id === cid);
@@ -1158,6 +1162,41 @@ async function load() {
       if (fg) fg.innerHTML = '<div class="empty" style="grid-column:1/-1"><i class="ti ti-wifi-off"></i>Load failed</div>';
     }
   }
+}
+
+// ── Auto-refresh batches when auto-lecture is running ─────────────────────────
+var _autoRefreshTimer = null;
+var _currentOpenBid = null;
+var _currentOpenSid = null;
+var _currentOpenCid = null;
+var _currentOpenUid = null;
+
+async function _refreshBatchesQuiet() {
+  try {
+    var fresh = await (await fetch('/api/batches')).json();
+    if (JSON.stringify(fresh) === JSON.stringify(batches)) return; // no change
+    batches = fresh;
+    localStorage.setItem('edubot_batches', JSON.stringify(fresh));
+    renderBatches(batches);
+    // Re-render current open page if user is inside a batch
+    var page = document.querySelector('.page.active')?.id;
+    if (_currentOpenUid && page === 'page-unit') {
+      openUnit(_currentOpenBid, _currentOpenSid, _currentOpenCid, _currentOpenUid);
+    } else if (_currentOpenCid && page === 'page-lectures') {
+      openChapter(_currentOpenBid, _currentOpenSid, _currentOpenCid);
+    } else if (_currentOpenSid && page === 'page-chapters') {
+      openSubject(_currentOpenBid, _currentOpenSid);
+    }
+  } catch(e) {}
+}
+
+function startBatchAutoRefresh() {
+  if (_autoRefreshTimer) return;
+  _autoRefreshTimer = setInterval(_refreshBatchesQuiet, 5000);
+}
+
+function stopBatchAutoRefresh() {
+  if (_autoRefreshTimer) { clearInterval(_autoRefreshTimer); _autoRefreshTimer = null; }
 }
 
 // ── Batch Tabs ────────────────────────────────────────────────────────────────
@@ -1583,6 +1622,7 @@ async function toggleAutoMode(checked) {
         '📊 Already saved: ' + r.session.lectureCount + ' lectures'
       );
       toast('🤖 Auto Mode ON! Bot mein video bhejo.', 'success');
+      startBatchAutoRefresh();
     } catch(e) {
       document.getElementById('autoModeToggle').checked = false;
       toast('Auto Mode shuru nahi hua: ' + e.message, 'error');
@@ -1595,6 +1635,7 @@ async function toggleAutoMode(checked) {
     try {
       var r = await apiFetch('/api/auto-lecture/stop', 'POST', {});
       _setAutoModeUI(false, '');
+      stopBatchAutoRefresh();
       toast('🤖 Auto Mode OFF — ' + (r.totalAdded || 0) + ' lectures save hue', 'success');
     } catch(e) {
       toast('Band nahi hua: ' + e.message, 'error');
@@ -1616,6 +1657,7 @@ async function _syncAutoModeStatus() {
         '▶️ Next: <b>Lecture ' + nextNum + '</b><br>' +
         '📊 Already saved: ' + r.lectureCount + ' lectures'
       );
+      startBatchAutoRefresh(); // Auto-mode chal raha hai — background refresh shuru karo
     } else {
       _setAutoModeUI(false, '');
     }
