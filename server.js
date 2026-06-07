@@ -13,6 +13,7 @@ const STORAGE_CHANNEL_ID = process.env.STORAGE_CHANNEL_ID
   ? parseInt(process.env.STORAGE_CHANNEL_ID)
   : null;
 const UPI_ID = process.env.UPI_ID || "";
+const SUPPORT_USERNAME = process.env.SUPPORT_USERNAME || "";
 const PAYMENT_GROUP_ID = process.env.PAYMENT_GROUP_ID ? parseInt(process.env.PAYMENT_GROUP_ID) : null;
 
 let BOT_USERNAME = "";
@@ -132,6 +133,7 @@ app.get("/api/config", (req, res) => {
     botUsername: BOT_USERNAME || '',
     forceJoinRequired: forceJoinChannels.length > 0,
     upiId: UPI_ID || '',
+    supportUsername: SUPPORT_USERNAME || '',
   });
 });
 
