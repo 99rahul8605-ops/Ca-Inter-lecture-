@@ -520,12 +520,12 @@ async function startBot() {
             const isVideo = f.file_type === "video" || f.file_type === "video_note";
             if (isVideo && sentMsg) {
               hasVideo = true;
-              const deleteAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+              const deleteAt = new Date(Date.now() + 6 * 60 * 60 * 1000);
               await scheduleDelete(bot, chatId, sentMsg.message_id, deleteAt);
             }
           }
           if (hasVideo) {
-            await bot.sendMessage(chatId, `⚠️ Videos in this batch will be automatically deleted from your DM after 24 hours.`);
+            await bot.sendMessage(chatId, `⚠️ Videos in this batch will be automatically deleted from your DM after 6 hours.`);
           }
           return;
         } catch (err) {
@@ -542,19 +542,19 @@ async function startBot() {
         const isVideo = record.file_type === "video" || record.file_type === "video_note";
 
         if (isVideo && record.delivered_to.includes(chatId)) {
-          return bot.sendMessage(chatId, `⚠️ This video has already been delivered to you. It will be auto-deleted from your DM within 24 hours of first delivery.`);
+          return bot.sendMessage(chatId, `⚠️ This video has already been delivered to you. It will be auto-deleted from your DM within 6 hours of first delivery.`);
         }
 
         const sentMsg = await sendFile(bot, chatId, record);
 
         if (isVideo) {
-          const deleteAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+          const deleteAt = new Date(Date.now() + 6 * 60 * 60 * 1000);
           await scheduleDelete(bot, chatId, sentMsg.message_id, deleteAt);
           await FileRecord.updateOne({ _id: record._id }, { $addToSet: { delivered_to: chatId } });
           setTimeout(async () => {
             await FileRecord.updateOne({ _id: record._id }, { $pull: { delivered_to: chatId } }).catch(() => {});
-          }, 24 * 60 * 60 * 1000);
-          await bot.sendMessage(chatId, `⚠️ This video will be automatically deleted from your DM after 24 hours.`);
+          }, 6 * 60 * 60 * 1000);
+          await bot.sendMessage(chatId, `⚠️ This video will be automatically deleted from your DM after 6 hours.`);
         }
       } catch (err) {
         console.error("Deep link error:", err.message);
