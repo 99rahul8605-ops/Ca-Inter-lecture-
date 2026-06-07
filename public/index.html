@@ -348,7 +348,7 @@ body.ready{transition:none}
   <div class="vs-bar"><div class="vs-fill" id="vsFill"></div></div>
   <div style="margin-top:32px;text-align:center">
     <div style="font-size:11px;color:var(--text3);margin-bottom:10px">Having trouble? Contact us</div>
-    <button onclick="var _bu=window._botUsername||'';if(tg){tg.openLink('https://t.me/'+_bu,{try_instant_view:false});}else{window.open('https://t.me/'+_bu,'_blank');}" style="display:inline-flex;align-items:center;gap:7px;background:var(--surface2);border:1px solid var(--border);color:var(--text2);padding:9px 18px;border-radius:20px;font-size:13px;font-weight:600;cursor:pointer;">
+    <button onclick="var _cl=window._contactLink||('https://t.me/'+(window._botUsername||''));if(tg){tg.openLink(_cl,{try_instant_view:false});}else{window.open(_cl,'_blank');}" style="display:inline-flex;align-items:center;gap:7px;background:var(--surface2);border:1px solid var(--border);color:var(--text2);padding:9px 18px;border-radius:20px;font-size:13px;font-weight:600;cursor:pointer;">
       📩 Contact Support
     </button>
   </div>
@@ -1356,6 +1356,7 @@ async function checkAdminAccess() {
     var ownerId = config.ownerId;
     if (config.botUsername) window._botUsername = config.botUsername;
     if (config.upiId) window._upiId = config.upiId;
+    if (config.contactLink) window._contactLink = config.contactLink;
     // Store force-join requirement
     _fjRequired = !!config.forceJoinRequired;
     if (!ownerId) return;
@@ -3192,9 +3193,9 @@ function handleContact(){
     _contactTimer=setTimeout(collapseContact, 4000);
   } else {
     clearTimeout(_contactTimer);
-    var _bu=window._botUsername||'';
-    if(tg){tg.openLink('https://t.me/'+_bu,{try_instant_view:false});}
-    else{window.open('https://t.me/'+_bu,'_blank');}
+    var _cl = window._contactLink || ('https://t.me/' + (window._botUsername||''));
+    if(tg){tg.openLink(_cl,{try_instant_view:false});}
+    else{window.open(_cl,'_blank');}
     collapseContact();
   }
 }
