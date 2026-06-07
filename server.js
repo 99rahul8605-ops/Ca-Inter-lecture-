@@ -410,7 +410,6 @@ async function startBot() {
   bot.startPolling();
   const me = await bot.getMe();
   BOT_USERNAME = me.username;
-  courseRoutes.setBotUsername && courseRoutes.setBotUsername(BOT_USERNAME);
   console.log(`Bot started: @${BOT_USERNAME}`);
 
   // ── Set Web App menu button ────────────────────────────────────────────────
