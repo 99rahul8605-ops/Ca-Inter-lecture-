@@ -877,7 +877,7 @@ function hardReload() {
 }
 
 var batches = [];
-var _popupLectures = []; // stores lectures for popup reference by index
+var _popupLectures = {}; // stores lectures for popup reference by _id
 var isAdmin = false;
 var pageStack = ['home'];
 var picBase64 = '';
@@ -1010,7 +1010,7 @@ function openChapter(bid, sid, cid) {
   var s = b && b.subjects.find(x => x._id === sid);
   var c = s && s.chapters.find(x => x._id === cid);
   if (!c) return;
-  _popupLectures = []; // Reset on every chapter open
+  _popupLectures = {}; // Reset on every chapter open
   var color = s.color;
   document.getElementById('unitPageTitle').textContent = c.name;
 
@@ -1034,7 +1034,7 @@ function openChapter(bid, sid, cid) {
     if (c.lectures && c.lectures.length > 0) {
       html += `<div style="padding:14px 0 8px;font-size:11px;font-weight:600;color:var(--text2);letter-spacing:1.2px;text-transform:uppercase">OTHER LECTURES</div>`;
       html += c.lectures.map((l,i) => {
-        var idx = _popupLectures.push(l) - 1;
+        _popupLectures[l._id] = l;
         return `
         <div class="lec-row">
           <div class="lec-num">${i+1}</div>
@@ -1044,8 +1044,8 @@ function openChapter(bid, sid, cid) {
               ? '<div style="margin-top:6px"><span class="coming-soon-badge">🔜 Coming Soon</span></div>'
               : `<div class="lec-mini-btns">
                   ${l.isDemo ? '<span class="demo-badge" style="margin-right:4px">DEMO</span>' : ''}
-                  <button class="lec-mini-btn lec-mini-watch" onclick="openLink('${l.link}','lecture')"><i class="ti ti-player-play-filled"></i> Lecture</button>
-                  ${l.notes ? `<button class="lec-mini-btn lec-mini-notes" onclick="openLink('${l.notes}','notes')"><i class="ti ti-notes"></i> Notes</button>` : ''}
+                  <button class="lec-mini-btn lec-mini-watch" data-lid="${l._id}" onclick="openLink(_popupLectures[this.dataset.lid].link,'lecture')"><i class="ti ti-player-play-filled"></i> Lecture</button>
+                  ${l.notes ? `<button class="lec-mini-btn lec-mini-notes" data-lid="${l._id}" onclick="openLink(_popupLectures[this.dataset.lid].notes,'notes')"><i class="ti ti-notes"></i> Notes</button>` : ''}
                 </div>`}
           </div>
         </div>`;
@@ -1057,15 +1057,15 @@ function openChapter(bid, sid, cid) {
     document.getElementById('unitSecLabel').textContent = 'LECTURES';
     html = !c.lectures.length ? '<div class="empty"><i class="ti ti-video"></i>No lectures yet</div>' :
       c.lectures.map((l,i) => {
-        var idx = _popupLectures.push(l) - 1;
+        _popupLectures[l._id] = l;
         return `
         <div class="lec-row">
           <div class="lec-num">${i+1}</div>
           <div class="lec-info">
             <div class="lec-name">${l.name}</div>
             <div class="lec-mini-btns">
-              <button class="lec-mini-btn lec-mini-watch" onclick="openLink('${l.link}','lecture')"><i class="ti ti-player-play-filled"></i> Lecture</button>
-              ${l.notes ? `<button class="lec-mini-btn lec-mini-notes" onclick="openLink('${l.notes}','notes')"><i class="ti ti-notes"></i> Notes</button>` : ''}
+              <button class="lec-mini-btn lec-mini-watch" data-lid="${l._id}" onclick="openLink(_popupLectures[this.dataset.lid].link,'lecture')"><i class="ti ti-player-play-filled"></i> Lecture</button>
+              ${l.notes ? `<button class="lec-mini-btn lec-mini-notes" data-lid="${l._id}" onclick="openLink(_popupLectures[this.dataset.lid].notes,'notes')"><i class="ti ti-notes"></i> Notes</button>` : ''}
             </div>
           </div>
         </div>`;
@@ -1083,12 +1083,12 @@ function openUnit(bid, sid, cid, uid) {
   var c = s && s.chapters.find(x => x._id === cid);
   var u = c && c.units.find(x => x._id === uid);
   if (!u) return;
-  _popupLectures = []; // Reset on every unit open
+  _popupLectures = {}; // Reset on every unit open
   document.getElementById('lecPageTitle').textContent = u.name;
   document.getElementById('lecPageSub').textContent = u.lectures.length + ' lectures';
   document.getElementById('lectureList').innerHTML = !u.lectures.length ? '<div class="empty"><i class="ti ti-video"></i>No lectures yet</div>' :
     u.lectures.map((l,i) => {
-      var idx = _popupLectures.push(l) - 1;
+      _popupLectures[l._id] = l;
       return `
       <div class="lec-row">
         <div class="lec-num">${i+1}</div>
@@ -1098,8 +1098,8 @@ function openUnit(bid, sid, cid, uid) {
             ? '<div style="margin-top:6px"><span class="coming-soon-badge">🔜 Coming Soon</span></div>'
             : `<div class="lec-mini-btns">
                 ${l.isDemo ? '<span class="demo-badge" style="margin-right:4px">DEMO</span>' : ''}
-                <button class="lec-mini-btn lec-mini-watch" onclick="openLink('${l.link}','lecture')"><i class="ti ti-player-play-filled"></i> Lecture</button>
-                ${l.notes ? `<button class="lec-mini-btn lec-mini-notes" onclick="openLink('${l.notes}','notes')"><i class="ti ti-notes"></i> Notes</button>` : ''}
+                <button class="lec-mini-btn lec-mini-watch" data-lid="${l._id}" onclick="openLink(_popupLectures[this.dataset.lid].link,'lecture')"><i class="ti ti-player-play-filled"></i> Lecture</button>
+                ${l.notes ? `<button class="lec-mini-btn lec-mini-notes" data-lid="${l._id}" onclick="openLink(_popupLectures[this.dataset.lid].notes,'notes')"><i class="ti ti-notes"></i> Notes</button>` : ''}
               </div>`}
         </div>
       </div>`;
@@ -2803,8 +2803,8 @@ init();
 
 </script>
 <script>
-function showLecturePopup(idx) {
-  var lecture = _popupLectures[idx];
+function showLecturePopup(lid) {
+  var lecture = _popupLectures[lid];
   if (!lecture) return;
   if (lecture.link) {
     openLink(lecture.link);
