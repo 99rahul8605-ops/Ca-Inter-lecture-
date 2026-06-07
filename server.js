@@ -78,7 +78,6 @@ const fileSchema = new mongoose.Schema({
   expires_at: { type: Date, default: null },
   delivered_to: [{ type: Number }],
   created_at: { type: Date, default: Date.now },
-  channel_msg_id: { type: Number, default: null }, // storage channel message_id for bot-change recovery
 });
 // TTL index removed — links are permanent. expires_at field kept for schema compatibility.
 const FileRecord = mongoose.model("FileRecord", fileSchema);
@@ -267,11 +266,12 @@ async function saveToStorageChannel(bot, fileInfo) {
     // Extract the channel file_id from the sent message response
     const channelFileInfo = extractFileInfo(sentMsg);
     if (channelFileInfo) {
-      return { ...channelFileInfo, file_name: fileInfo.file_name, channel_msg_id: sentMsg.message_id };
+      // Keep the original file_name, use channel's file_id and file_type
+      return { ...channelFileInfo, file_name: fileInfo.file_name };
     }
 
     console.warn("saveToStorageChannel: could not extract file_id from channel response, using original.");
-    return { ...fileInfo, channel_msg_id: sentMsg.message_id };
+    return fileInfo;
   } catch (err) {
     console.error("saveToStorageChannel failed, using original file_id:", err.message);
     return fileInfo;
@@ -280,28 +280,16 @@ async function saveToStorageChannel(bot, fileInfo) {
 
 async function sendFile(bot, chatId, record) {
   const caption = `📎 ${record.file_name}`;
-  const protect = !isOwner(chatId);
-
-  // Try sending via file_id first; if it fails (bot changed), fallback to forwarding from channel
-  try {
-    switch (record.file_type) {
-      case "photo":      return await bot.sendPhoto(chatId, record.file_id, { caption });
-      case "video":      return await bot.sendVideo(chatId, record.file_id, { caption, protect_content: protect });
-      case "audio":      return await bot.sendAudio(chatId, record.file_id, { caption });
-      case "voice":      return await bot.sendVoice(chatId, record.file_id, { caption });
-      case "video_note": return await bot.sendVideoNote(chatId, record.file_id, { protect_content: protect });
-      default:           return await bot.sendDocument(chatId, record.file_id, { caption, filename: record.file_name });
-    }
-  } catch (err) {
-    // file_id invalid (bot changed) — try forwarding from storage channel
-    if (STORAGE_CHANNEL_ID && record.channel_msg_id) {
-      try {
-        return await bot.forwardMessage(chatId, STORAGE_CHANNEL_ID, record.channel_msg_id);
-      } catch (fwdErr) {
-        console.error("Forward fallback failed:", fwdErr.message);
-      }
-    }
-    throw err; // rethrow if no fallback available
+  const protect = !isOwner(chatId); // owner ko forward allow, baaki restrict
+  switch (record.file_type) {
+    case "photo":      return await bot.sendPhoto(chatId, record.file_id, { caption });
+    case "video":      return await bot.sendVideo(chatId, record.file_id, { caption, protect_content: protect });
+    case "audio":      return await bot.sendAudio(chatId, record.file_id, { caption });
+    case "voice":      return await bot.sendVoice(chatId, record.file_id, { caption });
+    case "video_note": return await bot.sendVideoNote(chatId, record.file_id, { protect_content: protect });
+    default:
+      // document: pass filename explicitly so Telegram shows the clean name on download
+      return await bot.sendDocument(chatId, record.file_id, { caption, filename: record.file_name });
   }
 }
 
@@ -974,7 +962,6 @@ async function startBot() {
         file_name: storedFileInfo.file_name,
         uploaded_by: userId,
         expires_at: null,
-        channel_msg_id: storedFileInfo.channel_msg_id || null,
       });
       const link = `https://t.me/${BOT_USERNAME}?start=${code}`;
       await bot.deleteMessage(chatId, processing.message_id);
@@ -1094,7 +1081,6 @@ async function startBot() {
           file_name: storedFileInfo.file_name,
           uploaded_by: userId,
           expires_at: null,
-          channel_msg_id: storedFileInfo.channel_msg_id || null,
         });
         const link = `https://t.me/${BOT_USERNAME}?start=${code}`;
         await bot.deleteMessage(chatId, processing.message_id);
