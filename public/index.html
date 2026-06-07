@@ -1044,7 +1044,7 @@ function openChapter(bid, sid, cid) {
               ? '<div style="margin-top:6px"><span class="coming-soon-badge">🔜 Coming Soon</span></div>'
               : `<div class="lec-mini-btns">
                   ${l.isDemo ? '<span class="demo-badge" style="margin-right:4px">DEMO</span>' : ''}
-                  <button class="lec-mini-btn lec-mini-watch" data-lid="${l._id}" onclick="openLink(_popupLectures[this.dataset.lid].link,'lecture')"><i class="ti ti-player-play-filled"></i> Lecture</button>
+                  <button class="lec-mini-btn lec-mini-watch" data-lid="${l._id}" onclick="openLecLink(_popupLectures[this.dataset.lid].link,'lecture')"><i class="ti ti-player-play-filled"></i> Lecture</button>
                   ${l.notes ? `<button class="lec-mini-btn lec-mini-notes" data-lid="${l._id}" onclick="openLink(_popupLectures[this.dataset.lid].notes,'notes')"><i class="ti ti-notes"></i> Notes</button>` : ''}
                 </div>`}
           </div>
@@ -1064,7 +1064,7 @@ function openChapter(bid, sid, cid) {
           <div class="lec-info">
             <div class="lec-name">${l.name}</div>
             <div class="lec-mini-btns">
-              <button class="lec-mini-btn lec-mini-watch" data-lid="${l._id}" onclick="openLink(_popupLectures[this.dataset.lid].link,'lecture')"><i class="ti ti-player-play-filled"></i> Lecture</button>
+              <button class="lec-mini-btn lec-mini-watch" data-lid="${l._id}" onclick="openLecLink(_popupLectures[this.dataset.lid].link,'lecture')"><i class="ti ti-player-play-filled"></i> Lecture</button>
               ${l.notes ? `<button class="lec-mini-btn lec-mini-notes" data-lid="${l._id}" onclick="openLink(_popupLectures[this.dataset.lid].notes,'notes')"><i class="ti ti-notes"></i> Notes</button>` : ''}
             </div>
           </div>
@@ -1098,7 +1098,7 @@ function openUnit(bid, sid, cid, uid) {
             ? '<div style="margin-top:6px"><span class="coming-soon-badge">🔜 Coming Soon</span></div>'
             : `<div class="lec-mini-btns">
                 ${l.isDemo ? '<span class="demo-badge" style="margin-right:4px">DEMO</span>' : ''}
-                <button class="lec-mini-btn lec-mini-watch" data-lid="${l._id}" onclick="openLink(_popupLectures[this.dataset.lid].link,'lecture')"><i class="ti ti-player-play-filled"></i> Lecture</button>
+                <button class="lec-mini-btn lec-mini-watch" data-lid="${l._id}" onclick="openLecLink(_popupLectures[this.dataset.lid].link,'lecture')"><i class="ti ti-player-play-filled"></i> Lecture</button>
                 ${l.notes ? `<button class="lec-mini-btn lec-mini-notes" data-lid="${l._id}" onclick="openLink(_popupLectures[this.dataset.lid].notes,'notes')"><i class="ti ti-notes"></i> Notes</button>` : ''}
               </div>`}
         </div>
@@ -2003,7 +2003,7 @@ function openDemoModal(bid) {
           <div class="lec-name">${l.name} <span class="demo-badge" style="margin-left:4px">DEMO</span></div>
           <div class="lec-sub" style="font-size:10px;color:var(--text2);margin-top:2px">${l._subj} · ${l._chap}${l._unit ? ' · ' + l._unit : ''}</div>
           <div class="lec-mini-btns" style="margin-top:6px">
-            <button class="lec-mini-btn lec-mini-watch" onclick="openLink('${l.link}','lecture')"><i class="ti ti-player-play-filled"></i> Watch</button>
+            <button class="lec-mini-btn lec-mini-watch" onclick="openLecLink('${l.link}','lecture')"><i class="ti ti-player-play-filled"></i> Watch</button>
             ${l.notes ? `<button class="lec-mini-btn lec-mini-notes" onclick="openLink('${l.notes}','notes')"><i class="ti ti-notes"></i> Notes</button>` : ''}
           </div>
         </div>
@@ -2227,6 +2227,26 @@ var currentTab = 'home';
 var userId = null;
 var claimsToday = 0;    // 0-3 claims today
 var _adWatching = false; // prevent double-click while ad loads
+
+// ── Lecture link helper ───────────────────────────────────────────────────────
+// Handles both: plain code (e.g. "Abc123") and full links (legacy "https://t.me/bot?start=Abc123")
+// Bot username comes from config — so bot change = no manual DB update needed
+function openLecLink(codeOrLink, type) {
+  if (!codeOrLink) return openLink('', type || 'lecture');
+  var url;
+  if (codeOrLink.startsWith('http')) {
+    // Legacy full link — extract code and rebuild with current bot username
+    var match = codeOrLink.match(/[?&]start=([^&]+)/);
+    var code = match ? match[1] : null;
+    url = code && window._botUsername
+      ? 'https://t.me/' + window._botUsername + '?start=' + code
+      : codeOrLink; // fallback to original if no match
+  } else {
+    // New format — just the code
+    url = 'https://t.me/' + (window._botUsername || '') + '?start=' + codeOrLink;
+  }
+  openLink(url, type || 'lecture');
+}
 
 function getUserId() {
   var tgUser = tg && tg.initDataUnsafe && tg.initDataUnsafe.user;
@@ -2810,7 +2830,7 @@ function showLecturePopup(lid) {
   var lecture = _popupLectures[lid];
   if (!lecture) return;
   if (lecture.link) {
-    openLink(lecture.link);
+    openLecLink(lecture.link);
   } else if (lecture.notes) {
     openLink(lecture.notes, 'notes');
   } else {
