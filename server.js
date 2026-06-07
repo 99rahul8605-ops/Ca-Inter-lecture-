@@ -14,6 +14,7 @@ const STORAGE_CHANNEL_ID = process.env.STORAGE_CHANNEL_ID
   : null;
 const UPI_ID = process.env.UPI_ID || "";
 const PAYMENT_GROUP_ID = process.env.PAYMENT_GROUP_ID ? parseInt(process.env.PAYMENT_GROUP_ID) : null;
+const CONTACT_LINK = process.env.CONTACT_LINK || "";
 
 let BOT_USERNAME = "";
 let bot = null; // global bot instance
@@ -133,6 +134,7 @@ app.get("/api/config", (req, res) => {
     botUsername: BOT_USERNAME || '',
     forceJoinRequired: forceJoinChannels.length > 0,
     upiId: UPI_ID || '',
+    contactLink: CONTACT_LINK || `https://t.me/${BOT_USERNAME}`,
   });
 });
 
@@ -1376,110 +1378,6 @@ async function startBot() {
         `✅ Broadcast done — Sent: ${sent} | Blocked: ${blocked} | Failed: ${failed}`
       );
     }
-  });
-
-  // ── /rescan_channel (Owner only) ─────────────────────────────────────────────
-  // Scans storage channel messages and updates channel_msg_id in FileRecord DB
-  let _rescanActive = false;
-  bot.onText(/\/rescan_channel/, async (msg) => {
-    if (isGroupChat(msg)) return;
-    const userId = msg.from?.id;
-    if (!isOwner(userId)) return;
-    if (!STORAGE_CHANNEL_ID) return bot.sendMessage(userId, '❌ STORAGE_CHANNEL_ID not set.');
-    if (_rescanActive) return bot.sendMessage(userId, '⏳ Rescan already running...');
-
-    _rescanActive = true;
-    const progressMsg = await bot.sendMessage(userId,
-      '🔍 <b>Channel Rescan Started</b>\n\nScanning messages to recover file IDs...\nThis may take a few minutes for 1000+ messages.',
-      { parse_mode: 'HTML' }
-    );
-
-    let scanned = 0, updated = 0, errors = 0;
-    const BATCH = 50;
-
-    // Get total FileRecords without channel_msg_id
-    const total = await FileRecord.countDocuments({ channel_msg_id: null });
-
-    try {
-      // Strategy: try message IDs from 1 upward in batches
-      // We use forwardMessage to a temp chat to get file_id, then match with DB
-      // Better: use copyMessage to owner's DM to extract file_id silently
-
-      // Get all file_ids from DB that need channel_msg_id
-      const needsUpdate = await FileRecord.find({ channel_msg_id: null }).lean();
-      const fileIdMap = new Map(needsUpdate.map(r => [r.file_id, r._id]));
-
-      let msgId = 1;
-      let emptyStreak = 0;
-      const MAX_EMPTY = 20; // stop after 20 consecutive missing messages
-
-      while (_rescanActive && emptyStreak < MAX_EMPTY) {
-        // Process BATCH messages at a time
-        const promises = [];
-        for (let i = 0; i < BATCH; i++) {
-          promises.push((async (id) => {
-            try {
-              // Copy message to owner DM to extract file info
-              const copied = await bot.forwardMessage(userId, STORAGE_CHANNEL_ID, id);
-              // Delete the forwarded message immediately (cleanup)
-              await bot.deleteMessage(userId, copied.message_id).catch(() => {});
-              scanned++;
-              emptyStreak = 0;
-
-              // Extract file_id from forwarded message
-              const info = extractFileInfo(copied);
-              if (info && fileIdMap.has(info.file_id)) {
-                const recordId = fileIdMap.get(info.file_id);
-                await FileRecord.findByIdAndUpdate(recordId, { channel_msg_id: id });
-                updated++;
-                fileIdMap.delete(info.file_id);
-              }
-            } catch (e) {
-              if (e.message && e.message.includes('message to forward not found')) {
-                emptyStreak++;
-              }
-              errors++;
-            }
-          })(msgId + i));
-        }
-        await Promise.all(promises);
-        msgId += BATCH;
-
-        // Update progress every 5 batches
-        if (Math.floor(msgId / BATCH) % 5 === 0) {
-          await bot.editMessageText(
-            `🔍 <b>Scanning...</b>\n\n` +
-            `📨 Scanned: ${scanned}\n✅ Recovered: ${updated}/${total}\n❌ Errors: ${errors}\n\n` +
-            `${fileIdMap.size === 0 ? '🎉 All records recovered!' : `⏳ Remaining: ${fileIdMap.size}`}`,
-            { chat_id: userId, message_id: progressMsg.message_id, parse_mode: 'HTML' }
-          ).catch(() => {});
-        }
-
-        // All records updated — stop early
-        if (fileIdMap.size === 0) break;
-      }
-
-      _rescanActive = false;
-      await bot.editMessageText(
-        `✅ <b>Rescan Complete!</b>\n\n` +
-        `📨 Total scanned: ${scanned}\n` +
-        `✅ Recovered: ${updated}\n` +
-        `⚠️ Already had ID: ${needsUpdate.length - updated > 0 ? needsUpdate.length - updated : 0}\n` +
-        `❌ Errors: ${errors}`,
-        { chat_id: userId, message_id: progressMsg.message_id, parse_mode: 'HTML' }
-      ).catch(() => {});
-    } catch (err) {
-      _rescanActive = false;
-      console.error('Rescan error:', err.message);
-      await bot.sendMessage(userId, `❌ Rescan failed: ${err.message}`);
-    }
-  });
-
-  // Stop rescan
-  bot.onText(/\/rescan_stop/, async (msg) => {
-    if (!isOwner(msg.from?.id)) return;
-    _rescanActive = false;
-    bot.sendMessage(msg.from.id, '🛑 Rescan stopped.');
   });
 
   // ── /stats (Owner only) ──────────────────────────────────────────────────────
