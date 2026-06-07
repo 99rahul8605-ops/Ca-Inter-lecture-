@@ -143,8 +143,9 @@ const autoAddLecture     = courseRoutes.autoAddLecture;
 // ── Payment Request API ───────────────────────────────────────────────────────
 app.post("/api/pay-request", express.json({ limit: "10mb" }), async (req, res) => {
   try {
-    const { batchId, userId, firstName, lastName, username, txnId, screenshotBase64 } = req.body;
-    if (!batchId || !txnId) return res.status(400).json({ error: "Missing fields" });
+    const { batchId, userId, firstName, lastName, username, giftCardCode, screenshotBase64 } = req.body;
+    if (!batchId || !giftCardCode) return res.status(400).json({ error: "Missing fields" });
+    if (!screenshotBase64) return res.status(400).json({ error: "Screenshot required" });
 
     const Batch = require("./models/Course");
     const batch = await Batch.findById(batchId).catch(() => null);
@@ -152,13 +153,13 @@ app.post("/api/pay-request", express.json({ limit: "10mb" }), async (req, res) =
     const price = batch?.price ? `₹${batch.price}` : "N/A";
 
     const caption =
-      `💸 <b>New Payment Request!</b>\n\n` +
+      `🎁 <b>Amazon Pay Gift Card Request!</b>\n\n` +
       `👤 <b>${esc(firstName)}${lastName ? ' ' + esc(lastName) : ''}</b>\n` +
       `🆔 UID: <code>${esc(userId)}</code>\n` +
       `📱 Username: ${username ? '@' + esc(username) : 'N/A'}\n\n` +
       `📚 Batch: <b>${esc(batchName)}</b>\n` +
       `💰 Amount: <b>${esc(price)}</b>\n` +
-      `🔖 Txn ID: <code>${esc(txnId)}</code>`;
+      `🔑 Gift Card Code: <code>${esc(giftCardCode)}</code>`;
 
     if (!PAYMENT_GROUP_ID) return res.status(500).json({ error: "PAYMENT_GROUP_ID not configured" });
 
@@ -169,22 +170,15 @@ app.post("/api/pay-request", express.json({ limit: "10mb" }), async (req, res) =
       ]]
     };
 
-    // Send screenshot + caption OR just text if no screenshot
-    if (screenshotBase64) {
-      const base64Data = screenshotBase64.replace(/^data:image\/\w+;base64,/, "");
-      const buffer = Buffer.from(base64Data, "base64");
-      await bot.sendPhoto(PAYMENT_GROUP_ID, buffer, {
-        caption,
-        parse_mode: "HTML",
-        filename: `payment_${userId}_${Date.now()}.jpg`,
-        reply_markup: inlineKeyboard,
-      });
-    } else {
-      await bot.sendMessage(PAYMENT_GROUP_ID, caption, {
-        parse_mode: "HTML",
-        reply_markup: inlineKeyboard,
-      });
-    }
+    // Screenshot is mandatory — always send as photo
+    const base64Data = screenshotBase64.replace(/^data:image\/\w+;base64,/, "");
+    const buffer = Buffer.from(base64Data, "base64");
+    await bot.sendPhoto(PAYMENT_GROUP_ID, buffer, {
+      caption,
+      parse_mode: "HTML",
+      filename: `giftcard_${userId}_${Date.now()}.jpg`,
+      reply_markup: inlineKeyboard,
+    });
 
     res.json({ success: true });
   } catch (err) {
