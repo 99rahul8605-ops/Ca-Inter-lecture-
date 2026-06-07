@@ -105,6 +105,8 @@ body.ready{transition:none}
 .pay-gc-code-input{width:100%;background:var(--surface2);border:1.5px solid var(--border);color:var(--text);padding:11px 14px;border-radius:10px;font-size:15px;font-family:monospace;font-weight:600;outline:none;letter-spacing:1px;text-transform:uppercase}
 .pay-gc-code-input:focus{border-color:#ff9900}
 .pay-gc-code-input::placeholder{text-transform:none;font-weight:400;letter-spacing:0;font-size:13px}
+.pay-gc-buy-btn{width:100%;padding:13px;border-radius:12px;border:none;background:linear-gradient(135deg,#ff9900,#e47911);color:#fff;font-size:14px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;margin-bottom:12px}
+.pay-gc-buy-btn:active{opacity:0.85}
 .pay-steps{font-size:11px;color:var(--text2);line-height:1.8;margin-bottom:14px;padding:10px 12px;background:var(--surface2);border-radius:10px}
 .pay-steps b{color:var(--text)}
 .pay-ss-box{border:2px dashed var(--border);border-radius:12px;padding:16px;text-align:center;cursor:pointer;margin-bottom:12px;transition:border-color 0.2s}
@@ -2029,7 +2031,10 @@ function buyBatch(bid) {
 
   // Set batch info
   document.getElementById('payBatchName').textContent = b.name;
-  document.getElementById('payAmount').textContent = b.price ? '₹' + b.price : 'Contact Admin';
+  var priceText = b.price ? '₹' + b.price : 'Contact Admin';
+  document.getElementById('payAmount').textContent = priceText;
+  document.getElementById('payGcAmount2').textContent = priceText;
+  document.getElementById('payGcAmount3').textContent = priceText;
 
   // Reset form
   document.getElementById('payGcCode').value = '';
@@ -2040,6 +2045,15 @@ function buyBatch(bid) {
   document.getElementById('paySubmitBtn').innerHTML = '<i class="ti ti-gift"></i> Submit Gift Card';
 
   document.getElementById('payModal').classList.add('show');
+}
+
+function openAmazonGiftCard() {
+  var url = 'https://www.amazon.in/giftcards/';
+  if (tg && tg.openLink) {
+    tg.openLink(url);
+  } else {
+    window.open(url, '_blank');
+  }
 }
 
 function closePayModal() {
@@ -3052,13 +3066,25 @@ body.light-mode .lec-mini-notes{background:var(--surface2);color:var(--text)}
         <div class="pay-gc-logo"><span>🎁</span> Amazon Pay Gift Card</div>
         <div class="pay-gc-note">Amazon app se exact amount ka Gift Card kharido. Neeche card ka code aur screenshot submit karo — admin verify karke batch unlock karega.</div>
       </div>
+      <!-- Warning -->
+      <div style="background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.3);border-radius:10px;padding:10px 12px;margin-bottom:12px;display:flex;gap:8px;align-items:flex-start">
+        <span style="font-size:16px;flex-shrink:0">⚠️</span>
+        <div style="font-size:11px;color:#ef4444;line-height:1.7;font-weight:500">
+          <b style="font-size:12px">Sirf Amazon Pay Gift Card accepted hai.</b><br>
+          Koi bhi aur gift card (Flipkart, Google Play, etc.) submit kiya toh woh <b>rejected hoga</b> aur hum kisi bhi loss ke liye <b>responsible nahi honge.</b>
+        </div>
+      </div>
+      <!-- Buy Gift Card Button -->
+      <button class="pay-gc-buy-btn" id="payGcBuyBtn" onclick="openAmazonGiftCard()">
+        <span>🛒</span> Buy Amazon Gift Card — <span id="payGcAmount2">—</span>
+      </button>
       <!-- Steps -->
       <div class="pay-steps">
         <b>How to pay:</b><br>
-        1️⃣ Amazon app → Gift Cards → Buy a Gift Card<br>
-        2️⃣ Exact amount select karo jo upar dikh raha hai<br>
-        3️⃣ Gift Card ka <b>claim code</b> copy karo<br>
-        4️⃣ Gift Card ka screenshot lo<br>
+        1️⃣ Upar button dabao — Amazon Gift Card page khulega<br>
+        2️⃣ <b>Exactly <span id="payGcAmount3">—</span></b> amount daalo<br>
+        3️⃣ "For Myself" select karo → Pay karo<br>
+        4️⃣ Gift Card ka <b>claim code</b> copy karo<br>
         5️⃣ Code aur screenshot neeche submit karo
       </div>
       <!-- Gift Card Code -->
