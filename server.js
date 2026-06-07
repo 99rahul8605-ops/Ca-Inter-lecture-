@@ -78,6 +78,7 @@ const fileSchema = new mongoose.Schema({
   expires_at: { type: Date, default: null },
   delivered_to: [{ type: Number }],
   created_at: { type: Date, default: Date.now },
+  channel_msg_id: { type: Number, default: null }, // storage channel message_id for bot-change recovery
 });
 // TTL index removed — links are permanent. expires_at field kept for schema compatibility.
 const FileRecord = mongoose.model("FileRecord", fileSchema);
@@ -266,12 +267,11 @@ async function saveToStorageChannel(bot, fileInfo) {
     // Extract the channel file_id from the sent message response
     const channelFileInfo = extractFileInfo(sentMsg);
     if (channelFileInfo) {
-      // Keep the original file_name, use channel's file_id and file_type
-      return { ...channelFileInfo, file_name: fileInfo.file_name };
+      return { ...channelFileInfo, file_name: fileInfo.file_name, channel_msg_id: sentMsg.message_id };
     }
 
     console.warn("saveToStorageChannel: could not extract file_id from channel response, using original.");
-    return fileInfo;
+    return { ...fileInfo, channel_msg_id: sentMsg.message_id };
   } catch (err) {
     console.error("saveToStorageChannel failed, using original file_id:", err.message);
     return fileInfo;
@@ -280,16 +280,28 @@ async function saveToStorageChannel(bot, fileInfo) {
 
 async function sendFile(bot, chatId, record) {
   const caption = `📎 ${record.file_name}`;
-  const protect = !isOwner(chatId); // owner ko forward allow, baaki restrict
-  switch (record.file_type) {
-    case "photo":      return await bot.sendPhoto(chatId, record.file_id, { caption });
-    case "video":      return await bot.sendVideo(chatId, record.file_id, { caption, protect_content: protect });
-    case "audio":      return await bot.sendAudio(chatId, record.file_id, { caption });
-    case "voice":      return await bot.sendVoice(chatId, record.file_id, { caption });
-    case "video_note": return await bot.sendVideoNote(chatId, record.file_id, { protect_content: protect });
-    default:
-      // document: pass filename explicitly so Telegram shows the clean name on download
-      return await bot.sendDocument(chatId, record.file_id, { caption, filename: record.file_name });
+  const protect = !isOwner(chatId);
+
+  // Try sending via file_id first; if it fails (bot changed), fallback to forwarding from channel
+  try {
+    switch (record.file_type) {
+      case "photo":      return await bot.sendPhoto(chatId, record.file_id, { caption });
+      case "video":      return await bot.sendVideo(chatId, record.file_id, { caption, protect_content: protect });
+      case "audio":      return await bot.sendAudio(chatId, record.file_id, { caption });
+      case "voice":      return await bot.sendVoice(chatId, record.file_id, { caption });
+      case "video_note": return await bot.sendVideoNote(chatId, record.file_id, { protect_content: protect });
+      default:           return await bot.sendDocument(chatId, record.file_id, { caption, filename: record.file_name });
+    }
+  } catch (err) {
+    // file_id invalid (bot changed) — try forwarding from storage channel
+    if (STORAGE_CHANNEL_ID && record.channel_msg_id) {
+      try {
+        return await bot.forwardMessage(chatId, STORAGE_CHANNEL_ID, record.channel_msg_id);
+      } catch (fwdErr) {
+        console.error("Forward fallback failed:", fwdErr.message);
+      }
+    }
+    throw err; // rethrow if no fallback available
   }
 }
 
@@ -962,6 +974,7 @@ async function startBot() {
         file_name: storedFileInfo.file_name,
         uploaded_by: userId,
         expires_at: null,
+        channel_msg_id: storedFileInfo.channel_msg_id || null,
       });
       const link = `https://t.me/${BOT_USERNAME}?start=${code}`;
       await bot.deleteMessage(chatId, processing.message_id);
@@ -1081,6 +1094,7 @@ async function startBot() {
           file_name: storedFileInfo.file_name,
           uploaded_by: userId,
           expires_at: null,
+          channel_msg_id: storedFileInfo.channel_msg_id || null,
         });
         const link = `https://t.me/${BOT_USERNAME}?start=${code}`;
         await bot.deleteMessage(chatId, processing.message_id);
@@ -1362,6 +1376,110 @@ async function startBot() {
         `✅ Broadcast done — Sent: ${sent} | Blocked: ${blocked} | Failed: ${failed}`
       );
     }
+  });
+
+  // ── /rescan_channel (Owner only) ─────────────────────────────────────────────
+  // Scans storage channel messages and updates channel_msg_id in FileRecord DB
+  let _rescanActive = false;
+  bot.onText(/\/rescan_channel/, async (msg) => {
+    if (isGroupChat(msg)) return;
+    const userId = msg.from?.id;
+    if (!isOwner(userId)) return;
+    if (!STORAGE_CHANNEL_ID) return bot.sendMessage(userId, '❌ STORAGE_CHANNEL_ID not set.');
+    if (_rescanActive) return bot.sendMessage(userId, '⏳ Rescan already running...');
+
+    _rescanActive = true;
+    const progressMsg = await bot.sendMessage(userId,
+      '🔍 <b>Channel Rescan Started</b>\n\nScanning messages to recover file IDs...\nThis may take a few minutes for 1000+ messages.',
+      { parse_mode: 'HTML' }
+    );
+
+    let scanned = 0, updated = 0, errors = 0;
+    const BATCH = 50;
+
+    // Get total FileRecords without channel_msg_id
+    const total = await FileRecord.countDocuments({ channel_msg_id: null });
+
+    try {
+      // Strategy: try message IDs from 1 upward in batches
+      // We use forwardMessage to a temp chat to get file_id, then match with DB
+      // Better: use copyMessage to owner's DM to extract file_id silently
+
+      // Get all file_ids from DB that need channel_msg_id
+      const needsUpdate = await FileRecord.find({ channel_msg_id: null }).lean();
+      const fileIdMap = new Map(needsUpdate.map(r => [r.file_id, r._id]));
+
+      let msgId = 1;
+      let emptyStreak = 0;
+      const MAX_EMPTY = 20; // stop after 20 consecutive missing messages
+
+      while (_rescanActive && emptyStreak < MAX_EMPTY) {
+        // Process BATCH messages at a time
+        const promises = [];
+        for (let i = 0; i < BATCH; i++) {
+          promises.push((async (id) => {
+            try {
+              // Copy message to owner DM to extract file info
+              const copied = await bot.forwardMessage(userId, STORAGE_CHANNEL_ID, id);
+              // Delete the forwarded message immediately (cleanup)
+              await bot.deleteMessage(userId, copied.message_id).catch(() => {});
+              scanned++;
+              emptyStreak = 0;
+
+              // Extract file_id from forwarded message
+              const info = extractFileInfo(copied);
+              if (info && fileIdMap.has(info.file_id)) {
+                const recordId = fileIdMap.get(info.file_id);
+                await FileRecord.findByIdAndUpdate(recordId, { channel_msg_id: id });
+                updated++;
+                fileIdMap.delete(info.file_id);
+              }
+            } catch (e) {
+              if (e.message && e.message.includes('message to forward not found')) {
+                emptyStreak++;
+              }
+              errors++;
+            }
+          })(msgId + i));
+        }
+        await Promise.all(promises);
+        msgId += BATCH;
+
+        // Update progress every 5 batches
+        if (Math.floor(msgId / BATCH) % 5 === 0) {
+          await bot.editMessageText(
+            `🔍 <b>Scanning...</b>\n\n` +
+            `📨 Scanned: ${scanned}\n✅ Recovered: ${updated}/${total}\n❌ Errors: ${errors}\n\n` +
+            `${fileIdMap.size === 0 ? '🎉 All records recovered!' : `⏳ Remaining: ${fileIdMap.size}`}`,
+            { chat_id: userId, message_id: progressMsg.message_id, parse_mode: 'HTML' }
+          ).catch(() => {});
+        }
+
+        // All records updated — stop early
+        if (fileIdMap.size === 0) break;
+      }
+
+      _rescanActive = false;
+      await bot.editMessageText(
+        `✅ <b>Rescan Complete!</b>\n\n` +
+        `📨 Total scanned: ${scanned}\n` +
+        `✅ Recovered: ${updated}\n` +
+        `⚠️ Already had ID: ${needsUpdate.length - updated > 0 ? needsUpdate.length - updated : 0}\n` +
+        `❌ Errors: ${errors}`,
+        { chat_id: userId, message_id: progressMsg.message_id, parse_mode: 'HTML' }
+      ).catch(() => {});
+    } catch (err) {
+      _rescanActive = false;
+      console.error('Rescan error:', err.message);
+      await bot.sendMessage(userId, `❌ Rescan failed: ${err.message}`);
+    }
+  });
+
+  // Stop rescan
+  bot.onText(/\/rescan_stop/, async (msg) => {
+    if (!isOwner(msg.from?.id)) return;
+    _rescanActive = false;
+    bot.sendMessage(msg.from.id, '🛑 Rescan stopped.');
   });
 
   // ── /stats (Owner only) ──────────────────────────────────────────────────────
