@@ -7,6 +7,52 @@ const Batch = require("../models/Course");
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const OWNER_ID = parseInt(process.env.OWNER_ID || "0");
 
+// ── Bot username — set by server.js after bot.getMe() ────────────────────────
+let _BOT_USERNAME = '';
+function setBotUsername(u) { _BOT_USERNAME = u; }
+
+// Extract CODE from full t.me link OR return as-is if already a code
+// e.g. "https://t.me/SomeBot?start=T5bQnh" → "T5bQnh"
+//      "T5bQnh" → "T5bQnh"
+function extractCode(val) {
+  if (!val) return val;
+  const m = val.match(/[?&]start=([^&]+)/);
+  return m ? m[1] : val.trim();
+}
+
+// Build full t.me link from code using current bot username
+function codeToLink(code) {
+  if (!code) return code;
+  // Already a full URL (e.g. external link not from this bot)
+  if (code.startsWith('http')) return code;
+  return `https://t.me/${_BOT_USERNAME}?start=${code}`;
+}
+
+// Convert all lecture links in a batch object from CODE → full URL (for frontend)
+function expandBatchLinks(b) {
+  const batch = typeof b.toObject === 'function' ? b.toObject() : b;
+  batch.subjects = (batch.subjects || []).map(s => ({
+    ...s,
+    chapters: (s.chapters || []).map(c => ({
+      ...c,
+      lectures: (c.lectures || []).map(l => ({
+        ...l,
+        link:  l.link  ? codeToLink(l.link)  : l.link,
+        notes: l.notes ? codeToLink(l.notes) : l.notes,
+      })),
+      units: (c.units || []).map(u => ({
+        ...u,
+        lectures: (u.lectures || []).map(l => ({
+          ...l,
+          link:  l.link  ? codeToLink(l.link)  : l.link,
+          notes: l.notes ? codeToLink(l.notes) : l.notes,
+        })),
+      })),
+    })),
+  }));
+  return batch;
+}
+
 // ── Auto-Lecture Session — MongoDB backed (survives server restarts) ──────────
 const autoLecSessionSchema = new mongoose.Schema({
   _id:          { type: String, default: 'singleton' },
@@ -58,12 +104,13 @@ async function autoAddLecture({ batchId, subjectId, chapterId, unitId, name, lin
   if (!subj) throw new Error('Subject not found');
   const chap = subj.chapters.id(chapterId);
   if (!chap) throw new Error('Chapter not found');
+  const code = extractCode(link); // store only CODE, not full URL
   if (unitId) {
     const unit = chap.units.id(unitId);
     if (!unit) throw new Error('Unit not found');
-    unit.lectures.push({ name, link, notes: '', order: unit.lectures.length });
+    unit.lectures.push({ name, link: code, notes: '', order: unit.lectures.length });
   } else {
-    chap.lectures.push({ name, link, notes: '', order: chap.lectures.length });
+    chap.lectures.push({ name, link: code, notes: '', order: chap.lectures.length });
   }
   await batch.save();
 }
@@ -142,12 +189,20 @@ function stripPremiumLinks(batch) {
     ...s,
     chapters: s.chapters.map(c => ({
       ...c,
-      lectures: c.lectures.map(l => ({ ...l, link: l.isDemo ? l.link : '', notes: l.isDemo ? l.notes : '' })),
+      lectures: c.lectures.map(l => ({
+        ...l,
+        link:  l.isDemo ? codeToLink(l.link)  : '',
+        notes: l.isDemo ? codeToLink(l.notes) : '',
+      })),
       units: c.units.map(u => ({
         ...u,
-        lectures: u.lectures.map(l => ({ ...l, link: l.isDemo ? l.link : '', notes: l.isDemo ? l.notes : '' }))
-      }))
-    }))
+        lectures: u.lectures.map(l => ({
+          ...l,
+          link:  l.isDemo ? codeToLink(l.link)  : '',
+          notes: l.isDemo ? codeToLink(l.notes) : '',
+        })),
+      })),
+    })),
   }));
   return b;
 }
@@ -158,14 +213,14 @@ router.get("/batches", async (req, res) => {
     const filter = admin ? {} : { $or: [{ isPublic: true }, { isPublic: { $exists: false } }, { isPublic: false }] };
     const batches = await Batch.find(filter).sort({ order: 1 });
 
-    if (admin) return res.json(batches);
+    if (admin) return res.json(batches.map(b => expandBatchLinks(b)));
 
     // For non-admin: verify user identity, strip links from premium batches they don't have access to
     const userId = getRequestUserId(req);
     const result = batches.map(b => {
-      if (!b.isPremium) return b.toObject(); // free batch — send as-is
+      if (!b.isPremium) return expandBatchLinks(b); // free batch — expand links
       const hasAccess = userId && (b.premiumUsers || []).includes(userId);
-      return hasAccess ? b.toObject() : stripPremiumLinks(b); // strip links if no access
+      return hasAccess ? expandBatchLinks(b) : stripPremiumLinks(b); // strip links if no access
     });
 
     res.json(result);
@@ -403,9 +458,9 @@ router.post("/batches/:bid/subjects/:sid/chapters/:cid/lectures", verifyAdmin, a
     const subj = batch && batch.subjects.id(req.params.sid);
     const chap = subj && subj.chapters.id(req.params.cid);
     if (!chap) return res.status(404).json({ error: "Not found" });
-    chap.lectures.push({ name: req.body.name, link: req.body.link, notes: req.body.notes || "", order: chap.lectures.length, isDemo: req.body.isDemo === true });
+    chap.lectures.push({ name: req.body.name, link: extractCode(req.body.link), notes: extractCode(req.body.notes) || "", order: chap.lectures.length, isDemo: req.body.isDemo === true });
     await batch.save();
-    res.json(batch);
+    res.json(expandBatchLinks(batch));
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -430,11 +485,11 @@ router.patch("/batches/:bid/subjects/:sid/chapters/:cid/lectures/:lid/edit", ver
     const lec = chap && chap.lectures.id(req.params.lid);
     if (!lec) return res.status(404).json({ error: "Not found" });
     if (req.body.name) lec.name = req.body.name;
-    if (req.body.link !== undefined) lec.link = req.body.link;
-    if (req.body.notes !== undefined) lec.notes = req.body.notes;
+    if (req.body.link !== undefined) lec.link = extractCode(req.body.link);
+    if (req.body.notes !== undefined) lec.notes = extractCode(req.body.notes);
     if (req.body.comingSoon !== undefined) lec.comingSoon = req.body.comingSoon;
     if (req.body.isDemo !== undefined) lec.isDemo = req.body.isDemo;
-    await batch.save(); res.json(batch);
+    await batch.save(); res.json(expandBatchLinks(batch));
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -447,9 +502,9 @@ router.post("/batches/:bid/subjects/:sid/chapters/:cid/units/:uid/lectures", ver
     const chap = subj && subj.chapters.id(req.params.cid);
     const unit = chap && chap.units.id(req.params.uid);
     if (!unit) return res.status(404).json({ error: "Not found" });
-    unit.lectures.push({ name: req.body.name, link: req.body.link, notes: req.body.notes || "", order: unit.lectures.length, isDemo: req.body.isDemo === true });
+    unit.lectures.push({ name: req.body.name, link: extractCode(req.body.link), notes: extractCode(req.body.notes) || "", order: unit.lectures.length, isDemo: req.body.isDemo === true });
     await batch.save();
-    res.json(batch);
+    res.json(expandBatchLinks(batch));
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -476,13 +531,16 @@ router.patch("/batches/:bid/subjects/:sid/chapters/:cid/units/:uid/lectures/:lid
     const lec = unit && unit.lectures.id(req.params.lid);
     if (!lec) return res.status(404).json({ error: "Not found" });
     if (req.body.name) lec.name = req.body.name;
-    if (req.body.link !== undefined) lec.link = req.body.link;
-    if (req.body.notes !== undefined) lec.notes = req.body.notes;
+    if (req.body.link !== undefined) lec.link = extractCode(req.body.link);
+    if (req.body.notes !== undefined) lec.notes = extractCode(req.body.notes);
     if (req.body.comingSoon !== undefined) lec.comingSoon = req.body.comingSoon;
     if (req.body.isDemo !== undefined) lec.isDemo = req.body.isDemo;
-    await batch.save(); res.json(batch);
+    await batch.save(); res.json(expandBatchLinks(batch));
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
+
+router.autoAddLecture  = autoAddLecture;
+router.setBotUsername  = setBotUsername;
 
 module.exports = router;
 
