@@ -992,7 +992,7 @@ async function startBot() {
             chapterId: autoLectureSession.chapterId,
             unitId:    autoLectureSession.unitId,
             name: lectureName,
-            link,
+            link: code, // store only code, not full link
           });
           autoLectureSession.lectureCount = lectureNum;
           // Persist to DB so server restart keeps count
@@ -1112,7 +1112,7 @@ async function startBot() {
               chapterId: autoLectureSession.chapterId,
               unitId:    autoLectureSession.unitId,
               name: lectureName,
-              link,
+              link: code, // store only code, not full link
             });
             autoLectureSession.lectureCount = lectureNum;
           // Persist to DB so server restart keeps count
