@@ -353,7 +353,7 @@ body.ready{transition:none}
   <div class="vs-bar"><div class="vs-fill" id="vsFill"></div></div>
   <div style="margin-top:32px;text-align:center">
     <div style="font-size:11px;color:var(--text3);margin-bottom:10px">Having trouble? Contact us</div>
-    <button onclick="var _bu=window._botUsername||'';if(tg){tg.openLink('https://t.me/'+_bu,{try_instant_view:false});}else{window.open('https://t.me/'+_bu,'_blank');}" style="display:inline-flex;align-items:center;gap:7px;background:var(--surface2);border:1px solid var(--border);color:var(--text2);padding:9px 18px;border-radius:20px;font-size:13px;font-weight:600;cursor:pointer;">
+    <button onclick="var _bu=window._supportUsername||window._botUsername||'';if(tg){tg.openLink('https://t.me/'+_bu,{try_instant_view:false});}else{window.open('https://t.me/'+_bu,'_blank');}" style="display:inline-flex;align-items:center;gap:7px;background:var(--surface2);border:1px solid var(--border);color:var(--text2);padding:9px 18px;border-radius:20px;font-size:13px;font-weight:600;cursor:pointer;">
       📩 Contact Support
     </button>
   </div>
@@ -1361,7 +1361,7 @@ async function checkAdminAccess() {
     var ownerId = config.ownerId;
     if (config.botUsername) window._botUsername = config.botUsername;
     if (config.upiId) window._upiId = config.upiId;
-    if (config.gcEmail) window._gcEmail = config.gcEmail;
+    if (config.supportUsername) window._supportUsername = config.supportUsername;
     // Store force-join requirement
     _fjRequired = !!config.forceJoinRequired;
     if (!ownerId) return;
@@ -3106,6 +3106,12 @@ body.light-mode .lec-mini-notes{background:var(--surface2);color:var(--text)}
       <button class="pay-submit-btn" id="paySubmitBtn" onclick="submitPayment()">
         <i class="ti ti-gift"></i> Submit Gift Card
       </button>
+      <!-- Contact Admin -->
+      <div style="text-align:center;margin-top:12px">
+        <button onclick="var _bu=window._supportUsername||window._botUsername||'';if(tg){tg.openLink('https://t.me/'+_bu,{try_instant_view:false});}else{window.open('https://t.me/'+_bu,'_blank');}" style="background:none;border:none;color:var(--text2);font-size:12px;cursor:pointer;display:inline-flex;align-items:center;gap:5px;padding:6px 10px;border-radius:8px;text-decoration:underline;text-underline-offset:3px">
+          💬 Koi query? Contact Admin
+        </button>
+      </div>
     </div>
   </div>
 </div>
@@ -3194,7 +3200,7 @@ function handleContact(){
     _contactTimer=setTimeout(collapseContact, 4000);
   } else {
     clearTimeout(_contactTimer);
-    var _bu=window._botUsername||'';
+    var _bu = window._supportUsername || window._botUsername || '';
     if(tg){tg.openLink('https://t.me/'+_bu,{try_instant_view:false});}
     else{window.open('https://t.me/'+_bu,'_blank');}
     collapseContact();
