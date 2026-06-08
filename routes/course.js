@@ -222,6 +222,7 @@ router.patch("/batches/:bid/edit", verifyAdmin, async (req, res) => {
     if (req.body.description !== undefined) batch.description = req.body.description;
     if (req.body.isPremium !== undefined) batch.isPremium = req.body.isPremium;
     if (req.body.price !== undefined) batch.price = Number(req.body.price) || 0;
+    if (req.body.pic !== undefined) batch.pic = req.body.pic; // '' removes, base64 sets new
     await batch.save(); res.json(batch);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
