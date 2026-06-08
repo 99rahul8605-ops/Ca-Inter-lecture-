@@ -1266,6 +1266,9 @@ function renderBatches(list) {
   // Determine which batches are visible
   var visible = isAdmin ? list : list.filter(b => b.isPublic === true);
 
+  // New to old — reverse order
+  visible = visible.slice().reverse();
+
   // Split into free and premium
   var free = visible.filter(b => !b.isPremium);
   var premium = visible.filter(b => b.isPremium === true);
@@ -1828,7 +1831,28 @@ function _renderBreadcrumb() {
 // ── Edit Modal ────────────────────────────────────────────────────────────────
 var _editCtx = {};
 
+var _editPicBase64 = null; // tracks new pic during edit
+
+function handleEditPic(e) {
+  var file = e.target.files[0];
+  if (!file) return;
+  var reader = new FileReader();
+  reader.onload = function(ev) {
+    _editPicBase64 = ev.target.result;
+    var prev = document.getElementById('ei_pic_preview');
+    if (prev) prev.innerHTML = '<img src="' + _editPicBase64 + '" style="width:100%;height:100%;object-fit:cover">';
+  };
+  reader.readAsDataURL(file);
+}
+
+function clearEditPic() {
+  _editPicBase64 = '';
+  var prev = document.getElementById('ei_pic_preview');
+  if (prev) prev.innerHTML = '<span style="font-size:11px;color:var(--text3)">📷 Tap to add image</span>';
+}
+
 async function openEdit(type, bid, sid, cid, uid, lid) {
+  _editPicBase64 = null;
   _editCtx = { type, bid, sid, cid, uid, lid };
   var body = '';
   var title = '';
@@ -1838,6 +1862,14 @@ async function openEdit(type, bid, sid, cid, uid, lid) {
     title = 'Edit Batch';
     body = `<div class="form-group"><label class="form-label">Batch Name</label><input class="form-input" id="ei_name" value="${b.name}"></div>
             <div class="form-group"><label class="form-label">Description</label><input class="form-input" id="ei_desc" value="${b.description||''}"></div>
+            <div class="form-group">
+              <label class="form-label">Batch Image</label>
+              <div id="ei_pic_preview" onclick="document.getElementById('ei_pic_input').click()" style="width:100%;height:90px;border-radius:10px;border:2px dashed var(--border);overflow:hidden;cursor:pointer;display:flex;align-items:center;justify-content:center;background:var(--surface2)">
+                ${b.pic ? '<img src="' + b.pic + '" style="width:100%;height:100%;object-fit:cover">' : '<span style="font-size:11px;color:var(--text3)">📷 Tap to add image</span>'}
+              </div>
+              <input type="file" id="ei_pic_input" accept="image/*" style="display:none" onchange="handleEditPic(event)">
+              ${b.pic ? '<button onclick="clearEditPic()" style="margin-top:6px;background:none;border:1px solid var(--red);color:var(--red);border-radius:8px;padding:4px 12px;font-size:11px;font-weight:600;cursor:pointer;width:100%">🗑 Remove Image</button>' : ''}
+            </div>
             <div class="form-group" style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:linear-gradient(135deg,rgba(245,158,11,0.08),rgba(217,119,6,0.05));border:1px solid rgba(245,158,11,0.25);border-radius:var(--radius-sm)">
               <input type="checkbox" id="ei_isPremium" ${b.isPremium?'checked':''} style="width:18px;height:18px;cursor:pointer;accent-color:#f59e0b">
               <label for="ei_isPremium" style="font-size:13px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:6px"><i class="ti ti-crown" style="color:#f59e0b"></i> Premium Batch</label>
@@ -1916,12 +1948,14 @@ async function saveEdit() {
   try {
     var updated;
     if (type === 'batch') {
-      updated = await apiFetch(`/api/batches/${bid}/edit`, 'PATCH', {
+      var payload = {
         name: document.getElementById('ei_name').value.trim(),
         description: document.getElementById('ei_desc').value.trim(),
         isPremium: document.getElementById('ei_isPremium').checked,
-        price: parseInt(document.getElementById('ei_price').value) || 0
-      });
+        price: parseInt(document.getElementById('ei_price').value) || 0,
+      };
+      if (_editPicBase64 !== null) payload.pic = _editPicBase64; // '' = remove, base64 = new pic
+      updated = await apiFetch(`/api/batches/${bid}/edit`, 'PATCH', payload);
       var idx = batches.findIndex(x => x._id === bid);
       if (idx >= 0) batches[idx] = updated;
     } else if (type === 'subject') {
