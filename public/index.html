@@ -722,6 +722,13 @@ body.ready{transition:none}
         <label class="form-label">Expires On</label>
         <input class="form-input" id="cpnExpiry" type="datetime-local">
       </div>
+      <div class="form-group">
+        <label class="form-label">Apply To <span style="color:var(--text3);font-weight:400">(leave empty = all batches)</span></label>
+        <select class="form-select" id="cpnBatchSelect" multiple style="height:90px;padding:6px 10px;font-size:13px" title="Ctrl/Cmd+click to select multiple">
+          <!-- populated by JS -->
+        </select>
+        <div style="font-size:10px;color:var(--text3);margin-top:4px">Hold Ctrl/Cmd to select multiple batches</div>
+      </div>
       <button class="btn-add" id="cpnAddBtn" onclick="adminCreateCoupon()"><i class="ti ti-plus"></i> Create Coupon</button>
       <div style="margin-top:16px">
         <div style="font-size:12px;font-weight:600;color:var(--text2);margin-bottom:8px;letter-spacing:0.5px">EXISTING COUPONS</div>
@@ -2165,6 +2172,16 @@ function handleSsUpload(e) {
   reader.readAsDataURL(file);
 }
 
+function validateUtr(val) {
+  var errEl = document.getElementById('utrError');
+  if (!errEl) return true;
+  if (!val) { errEl.textContent = ''; return false; }
+  if (!/^\d+$/.test(val)) { errEl.textContent = 'Sirf numbers allowed hain'; return false; }
+  if (val.length < 12) { errEl.textContent = '12 digits zaroori hain (' + val.length + '/12)'; return false; }
+  errEl.textContent = '';
+  return true;
+}
+
 async function applyCoupon() {
   var code = document.getElementById('payCouponInput').value.trim().toUpperCase();
   var cs = document.getElementById('payCouponStatus');
@@ -2173,7 +2190,7 @@ async function applyCoupon() {
   btn.disabled = true; btn.textContent = '...';
   cs.className = 'pay-coupon-status'; cs.textContent = '';
   try {
-    var r = await fetch('/api/coupons/validate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code }) });
+    var r = await fetch('/api/coupons/validate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code, batchId: _payBatchId }) });
     var d = await r.json();
     if (!r.ok) {
       _payAppliedCoupon = null;
@@ -2211,7 +2228,8 @@ function _updatePayQr(amount) {
 
 async function submitPayment() {
   var txnId = document.getElementById('payTxnId').value.trim();
-  if (!txnId) return toast('Transaction ID daalo!', 'error');
+  if (!txnId) return toast('UTR number daalo!', 'error');
+  if (!/^\d{12}$/.test(txnId)) return toast('UTR 12-digit number hona chahiye!', 'error');
   if (!_paySsBase64) return toast('Screenshot upload karo!', 'error');
   if (!_payBatchId) return;
 
@@ -3230,7 +3248,7 @@ body.light-mode .lec-mini-notes{background:var(--surface2);color:var(--text)}
         1️⃣ Scan QR or copy UPI ID<br>
         2️⃣ Pay the exact amount shown above<br>
         3️⃣ Take a screenshot of payment confirmation<br>
-        4️⃣ Enter Transaction ID &amp; upload screenshot below<br>
+        4️⃣ Enter UTR Number (12-digit) &amp; upload screenshot below<br>
         5️⃣ Submit — admin will verify &amp; unlock your batch
       </div>
       <!-- Coupon Code -->
@@ -3242,10 +3260,11 @@ body.light-mode .lec-mini-notes{background:var(--surface2);color:var(--text)}
         </div>
         <div class="pay-coupon-status" id="payCouponStatus"></div>
       </div>
-      <!-- Transaction ID -->
-      <div class="form-group" style="margin-bottom:10px">
-        <label class="form-label">Transaction ID / UTR Number</label>
-        <input class="form-input" id="payTxnId" placeholder="e.g. 4234XXXXXXXX">
+      <!-- UTR Number -->
+      <div class="form-group" style="margin-bottom:6px">
+        <label class="form-label">UTR Number <span style="color:var(--text3);font-weight:400">(12-digit, numbers only)</span></label>
+        <input class="form-input" id="payTxnId" placeholder="e.g. 123456789012" maxlength="12" inputmode="numeric" oninput="this.value=this.value.replace(/\D/g,'').slice(0,12);validateUtr(this.value)">
+        <div id="utrError" style="font-size:11px;color:var(--red);margin-top:4px;min-height:16px"></div>
       </div>
       <!-- Screenshot upload -->
       <div class="pay-ss-box" id="paySsBox" onclick="document.getElementById('paySsInput').click()">
@@ -3548,6 +3567,14 @@ async function deleteAnnouncement(id) {
 
 // ── Coupon Admin Functions ────────────────────────────────────────────────────
 async function adminLoadCoupons() {
+  // Populate batch select options
+  var sel = document.getElementById('cpnBatchSelect');
+  if (sel) {
+    sel.innerHTML = batches.map(function(b) {
+      return '<option value="' + b._id + '">' + b.name + '</option>';
+    }).join('');
+  }
+
   var el = document.getElementById('couponList');
   if (!el) return;
   el.innerHTML = '<div style="font-size:12px;color:var(--text2);padding:10px">Loading...</div>';
@@ -3560,12 +3587,24 @@ async function adminLoadCoupons() {
       var expStr = new Date(c.expiresAt).toLocaleDateString('en-IN', { day:'numeric', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' });
       var statusColor = !c.isActive ? 'var(--text3)' : expired ? 'var(--red)' : 'var(--green)';
       var statusLabel = !c.isActive ? 'Inactive' : expired ? 'Expired' : 'Active';
+      // Batch names
+      var batchLabel = '';
+      if (c.batchIds && c.batchIds.length > 0) {
+        var names = c.batchIds.map(function(id) {
+          var b = batches.find(function(x){ return x._id === id; });
+          return b ? b.name : id;
+        });
+        batchLabel = '<div style="font-size:10px;color:var(--accent);margin-top:2px">📚 ' + names.join(', ') + '</div>';
+      } else {
+        batchLabel = '<div style="font-size:10px;color:var(--text3);margin-top:2px">📚 All batches</div>';
+      }
       return '<div class="manage-item" style="flex-direction:column;align-items:stretch;gap:6px">' +
         '<div style="display:flex;align-items:center;gap:8px">' +
           '<div style="font-size:15px">🎟</div>' +
           '<div style="flex:1">' +
             '<div style="font-size:13px;font-weight:700;font-family:monospace;letter-spacing:1px">' + c.code + '</div>' +
             '<div style="font-size:11px;color:var(--text2)">' + c.discountPct + '% off &nbsp;·&nbsp; Expires: ' + expStr + '</div>' +
+            batchLabel +
           '</div>' +
           '<span style="font-size:10px;font-weight:700;color:' + statusColor + '">' + statusLabel + '</span>' +
         '</div>' +
@@ -3585,16 +3624,20 @@ async function adminCreateCoupon() {
   var code = (document.getElementById('cpnCode').value || '').trim().toUpperCase();
   var disc = parseInt(document.getElementById('cpnDiscount').value || '0', 10);
   var expiry = document.getElementById('cpnExpiry').value;
+  // Collect selected batch IDs (multi-select)
+  var sel = document.getElementById('cpnBatchSelect');
+  var batchIds = sel ? Array.from(sel.selectedOptions).map(function(o){ return o.value; }) : [];
   if (!code) return toast('Coupon code daalo!', 'error');
   if (!disc || disc < 1 || disc > 100) return toast('Discount 1-100 ke beech hona chahiye!', 'error');
   if (!expiry) return toast('Expiry date daalo!', 'error');
   var btn = document.getElementById('cpnAddBtn');
   btn.disabled = true;
   try {
-    await apiFetch('/api/coupons', 'POST', { code, discountPct: disc, expiresAt: new Date(expiry).toISOString() });
+    await apiFetch('/api/coupons', 'POST', { code, discountPct: disc, expiresAt: new Date(expiry).toISOString(), batchIds });
     document.getElementById('cpnCode').value = '';
     document.getElementById('cpnDiscount').value = '';
     document.getElementById('cpnExpiry').value = '';
+    if (sel) Array.from(sel.options).forEach(function(o){ o.selected = false; });
     toast('✅ Coupon created!', 'success');
     adminLoadCoupons();
   } catch(e) { toast('Error: ' + e.message, 'error'); }
