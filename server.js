@@ -169,7 +169,7 @@ app.post("/api/pay-request", express.json({ limit: "10mb" }), async (req, res) =
       `📱 Username: ${username ? '@' + esc(username) : 'N/A'}\n\n` +
       `📚 Batch: <b>${esc(batchName)}</b>\n` +
       `${priceLine}\n` +
-      `🔖 Txn ID: <code>${esc(txnId)}</code>`;
+      `🔖 UTR: <code>${esc(txnId)}</code>`;
 
     if (!PAYMENT_GROUP_ID) return res.status(500).json({ error: "PAYMENT_GROUP_ID not configured" });
 
