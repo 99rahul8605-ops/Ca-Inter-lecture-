@@ -146,37 +146,13 @@ const autoAddLecture     = courseRoutes.autoAddLecture;
 // ── Payment Request API ───────────────────────────────────────────────────────
 app.post("/api/pay-request", express.json({ limit: "10mb" }), async (req, res) => {
   try {
-    const { batchId, userId, firstName, lastName, username, txnId, screenshotBase64, couponCode } = req.body;
+    const { batchId, userId, firstName, lastName, username, txnId, screenshotBase64 } = req.body;
     if (!batchId || !txnId) return res.status(400).json({ error: "Missing fields" });
 
     const Batch = require("./models/Course");
     const batch = await Batch.findById(batchId).catch(() => null);
     const batchName = batch ? batch.name : batchId;
-    let originalPrice = batch?.price || 0;
-    let finalPrice = originalPrice;
-    let couponInfo = "";
-
-    // Validate and apply coupon if provided
-    if (couponCode) {
-      const Coupon = courseRoutes.CouponModel;
-      const coupon = Coupon ? await Coupon.findOne({
-        code: String(couponCode).toUpperCase().trim(),
-        active: true,
-        expiresAt: { $gt: new Date() },
-      }).catch(() => null) : null;
-
-      if (coupon && (coupon.maxUses === 0 || coupon.usedCount < coupon.maxUses)) {
-        const batchAllowed = coupon.batchIds.length === 0 || coupon.batchIds.includes(String(batchId));
-        if (batchAllowed) {
-          finalPrice = Math.round(originalPrice * (1 - coupon.discountPct / 100));
-          couponInfo = `\n🏷️ Coupon: <code>${esc(coupon.code)}</code> (${coupon.discountPct}% off)\n💸 Original: <s>₹${originalPrice}</s> → <b>₹${finalPrice}</b>`;
-          // Increment usedCount
-          await Coupon.findByIdAndUpdate(coupon._id, { $inc: { usedCount: 1 } }).catch(() => {});
-        }
-      }
-    }
-
-    const price = finalPrice ? `₹${finalPrice}` : (originalPrice ? `₹${originalPrice}` : "N/A");
+    const price = batch?.price ? `₹${batch.price}` : "N/A";
 
     const caption =
       `💸 <b>New Payment Request!</b>\n\n` +
@@ -184,7 +160,7 @@ app.post("/api/pay-request", express.json({ limit: "10mb" }), async (req, res) =
       `🆔 UID: <code>${esc(userId)}</code>\n` +
       `📱 Username: ${username ? '@' + esc(username) : 'N/A'}\n\n` +
       `📚 Batch: <b>${esc(batchName)}</b>\n` +
-      `💰 Amount: <b>${esc(price)}</b>${couponInfo}\n` +
+      `💰 Amount: <b>${esc(price)}</b>\n` +
       `🔖 Txn ID: <code>${esc(txnId)}</code>`;
 
     if (!PAYMENT_GROUP_ID) return res.status(500).json({ error: "PAYMENT_GROUP_ID not configured" });
