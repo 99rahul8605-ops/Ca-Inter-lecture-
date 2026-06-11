@@ -865,6 +865,7 @@ const couponSchema = new mongoose.Schema({
   expiresAt:   { type: Date, required: true },
   isActive:    { type: Boolean, default: true },
   usageCount:  { type: Number, default: 0 },
+  batchIds:    [{ type: String }], // empty = all batches; specific IDs = only those batches
   createdAt:   { type: Date, default: Date.now },
 });
 const Coupon = mongoose.model('Coupon', couponSchema);
@@ -880,13 +881,14 @@ router.get('/coupons', verifyAdmin, async (req, res) => {
 // POST create coupon (admin only)
 router.post('/coupons', verifyAdmin, async (req, res) => {
   try {
-    const { code, discountPct, expiresAt, isActive } = req.body;
+    const { code, discountPct, expiresAt, isActive, batchIds } = req.body;
     if (!code || !discountPct || !expiresAt) return res.status(400).json({ error: 'code, discountPct, expiresAt required' });
     const coupon = await Coupon.create({
       code: code.toUpperCase().trim(),
       discountPct: Number(discountPct),
       expiresAt: new Date(expiresAt),
       isActive: isActive !== false,
+      batchIds: Array.isArray(batchIds) ? batchIds.filter(Boolean) : [],
     });
     res.json(coupon);
   } catch (e) {
@@ -917,12 +919,18 @@ router.patch('/coupons/:id/toggle', verifyAdmin, async (req, res) => {
 // POST validate coupon (public — any user can check)
 router.post('/coupons/validate', async (req, res) => {
   try {
-    const { code } = req.body;
+    const { code, batchId } = req.body;
     if (!code) return res.status(400).json({ error: 'code required' });
     const coupon = await Coupon.findOne({ code: code.toUpperCase().trim() });
     if (!coupon) return res.status(404).json({ error: 'Invalid coupon code' });
     if (!coupon.isActive) return res.status(400).json({ error: 'Coupon is inactive' });
     if (coupon.expiresAt < new Date()) return res.status(400).json({ error: 'Coupon has expired' });
+    // If coupon has specific batch restrictions, check batchId matches
+    if (coupon.batchIds && coupon.batchIds.length > 0) {
+      if (!batchId || !coupon.batchIds.includes(String(batchId))) {
+        return res.status(400).json({ error: 'This coupon is not valid for this batch' });
+      }
+    }
     res.json({ valid: true, discountPct: coupon.discountPct, code: coupon.code });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
