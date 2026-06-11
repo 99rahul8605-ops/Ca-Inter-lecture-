@@ -110,6 +110,17 @@ body.ready{transition:none}
 .pay-ss-label{font-size:12px;color:var(--text2);display:flex;flex-direction:column;align-items:center;gap:6px}
 .pay-submit-btn{width:100%;padding:13px;border-radius:12px;border:none;background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff;font-size:14px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;margin-top:4px}
 .pay-submit-btn:disabled{opacity:0.6}
+/* Coupon */
+.pay-coupon-row{display:flex;gap:8px;margin-bottom:10px}
+.pay-coupon-input{flex:1;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:9px 12px;border-radius:var(--radius-sm);font-size:13px;outline:none;text-transform:uppercase;letter-spacing:1px}
+.pay-coupon-input:focus{border-color:var(--accent)}
+.pay-coupon-btn{background:var(--accent);border:none;color:#fff;border-radius:var(--radius-sm);padding:9px 14px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;flex-shrink:0}
+.pay-coupon-btn:disabled{opacity:0.5}
+.pay-coupon-status{font-size:12px;margin-bottom:10px;min-height:18px;display:none;padding:7px 10px;border-radius:8px}
+.pay-coupon-status.success{display:block;background:rgba(34,197,94,0.1);color:var(--green);border:1px solid rgba(34,197,94,0.3)}
+.pay-coupon-status.error{display:block;background:rgba(239,68,68,0.1);color:var(--red);border:1px solid rgba(239,68,68,0.3)}
+.pay-amount-original{font-size:13px;color:var(--text2);text-decoration:line-through;margin-right:6px}
+.pay-amount-final{font-size:20px;font-weight:800;color:var(--green)}
 .batch-tabs{display:flex;gap:8px;padding:14px 16px 8px;flex-shrink:0}
 .batch-tab{flex:1;display:flex;align-items:center;justify-content:center;gap:6px;padding:9px 12px;border-radius:10px;border:1.5px solid var(--border);background:var(--surface);color:var(--text2);font-size:13px;font-weight:600;cursor:pointer;transition:all 0.18s}
 .batch-tab.active-free{background:rgba(34,197,94,0.1);border-color:var(--green);color:var(--green)}
@@ -581,6 +592,7 @@ body.ready{transition:none}
       <button class="tab-btn" onclick="switchTab('unit')">+ Unit</button>
       <button class="tab-btn" onclick="switchTab('lecture')">+ Lecture</button>
       <button class="tab-btn" onclick="switchTab('manage')">Manage</button>
+      <button class="tab-btn" onclick="switchTab('coupons')">🎟 Coupons</button>
     </div>
 
     <!-- Add Batch -->
@@ -695,6 +707,27 @@ body.ready{transition:none}
   <div id="manageBreadcrumb"></div>
   <div id="manageList"></div>
 </div>
+
+    <!-- Coupons -->
+    <div class="tab-content" id="tab-coupons">
+      <div class="form-group">
+        <label class="form-label">Coupon Code</label>
+        <input class="form-input" id="cpnCode" placeholder="e.g. SAVE20" maxlength="20" style="text-transform:uppercase" oninput="this.value=this.value.toUpperCase()">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Discount %</label>
+        <input class="form-input" id="cpnDiscount" type="number" min="1" max="100" placeholder="e.g. 20 (means 20% off)">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Expires On</label>
+        <input class="form-input" id="cpnExpiry" type="datetime-local">
+      </div>
+      <button class="btn-add" id="cpnAddBtn" onclick="adminCreateCoupon()"><i class="ti ti-plus"></i> Create Coupon</button>
+      <div style="margin-top:16px">
+        <div style="font-size:12px;font-weight:600;color:var(--text2);margin-bottom:8px;letter-spacing:0.5px">EXISTING COUPONS</div>
+        <div id="couponList"><div class="loading"><i class="ti ti-loader-2"></i></div></div>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -1403,12 +1436,13 @@ function closeAdmin() {
 function closeModalOutside(e) { if (e.target.id==='adminModal') closeAdmin(); }
 
 function switchTab(name) {
-  var tabs = ['batch','subject','chapter','unit','lecture','manage'];
+  var tabs = ['batch','subject','chapter','unit','lecture','manage','coupons'];
   document.querySelectorAll('.tab-btn').forEach((b,i)=>b.classList.toggle('active',tabs[i]===name));
   document.querySelectorAll('.tab-content').forEach(t=>t.classList.remove('active'));
   document.getElementById('tab-'+name).classList.add('active');
   if (name==='manage') renderManage();
   if (name==='lecture') _syncAutoModeStatus();
+  if (name==='coupons') adminLoadCoupons();
 }
 
 function batchOpts() { return batches.map(b=>`<option value="${b._id}">${b.name}</option>`).join('')||'<option>Add a batch first</option>'; }
@@ -2053,16 +2087,21 @@ function closeDemoOutside(e) { if (e.target.id === 'demoModal') closeDemoModal()
 // ── Payment Modal ─────────────────────────────────────────────────────────────
 var _payBatchId = null;
 var _paySsBase64 = null;
+var _payOriginalPrice = 0;
+var _payAppliedCoupon = null; // { code, discountPct, finalAmount }
 
 function buyBatch(bid) {
   var b = batches.find(x => x._id === bid);
   if (!b) return;
   _payBatchId = bid;
   _paySsBase64 = null;
+  _payOriginalPrice = b.price || 0;
+  _payAppliedCoupon = null;
 
   // Set batch info
   document.getElementById('payBatchName').textContent = b.name;
   document.getElementById('payAmount').textContent = b.price ? '₹' + b.price : 'Contact Admin';
+  document.getElementById('payAmount').className = 'pay-amount';
 
   // Set UPI ID
   var upi = window._upiId || '';
@@ -2078,6 +2117,13 @@ function buyBatch(bid) {
     document.getElementById('payQrImg').src = '';
   }
 
+  // Reset coupon
+  document.getElementById('payCouponInput').value = '';
+  var cs = document.getElementById('payCouponStatus');
+  cs.className = 'pay-coupon-status'; cs.textContent = '';
+  var applyBtn = document.getElementById('payCouponApplyBtn');
+  if (applyBtn) { applyBtn.textContent = 'Apply'; applyBtn.disabled = false; }
+
   // Reset form
   document.getElementById('payTxnId').value = '';
   document.getElementById('paySsPreview').style.display = 'none';
@@ -2091,7 +2137,7 @@ function buyBatch(bid) {
 
 function closePayModal() {
   document.getElementById('payModal').classList.remove('show');
-  _payBatchId = null; _paySsBase64 = null;
+  _payBatchId = null; _paySsBase64 = null; _payAppliedCoupon = null;
 }
 function closePayOutside(e) { if (e.target.id === 'payModal') closePayModal(); }
 
@@ -2119,6 +2165,50 @@ function handleSsUpload(e) {
   reader.readAsDataURL(file);
 }
 
+async function applyCoupon() {
+  var code = document.getElementById('payCouponInput').value.trim().toUpperCase();
+  var cs = document.getElementById('payCouponStatus');
+  var btn = document.getElementById('payCouponApplyBtn');
+  if (!code) { cs.className = 'pay-coupon-status error'; cs.textContent = 'Coupon code daalo!'; return; }
+  btn.disabled = true; btn.textContent = '...';
+  cs.className = 'pay-coupon-status'; cs.textContent = '';
+  try {
+    var r = await fetch('/api/coupons/validate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code }) });
+    var d = await r.json();
+    if (!r.ok) {
+      _payAppliedCoupon = null;
+      cs.className = 'pay-coupon-status error'; cs.textContent = '❌ ' + (d.error || 'Invalid coupon');
+      // Reset amount display
+      document.getElementById('payAmount').textContent = _payOriginalPrice ? '₹' + _payOriginalPrice : 'Contact Admin';
+      document.getElementById('payAmount').className = 'pay-amount';
+      _updatePayQr(_payOriginalPrice);
+    } else {
+      var disc = d.discountPct;
+      var final = Math.round(_payOriginalPrice * (1 - disc / 100));
+      _payAppliedCoupon = { code: d.code, discountPct: disc, finalAmount: final };
+      cs.className = 'pay-coupon-status success'; cs.textContent = '✅ ' + disc + '% off applied! You pay ₹' + final + ' instead of ₹' + _payOriginalPrice;
+      // Update amount display
+      var amtEl = document.getElementById('payAmount');
+      amtEl.innerHTML = '<span class="pay-amount-original">₹' + _payOriginalPrice + '</span><span class="pay-amount-final">₹' + final + '</span>';
+      amtEl.className = '';
+      _updatePayQr(final);
+      btn.textContent = '✓';
+    }
+  } catch(e) {
+    cs.className = 'pay-coupon-status error'; cs.textContent = '❌ Error validating coupon';
+  }
+  btn.disabled = false; if (btn.textContent === '...') btn.textContent = 'Apply';
+}
+
+function _updatePayQr(amount) {
+  var upi = window._upiId || '';
+  var b = batches.find(x => x._id === _payBatchId);
+  if (upi && amount) {
+    var upiStr = 'upi://pay?pa=' + encodeURIComponent(upi) + '&am=' + amount + '&cu=INR&tn=' + encodeURIComponent(b ? b.name : '');
+    document.getElementById('payQrImg').src = 'https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=' + encodeURIComponent(upiStr);
+  }
+}
+
 async function submitPayment() {
   var txnId = document.getElementById('payTxnId').value.trim();
   if (!txnId) return toast('Transaction ID daalo!', 'error');
@@ -2139,6 +2229,9 @@ async function submitPayment() {
       username: tgUser ? (tgUser.username || '') : '',
       txnId: txnId,
       screenshotBase64: _paySsBase64,
+      couponCode: _payAppliedCoupon ? _payAppliedCoupon.code : null,
+      discountPct: _payAppliedCoupon ? _payAppliedCoupon.discountPct : null,
+      finalAmount: _payAppliedCoupon ? _payAppliedCoupon.finalAmount : null,
     };
     var r = await fetch('/api/pay-request', {
       method: 'POST',
@@ -3140,6 +3233,15 @@ body.light-mode .lec-mini-notes{background:var(--surface2);color:var(--text)}
         4️⃣ Enter Transaction ID &amp; upload screenshot below<br>
         5️⃣ Submit — admin will verify &amp; unlock your batch
       </div>
+      <!-- Coupon Code -->
+      <div style="margin-bottom:4px">
+        <label class="form-label" style="margin-bottom:5px;display:block">🎟 Coupon Code (optional)</label>
+        <div class="pay-coupon-row">
+          <input class="pay-coupon-input" id="payCouponInput" placeholder="ENTER CODE" maxlength="30" oninput="this.value=this.value.toUpperCase()">
+          <button class="pay-coupon-btn" id="payCouponApplyBtn" onclick="applyCoupon()">Apply</button>
+        </div>
+        <div class="pay-coupon-status" id="payCouponStatus"></div>
+      </div>
       <!-- Transaction ID -->
       <div class="form-group" style="margin-bottom:10px">
         <label class="form-label">Transaction ID / UTR Number</label>
@@ -3442,6 +3544,77 @@ async function deleteAnnouncement(id) {
   } catch(e) {
     toast('Error', 'error');
   }
+}
+
+// ── Coupon Admin Functions ────────────────────────────────────────────────────
+async function adminLoadCoupons() {
+  var el = document.getElementById('couponList');
+  if (!el) return;
+  el.innerHTML = '<div style="font-size:12px;color:var(--text2);padding:10px">Loading...</div>';
+  try {
+    var list = await apiFetch('/api/coupons');
+    if (!list.length) { el.innerHTML = '<div style="font-size:12px;color:var(--text2);padding:10px">No coupons yet.</div>'; return; }
+    var now = Date.now();
+    el.innerHTML = list.map(function(c) {
+      var expired = new Date(c.expiresAt) < now;
+      var expStr = new Date(c.expiresAt).toLocaleDateString('en-IN', { day:'numeric', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' });
+      var statusColor = !c.isActive ? 'var(--text3)' : expired ? 'var(--red)' : 'var(--green)';
+      var statusLabel = !c.isActive ? 'Inactive' : expired ? 'Expired' : 'Active';
+      return '<div class="manage-item" style="flex-direction:column;align-items:stretch;gap:6px">' +
+        '<div style="display:flex;align-items:center;gap:8px">' +
+          '<div style="font-size:15px">🎟</div>' +
+          '<div style="flex:1">' +
+            '<div style="font-size:13px;font-weight:700;font-family:monospace;letter-spacing:1px">' + c.code + '</div>' +
+            '<div style="font-size:11px;color:var(--text2)">' + c.discountPct + '% off &nbsp;·&nbsp; Expires: ' + expStr + '</div>' +
+          '</div>' +
+          '<span style="font-size:10px;font-weight:700;color:' + statusColor + '">' + statusLabel + '</span>' +
+        '</div>' +
+        '<div style="display:flex;gap:6px">' +
+          '<button onclick="adminToggleCoupon(\'' + c._id + '\')" style="flex:1;background:var(--surface3);border:none;color:var(--text);font-size:11px;font-weight:600;padding:5px 10px;border-radius:6px;cursor:pointer">' +
+            (c.isActive ? '⏸ Deactivate' : '▶ Activate') + '</button>' +
+          '<button onclick="adminDeleteCoupon(\'' + c._id + '\')" style="background:none;border:1px solid rgba(239,68,68,0.3);color:var(--red);font-size:11px;padding:5px 10px;border-radius:6px;cursor:pointer"><i class="ti ti-trash"></i></button>' +
+        '</div>' +
+      '</div>';
+    }).join('');
+  } catch(e) {
+    el.innerHTML = '<div style="font-size:12px;color:var(--red);padding:10px">Error: ' + e.message + '</div>';
+  }
+}
+
+async function adminCreateCoupon() {
+  var code = (document.getElementById('cpnCode').value || '').trim().toUpperCase();
+  var disc = parseInt(document.getElementById('cpnDiscount').value || '0', 10);
+  var expiry = document.getElementById('cpnExpiry').value;
+  if (!code) return toast('Coupon code daalo!', 'error');
+  if (!disc || disc < 1 || disc > 100) return toast('Discount 1-100 ke beech hona chahiye!', 'error');
+  if (!expiry) return toast('Expiry date daalo!', 'error');
+  var btn = document.getElementById('cpnAddBtn');
+  btn.disabled = true;
+  try {
+    await apiFetch('/api/coupons', 'POST', { code, discountPct: disc, expiresAt: new Date(expiry).toISOString() });
+    document.getElementById('cpnCode').value = '';
+    document.getElementById('cpnDiscount').value = '';
+    document.getElementById('cpnExpiry').value = '';
+    toast('✅ Coupon created!', 'success');
+    adminLoadCoupons();
+  } catch(e) { toast('Error: ' + e.message, 'error'); }
+  btn.disabled = false;
+}
+
+async function adminToggleCoupon(id) {
+  try {
+    await apiFetch('/api/coupons/' + id + '/toggle', 'PATCH');
+    adminLoadCoupons();
+  } catch(e) { toast('Error', 'error'); }
+}
+
+async function adminDeleteCoupon(id) {
+  if (!confirm('Delete this coupon?')) return;
+  try {
+    await apiFetch('/api/coupons/' + id, 'DELETE');
+    toast('Deleted!', 'success');
+    adminLoadCoupons();
+  } catch(e) { toast('Error', 'error'); }
 }
 </script>
 
