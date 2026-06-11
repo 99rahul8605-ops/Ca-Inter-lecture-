@@ -485,106 +485,6 @@ router.patch("/batches/:bid/subjects/:sid/chapters/:cid/units/:uid/lectures/:lid
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// ── Coupon System ─────────────────────────────────────────────────────────────
-const couponSchema = new mongoose.Schema({
-  code:        { type: String, required: true, unique: true, uppercase: true, trim: true },
-  discountPct: { type: Number, required: true, min: 1, max: 100 }, // e.g. 20 = 20% off
-  expiresAt:   { type: Date, required: true },
-  batchIds:    { type: [String], default: [] }, // empty = valid for all batches
-  maxUses:     { type: Number, default: 0 },    // 0 = unlimited
-  usedCount:   { type: Number, default: 0 },
-  createdAt:   { type: Date, default: Date.now },
-  active:      { type: Boolean, default: true },
-});
-const Coupon = mongoose.model('Coupon', couponSchema);
-
-// GET all coupons (admin only)
-router.get('/coupons', verifyAdmin, async (req, res) => {
-  try {
-    const coupons = await Coupon.find().sort({ createdAt: -1 });
-    res.json(coupons);
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// POST create coupon (admin only)
-router.post('/coupons', verifyAdmin, async (req, res) => {
-  try {
-    const { code, discountPct, expiresAt, batchIds, maxUses } = req.body;
-    if (!code || !discountPct || !expiresAt) return res.status(400).json({ error: 'code, discountPct, expiresAt required' });
-    const coupon = await Coupon.create({
-      code: String(code).toUpperCase().trim(),
-      discountPct: Number(discountPct),
-      expiresAt: new Date(expiresAt),
-      batchIds: Array.isArray(batchIds) ? batchIds : [],
-      maxUses: Number(maxUses) || 0,
-    });
-    res.json(coupon);
-  } catch (e) {
-    if (e.code === 11000) return res.status(400).json({ error: 'Coupon code already exists' });
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// PATCH toggle coupon active/inactive (admin only)
-router.patch('/coupons/:id/toggle', verifyAdmin, async (req, res) => {
-  try {
-    const coupon = await Coupon.findById(req.params.id);
-    if (!coupon) return res.status(404).json({ error: 'Coupon not found' });
-    coupon.active = !coupon.active;
-    await coupon.save();
-    res.json(coupon);
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// DELETE coupon (admin only)
-router.delete('/coupons/:id', verifyAdmin, async (req, res) => {
-  try {
-    await Coupon.findByIdAndDelete(req.params.id);
-    res.json({ success: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// POST validate coupon — public endpoint called during payment
-// Body: { code, batchId }  →  returns { valid, discountPct, finalPrice, message }
-router.post('/coupons/validate', async (req, res) => {
-  try {
-    const { code, batchId } = req.body;
-    if (!code) return res.status(400).json({ error: 'code required' });
-
-    const coupon = await Coupon.findOne({ code: String(code).toUpperCase().trim() });
-    if (!coupon) return res.status(404).json({ valid: false, message: 'Invalid coupon code' });
-    if (!coupon.active) return res.status(400).json({ valid: false, message: 'Coupon is inactive' });
-    if (coupon.expiresAt < new Date()) return res.status(400).json({ valid: false, message: 'Coupon has expired' });
-    if (coupon.maxUses > 0 && coupon.usedCount >= coupon.maxUses) return res.status(400).json({ valid: false, message: 'Coupon usage limit reached' });
-
-    // Check batch restriction
-    if (coupon.batchIds.length > 0 && batchId && !coupon.batchIds.includes(String(batchId))) {
-      return res.status(400).json({ valid: false, message: 'Coupon not valid for this batch' });
-    }
-
-    // Calculate discounted price if batchId supplied
-    let originalPrice = null, finalPrice = null;
-    if (batchId) {
-      const batch = await Batch.findById(batchId).catch(() => null);
-      if (batch && batch.price) {
-        originalPrice = batch.price;
-        finalPrice = Math.round(originalPrice * (1 - coupon.discountPct / 100));
-      }
-    }
-
-    res.json({
-      valid: true,
-      discountPct: coupon.discountPct,
-      originalPrice,
-      finalPrice,
-      message: `${coupon.discountPct}% off applied!`,
-    });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// Export Coupon model so server.js can increment usedCount on approval
-router.CouponModel = Coupon;
-
 module.exports = router;
 
 
@@ -954,5 +854,75 @@ router.get('/stats', async (req, res) => {
       access:    { totalAccess, activeAccess },
       referrals: { totalReferrals, uniqueReferrers: uniqueReferrers.length },
     });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+
+// ── Coupon System ─────────────────────────────────────────────────────────────
+const couponSchema = new mongoose.Schema({
+  code:        { type: String, required: true, unique: true, uppercase: true, trim: true },
+  discountPct: { type: Number, required: true, min: 1, max: 100 }, // e.g. 20 = 20% off
+  expiresAt:   { type: Date, required: true },
+  isActive:    { type: Boolean, default: true },
+  usageCount:  { type: Number, default: 0 },
+  createdAt:   { type: Date, default: Date.now },
+});
+const Coupon = mongoose.model('Coupon', couponSchema);
+
+// GET all coupons (admin only)
+router.get('/coupons', verifyAdmin, async (req, res) => {
+  try {
+    const coupons = await Coupon.find().sort({ createdAt: -1 });
+    res.json(coupons);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST create coupon (admin only)
+router.post('/coupons', verifyAdmin, async (req, res) => {
+  try {
+    const { code, discountPct, expiresAt, isActive } = req.body;
+    if (!code || !discountPct || !expiresAt) return res.status(400).json({ error: 'code, discountPct, expiresAt required' });
+    const coupon = await Coupon.create({
+      code: code.toUpperCase().trim(),
+      discountPct: Number(discountPct),
+      expiresAt: new Date(expiresAt),
+      isActive: isActive !== false,
+    });
+    res.json(coupon);
+  } catch (e) {
+    if (e.code === 11000) return res.status(400).json({ error: 'Coupon code already exists' });
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// DELETE coupon (admin only)
+router.delete('/coupons/:id', verifyAdmin, async (req, res) => {
+  try {
+    await Coupon.findByIdAndDelete(req.params.id);
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// PATCH toggle active (admin only)
+router.patch('/coupons/:id/toggle', verifyAdmin, async (req, res) => {
+  try {
+    const c = await Coupon.findById(req.params.id);
+    if (!c) return res.status(404).json({ error: 'Not found' });
+    c.isActive = !c.isActive;
+    await c.save();
+    res.json(c);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST validate coupon (public — any user can check)
+router.post('/coupons/validate', async (req, res) => {
+  try {
+    const { code } = req.body;
+    if (!code) return res.status(400).json({ error: 'code required' });
+    const coupon = await Coupon.findOne({ code: code.toUpperCase().trim() });
+    if (!coupon) return res.status(404).json({ error: 'Invalid coupon code' });
+    if (!coupon.isActive) return res.status(400).json({ error: 'Coupon is inactive' });
+    if (coupon.expiresAt < new Date()) return res.status(400).json({ error: 'Coupon has expired' });
+    res.json({ valid: true, discountPct: coupon.discountPct, code: coupon.code });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
