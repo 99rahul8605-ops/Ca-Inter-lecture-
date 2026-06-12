@@ -116,6 +116,44 @@ const userSchema = new mongoose.Schema({
 });
 const User = mongoose.model("User", userSchema);
 
+// Daily video limit tracking
+const DAILY_VIDEO_LIMIT = 10;
+const dailyLimitSchema = new mongoose.Schema({
+  userId:    { type: Number, required: true, unique: true },
+  count:     { type: Number, default: 0 },
+  resetDate: { type: String, required: true }, // "YYYY-MM-DD" IST date string
+});
+const DailyVideoLimit = mongoose.model("DailyVideoLimit", dailyLimitSchema);
+
+// Helper: get today's date string in IST (UTC+5:30)
+function getTodayIST() {
+  const now = new Date();
+  const istOffset = 5.5 * 60 * 60 * 1000;
+  const istDate = new Date(now.getTime() + istOffset);
+  return istDate.toISOString().slice(0, 10); // "YYYY-MM-DD"
+}
+
+// Returns { allowed: bool, used: number, remaining: number }
+// If allowed, also increments the counter.
+async function checkAndIncrementVideoLimit(userId) {
+  const today = getTodayIST();
+  let rec = await DailyVideoLimit.findOne({ userId });
+  if (!rec || rec.resetDate !== today) {
+    // New day — reset counter
+    rec = await DailyVideoLimit.findOneAndUpdate(
+      { userId },
+      { userId, count: 0, resetDate: today },
+      { upsert: true, new: true }
+    );
+  }
+  if (rec.count >= DAILY_VIDEO_LIMIT) {
+    return { allowed: false, used: rec.count, remaining: 0 };
+  }
+  rec.count += 1;
+  await rec.save();
+  return { allowed: true, used: rec.count, remaining: DAILY_VIDEO_LIMIT - rec.count };
+}
+
 // ── Express app ──────────────────────────────────────────────────────────────
 const app = express();
 app.use(express.json({ limit: "10mb" }));
@@ -518,7 +556,7 @@ async function startBot() {
       }
 
       if (param.startsWith("B")) {
-        // Bulk batch
+        // Bulk batch — no daily limit (batch can have more than 10 videos)
         try {
           const batch = await BulkBatch.findOne({ batch_code: param });
           if (!batch) return bot.sendMessage(chatId, `File not found. Link may be invalid or expired.`);
@@ -551,6 +589,42 @@ async function startBot() {
 
         if (isVideo && record.delivered_to.includes(chatId)) {
           return bot.sendMessage(chatId, `⚠️ This video has already been delivered to you. It will be auto-deleted from your DM within 6 hours of first delivery.`);
+        }
+
+        // ── Daily video limit check (non-owner users only) ──────────────────
+        if (isVideo && !isOwner(userId)) {
+          const limitResult = await checkAndIncrementVideoLimit(userId);
+          if (!limitResult.allowed) {
+            return bot.sendMessage(chatId,
+              `🚫 <b>Daily Video Limit Reached!</b>\n\n` +
+              `Aap aaj <b>${DAILY_VIDEO_LIMIT} videos</b> dekh chuke hain.\n` +
+              `📅 Aapki limit kal midnight ke baad reset hogi.\n\n` +
+              `<i>Agar aapko lagta hai yeh galat hai, support se contact karein.</i>`,
+              { parse_mode: "HTML" }
+            );
+          }
+          // Show remaining count as a warning
+          const sentMsg = await sendFile(bot, chatId, record);
+          const deleteAt = new Date(Date.now() + 6 * 60 * 60 * 1000);
+          await scheduleDelete(bot, chatId, sentMsg.message_id, deleteAt);
+          await FileRecord.updateOne({ _id: record._id }, { $addToSet: { delivered_to: chatId } });
+          setTimeout(async () => {
+            await FileRecord.updateOne({ _id: record._id }, { $pull: { delivered_to: chatId } }).catch(() => {});
+          }, 6 * 60 * 60 * 1000);
+          const warningLines = [
+            `⚠️ Yeh video 6 ghante baad automatically delete ho jayegi.`,
+            ``,
+            `📊 <b>Aaj ki videos:</b> ${limitResult.used}/${DAILY_VIDEO_LIMIT} use ki gayi`,
+          ];
+          if (limitResult.remaining === 0) {
+            warningLines.push(`🚫 <b>Aaj ki limit khatam ho gayi hai!</b> Kal aur videos dekh sakte hain.`);
+          } else if (limitResult.remaining <= 3) {
+            warningLines.push(`⚠️ Sirf <b>${limitResult.remaining} video${limitResult.remaining === 1 ? '' : 's'}</b> bacha hai aaj ke liye!`);
+          } else {
+            warningLines.push(`✅ Abhi <b>${limitResult.remaining} videos</b> baaki hain aaj ke liye.`);
+          }
+          await bot.sendMessage(chatId, warningLines.join("\n"), { parse_mode: "HTML" });
+          return;
         }
 
         const sentMsg = await sendFile(bot, chatId, record);
