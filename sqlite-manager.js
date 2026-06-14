@@ -11,7 +11,10 @@
 const BetterSqlite3 = require('better-sqlite3');
 const path = require('path');
 
-const DB_PATH = path.join(__dirname, 'bot_cache.db');
+// Render pe /tmp use karo (writable), VPS pe home directory
+const IS_RENDER = !!process.env.RENDER_SERVICE_ID || process.env.RENDER === 'true';
+const USE_SQLITE = !IS_RENDER && process.env.USE_SQLITE !== 'false';
+const DB_PATH = process.env.SQLITE_PATH || (IS_RENDER ? '/tmp/bot_cache.db' : path.join(__dirname, 'bot_cache.db'));
 let _db = null;
 
 function getDb() {
