@@ -3,9 +3,94 @@ const router = express.Router();
 const crypto = require("crypto");
 const mongoose = require("mongoose");
 const Batch = require("../models/Course");
+const BetterSqlite3 = require("better-sqlite3");
+const path = require("path");
 
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const OWNER_ID = parseInt(process.env.OWNER_ID || "0");
+
+// ── SQLite Cache ──────────────────────────────────────────────────────────────
+// Reads come from local SQLite (fast ⚡). Writes go to MongoDB then refresh cache.
+
+const SQLITE_PATH = path.join(__dirname, "bot_cache.db");
+let _sqliteDb = null;
+
+function getSQLiteDb() {
+  if (!_sqliteDb) {
+    _sqliteDb = new BetterSqlite3(SQLITE_PATH);
+    _sqliteDb.pragma("journal_mode = WAL");
+    _sqliteDb.pragma("foreign_keys = ON");
+    _setupSQLiteTables(_sqliteDb);
+  }
+  return _sqliteDb;
+}
+
+function _setupSQLiteTables(db) {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS batches (
+      id           TEXT PRIMARY KEY,
+      data         TEXT NOT NULL,
+      updated_at   INTEGER DEFAULT 0
+    );
+  `);
+}
+
+// Store all batches as JSON blobs — simple and matches existing .toObject() output exactly.
+// Each row = one batch document. We serialize the full Mongoose object so the API response
+// is byte-for-byte identical to what MongoDB returns — zero changes needed in the frontend.
+function _writeBatchesToSQLite(db, batches) {
+  const upsert = db.prepare(
+    "INSERT INTO batches (id, data, updated_at) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET data=excluded.data, updated_at=excluded.updated_at"
+  );
+  const deleteStmt = db.prepare("DELETE FROM batches WHERE id NOT IN (SELECT value FROM json_each(?))");
+
+  const ids = batches.map(b => String(b._id));
+  const now = Date.now();
+
+  const sync = db.transaction(() => {
+    for (const b of batches) {
+      upsert.run(String(b._id), JSON.stringify(b), now);
+    }
+    // Remove any batches deleted from MongoDB
+    deleteStmt.run(JSON.stringify(ids));
+  });
+  sync();
+}
+
+function _readBatchesFromSQLite(db) {
+  const rows = db.prepare("SELECT data FROM batches ORDER BY json_extract(data, '$.order') ASC").all();
+  return rows.map(r => JSON.parse(r.data));
+}
+
+function _readOneBatchFromSQLite(db, id) {
+  const row = db.prepare("SELECT data FROM batches WHERE id = ?").get(id);
+  return row ? JSON.parse(row.data) : null;
+}
+
+function _deleteBatchFromSQLite(db, id) {
+  db.prepare("DELETE FROM batches WHERE id = ?").run(id);
+}
+
+// Refresh SQLite from MongoDB (called after every write operation)
+async function refreshSQLiteCache() {
+  try {
+    const batches = await Batch.find({}).sort({ order: 1 }).lean();
+    const db = getSQLiteDb();
+    _writeBatchesToSQLite(db, batches);
+  } catch (e) {
+    console.error("SQLite cache refresh error:", e.message);
+  }
+}
+
+// Initialize cache on startup (non-blocking)
+(async () => {
+  try {
+    await refreshSQLiteCache();
+    console.log("✅ SQLite cache ready");
+  } catch (e) {
+    console.error("SQLite cache init error:", e.message);
+  }
+})();
 
 // ── Auto-Lecture Session — MongoDB backed (survives server restarts) ──────────
 const autoLecSessionSchema = new mongoose.Schema({
@@ -155,17 +240,37 @@ function stripPremiumLinks(batch) {
 router.get("/batches", async (req, res) => {
   try {
     const admin = isAdminRequest(req);
-    const filter = admin ? {} : { $or: [{ isPublic: true }, { isPublic: { $exists: false } }, { isPublic: false }] };
-    const batches = await Batch.find(filter).sort({ order: 1 });
 
-    if (admin) return res.json(batches);
+    // Admin always gets fresh data from MongoDB (so edits are instantly visible)
+    if (admin) {
+      const batches = await Batch.find({}).sort({ order: 1 });
+      return res.json(batches);
+    }
 
-    // For non-admin: verify user identity, strip links from premium batches they don't have access to
+    // Non-admin: serve from local SQLite cache ⚡ (no MongoDB round-trip)
+    const db = getSQLiteDb();
+    const batches = _readBatchesFromSQLite(db);
+
     const userId = getRequestUserId(req);
     const result = batches.map(b => {
-      if (!b.isPremium) return b.toObject(); // free batch — send as-is
+      if (!b.isPremium) return b; // free batch — send as-is
       const hasAccess = userId && (b.premiumUsers || []).includes(userId);
-      return hasAccess ? b.toObject() : stripPremiumLinks(b); // strip links if no access
+      if (hasAccess) return b;
+      // Strip links for unauthorized premium users
+      return {
+        ...b,
+        subjects: (b.subjects || []).map(s => ({
+          ...s,
+          chapters: (s.chapters || []).map(c => ({
+            ...c,
+            lectures: (c.lectures || []).map(l => ({ ...l, link: l.isDemo ? l.link : '', notes: l.isDemo ? l.notes : '' })),
+            units: (c.units || []).map(u => ({
+              ...u,
+              lectures: (u.lectures || []).map(l => ({ ...l, link: l.isDemo ? l.link : '', notes: l.isDemo ? l.notes : '' }))
+            }))
+          }))
+        }))
+      };
     });
 
     res.json(result);
@@ -176,14 +281,14 @@ router.get("/batches", async (req, res) => {
 router.post("/batches/migrate-publish", verifyAdmin, async (req, res) => {
   try {
     const result = await Batch.updateMany({ isPublic: false }, { $set: { isPublic: true } });
-    res.json({ success: true, updated: result.modifiedCount });
+    refreshSQLiteCache(); res.json({ success: true, updated: result.modifiedCount });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 router.post("/batches", verifyAdmin, async (req, res) => {
   try {
     const count = await Batch.countDocuments();
-    res.json(await Batch.create({
+    const batch = await Batch.create({
       name: req.body.name,
       pic: req.body.pic || "",
       description: req.body.description || "",
@@ -192,7 +297,9 @@ router.post("/batches", verifyAdmin, async (req, res) => {
       isPremium: req.body.isPremium === true,
       premiumUsers: [],
       price: req.body.price ? Number(req.body.price) : 0,
-    }));
+    });
+    refreshSQLiteCache();
+    res.json(batch);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -202,6 +309,7 @@ router.patch("/batches/:bid/publish", verifyAdmin, async (req, res) => {
     if (!batch) return res.status(404).json({ error: "Batch not found" });
     batch.isPublic = !batch.isPublic;
     await batch.save();
+    refreshSQLiteCache();
     res.json({ success: true, isPublic: batch.isPublic });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -209,6 +317,7 @@ router.patch("/batches/:bid/publish", verifyAdmin, async (req, res) => {
 router.delete("/batches/:bid", verifyAdmin, async (req, res) => {
   try {
     await Batch.findByIdAndDelete(req.params.bid);
+    refreshSQLiteCache();
     res.json({ success: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -223,22 +332,47 @@ router.patch("/batches/:bid/edit", verifyAdmin, async (req, res) => {
     if (req.body.isPremium !== undefined) batch.isPremium = req.body.isPremium;
     if (req.body.price !== undefined) batch.price = Number(req.body.price) || 0;
     if (req.body.pic !== undefined) batch.pic = req.body.pic; // '' removes, base64 sets new
-    await batch.save(); res.json(batch);
+    await batch.save(); refreshSQLiteCache(); res.json(batch);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // ── Premium User Management ───────────────────────────────────────────────────
 
-// Single batch GET — admin gets full data with links
+// Single batch GET — admin gets fresh MongoDB data; users get SQLite cache ⚡
 router.get("/batches/:bid", async (req, res) => {
   try {
     const admin = isAdminRequest(req);
-    const batch = await Batch.findById(req.params.bid);
+
+    if (admin) {
+      const batch = await Batch.findById(req.params.bid);
+      if (!batch) return res.status(404).json({ error: "Not found" });
+      return res.json(batch.toObject());
+    }
+
+    // Non-admin: serve from SQLite cache
+    const db = getSQLiteDb();
+    const batch = _readOneBatchFromSQLite(db, req.params.bid);
     if (!batch) return res.status(404).json({ error: "Not found" });
-    if (admin) return res.json(batch.toObject());
+
     const userId = getRequestUserId(req);
     const hasAccess = userId && (batch.premiumUsers || []).includes(userId);
-    res.json(batch.isPremium && !hasAccess ? stripPremiumLinks(batch) : batch.toObject());
+    if (!batch.isPremium || hasAccess) return res.json(batch);
+
+    // Strip links for unauthorized premium users
+    res.json({
+      ...batch,
+      subjects: (batch.subjects || []).map(s => ({
+        ...s,
+        chapters: (s.chapters || []).map(c => ({
+          ...c,
+          lectures: (c.lectures || []).map(l => ({ ...l, link: l.isDemo ? l.link : '', notes: l.isDemo ? l.notes : '' })),
+          units: (c.units || []).map(u => ({
+            ...u,
+            lectures: (u.lectures || []).map(l => ({ ...l, link: l.isDemo ? l.link : '', notes: l.isDemo ? l.notes : '' }))
+          }))
+        }))
+      }))
+    });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -271,6 +405,7 @@ router.delete("/batches/:bid/premium-users/:uid", verifyAdmin, async (req, res) 
     if (!batch) return res.status(404).json({ error: "Batch not found" });
     batch.premiumUsers = (batch.premiumUsers || []).filter(u => u !== req.params.uid);
     await batch.save();
+    refreshSQLiteCache();
     res.json({ success: true, premiumUsers: batch.premiumUsers });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -292,6 +427,7 @@ router.post("/batches/:bid/subjects", verifyAdmin, async (req, res) => {
     if (!batch) return res.status(404).json({ error: "Batch not found" });
     batch.subjects.push({ name: req.body.name, icon: req.body.icon || "📚", color: req.body.color || "#4f8ef7", order: batch.subjects.length });
     await batch.save();
+    refreshSQLiteCache();
     res.json(batch);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -302,6 +438,7 @@ router.delete("/batches/:bid/subjects/:sid", verifyAdmin, async (req, res) => {
     if (!batch) return res.status(404).json({ error: "Batch not found" });
     batch.subjects = batch.subjects.filter(s => s._id.toString() !== req.params.sid);
     await batch.save();
+    refreshSQLiteCache();
     res.json({ success: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -315,7 +452,7 @@ router.patch("/batches/:bid/subjects/:sid/edit", verifyAdmin, async (req, res) =
     if (req.body.name) subj.name = req.body.name;
     if (req.body.icon) subj.icon = req.body.icon;
     if (req.body.color) subj.color = req.body.color;
-    await batch.save(); res.json(batch);
+    await batch.save(); refreshSQLiteCache(); res.json(batch);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -328,6 +465,7 @@ router.post("/batches/:bid/subjects/:sid/chapters", verifyAdmin, async (req, res
     if (!subj) return res.status(404).json({ error: "Not found" });
     subj.chapters.push({ name: req.body.name, order: subj.chapters.length });
     await batch.save();
+    refreshSQLiteCache();
     res.json(batch);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -339,6 +477,7 @@ router.delete("/batches/:bid/subjects/:sid/chapters/:cid", verifyAdmin, async (r
     if (!subj) return res.status(404).json({ error: "Not found" });
     subj.chapters = subj.chapters.filter(c => c._id.toString() !== req.params.cid);
     await batch.save();
+    refreshSQLiteCache();
     res.json({ success: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -352,7 +491,7 @@ router.patch("/batches/:bid/subjects/:sid/chapters/:cid/edit", verifyAdmin, asyn
     if (!chap) return res.status(404).json({ error: "Not found" });
     if (req.body.name) chap.name = req.body.name;
     if (req.body.comingSoon !== undefined) chap.comingSoon = req.body.comingSoon;
-    await batch.save(); res.json(batch);
+    await batch.save(); refreshSQLiteCache(); res.json(batch);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -366,6 +505,7 @@ router.post("/batches/:bid/subjects/:sid/chapters/:cid/units", verifyAdmin, asyn
     if (!chap) return res.status(404).json({ error: "Not found" });
     chap.units.push({ name: req.body.name, order: chap.units.length });
     await batch.save();
+    refreshSQLiteCache();
     res.json(batch);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -378,6 +518,7 @@ router.delete("/batches/:bid/subjects/:sid/chapters/:cid/units/:uid", verifyAdmi
     if (!chap) return res.status(404).json({ error: "Not found" });
     chap.units = chap.units.filter(u => u._id.toString() !== req.params.uid);
     await batch.save();
+    refreshSQLiteCache();
     res.json({ success: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -392,6 +533,7 @@ router.patch("/batches/:bid/subjects/:sid/chapters/:cid/units/:uid/edit", verify
     if (!unit) return res.status(404).json({ error: "Not found" });
     if (req.body.name) unit.name = req.body.name;
     await batch.save();
+    refreshSQLiteCache();
     res.json(batch);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -406,6 +548,7 @@ router.post("/batches/:bid/subjects/:sid/chapters/:cid/lectures", verifyAdmin, a
     if (!chap) return res.status(404).json({ error: "Not found" });
     chap.lectures.push({ name: req.body.name, link: req.body.link, notes: req.body.notes || "", order: chap.lectures.length, isDemo: req.body.isDemo === true });
     await batch.save();
+    refreshSQLiteCache();
     res.json(batch);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -418,6 +561,7 @@ router.delete("/batches/:bid/subjects/:sid/chapters/:cid/lectures/:lid", verifyA
     if (!chap) return res.status(404).json({ error: "Not found" });
     chap.lectures = chap.lectures.filter(l => l._id.toString() !== req.params.lid);
     await batch.save();
+    refreshSQLiteCache();
     res.json({ success: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -435,7 +579,7 @@ router.patch("/batches/:bid/subjects/:sid/chapters/:cid/lectures/:lid/edit", ver
     if (req.body.notes !== undefined) lec.notes = req.body.notes;
     if (req.body.comingSoon !== undefined) lec.comingSoon = req.body.comingSoon;
     if (req.body.isDemo !== undefined) lec.isDemo = req.body.isDemo;
-    await batch.save(); res.json(batch);
+    await batch.save(); refreshSQLiteCache(); res.json(batch);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -450,6 +594,7 @@ router.post("/batches/:bid/subjects/:sid/chapters/:cid/units/:uid/lectures", ver
     if (!unit) return res.status(404).json({ error: "Not found" });
     unit.lectures.push({ name: req.body.name, link: req.body.link, notes: req.body.notes || "", order: unit.lectures.length, isDemo: req.body.isDemo === true });
     await batch.save();
+    refreshSQLiteCache();
     res.json(batch);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -463,6 +608,7 @@ router.delete("/batches/:bid/subjects/:sid/chapters/:cid/units/:uid/lectures/:li
     if (!unit) return res.status(404).json({ error: "Not found" });
     unit.lectures = unit.lectures.filter(l => l._id.toString() !== req.params.lid);
     await batch.save();
+    refreshSQLiteCache();
     res.json({ success: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -481,7 +627,7 @@ router.patch("/batches/:bid/subjects/:sid/chapters/:cid/units/:uid/lectures/:lid
     if (req.body.notes !== undefined) lec.notes = req.body.notes;
     if (req.body.comingSoon !== undefined) lec.comingSoon = req.body.comingSoon;
     if (req.body.isDemo !== undefined) lec.isDemo = req.body.isDemo;
-    await batch.save(); res.json(batch);
+    await batch.save(); refreshSQLiteCache(); res.json(batch);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
