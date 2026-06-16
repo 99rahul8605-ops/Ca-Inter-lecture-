@@ -784,26 +784,6 @@ body.ready{transition:none}
   </button>
 </div>
 
-<!-- Points Redeem — Batch Select Modal -->
-<div id="redeemBatchModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:600;align-items:flex-end;justify-content:center" onclick="if(event.target===this)closeRedeemModal()">
-  <div style="background:var(--surface);border-radius:20px 20px 0 0;width:100%;max-width:480px;max-height:85vh;overflow-y:auto;padding-bottom:24px">
-    <div style="width:40px;height:4px;background:var(--border);border-radius:2px;margin:14px auto 0;display:block"></div>
-    <div style="padding:14px 16px 10px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border)">
-      <div style="font-size:15px;font-weight:700;display:flex;align-items:center;gap:7px">
-        <i class="ti ti-crown" style="color:#f59e0b"></i>
-        <span id="redeemModalTitle">Batch Select Karo</span>
-      </div>
-      <button onclick="closeRedeemModal()" style="background:var(--surface2);border:none;color:var(--text2);width:30px;height:30px;border-radius:50%;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:15px"><i class="ti ti-x"></i></button>
-    </div>
-    <div style="padding:12px 16px 4px">
-      <div style="font-size:12px;color:var(--text2);margin-bottom:10px" id="redeemModalDesc">Premium batch choose karo jise unlock karna hai</div>
-      <div id="redeemBatchList" style="display:flex;flex-direction:column;gap:8px">
-        <!-- JS se fill hoga -->
-      </div>
-    </div>
-  </div>
-</div>
-
 <!-- Refer Page -->
 <div class="page" id="page-refer">
   <div class="page-header">
@@ -836,75 +816,35 @@ body.ready{transition:none}
       </div>
     </div>
 
-    <!-- Points Balance -->
-    <div class="card" id="pointsBalanceCard" style="margin-bottom:14px;background:linear-gradient(135deg,rgba(245,158,11,0.12),rgba(217,119,6,0.06));border:1px solid rgba(245,158,11,0.35)">
-      <div style="display:flex;align-items:center;justify-content:space-between">
-        <div>
-          <div style="font-size:11px;color:var(--text2);font-weight:500;margin-bottom:3px">AVAILABLE POINTS</div>
-          <div style="display:flex;align-items:baseline;gap:5px">
-            <span id="availablePoints" style="font-size:36px;font-weight:800;color:#f59e0b">-</span>
-            <span style="font-size:13px;color:var(--text2)">pts</span>
-          </div>
-          <div style="font-size:11px;color:var(--text3);margin-top:2px">Total: <span id="totalPointsEarned" style="color:var(--text2)">-</span> pts · Used: <span id="usedPointsCount" style="color:var(--text2)">-</span> pts</div>
-        </div>
-        <div style="font-size:44px">🪙</div>
-      </div>
-    </div>
-
     <!-- Rewards card -->
     <div class="card" style="margin-bottom:14px;border:1px solid rgba(245,158,11,0.25)">
-      <div style="font-size:13px;font-weight:600;margin-bottom:12px;color:var(--text)">🎁 Points Redeem Karo</div>
-
-      <!-- Tier 1 -->
-      <div style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px;margin-bottom:8px">
-        <div style="display:flex;align-items:center;gap:10px">
-          <div style="width:44px;height:44px;border-radius:12px;background:linear-gradient(135deg,#22c55e,#16a34a);display:flex;align-items:center;justify-content:center;font-size:22px;flex-shrink:0">⚡</div>
-          <div style="flex:1;min-width:0">
-            <div style="font-size:13px;font-weight:700;color:var(--text)">24h Free Access</div>
-            <div style="font-size:11px;color:var(--text2);margin-top:2px">Saare free batches 24 ghante ke liye unlock</div>
-          </div>
-          <div style="font-size:16px;font-weight:800;color:#f59e0b;flex-shrink:0">1 pt</div>
+      <div style="font-size:13px;font-weight:600;margin-bottom:10px;color:var(--text)">🎁 Rewards</div>
+      <div style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--surface2);border-radius:var(--radius-sm);margin-bottom:8px">
+        <span style="font-size:22px">🏆</span>
+        <div>
+          <div style="font-size:12px;font-weight:600;color:var(--text)">Free Access Pass</div>
+          <div style="font-size:11px;color:var(--text2)">Redeem with points for free lecture access</div>
         </div>
-        <button onclick="redeemPoints('access_24h')" id="redeemBtn_access_24h"
-          style="margin-top:10px;width:100%;background:linear-gradient(135deg,#22c55e,#16a34a);color:#fff;border:none;border-radius:8px;padding:9px;font-size:12px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px">
-          <i class="ti ti-bolt"></i> Redeem — 1 Point
-        </button>
+        <span class="coming-soon-badge" style="margin-left:auto">🔜 Soon</span>
       </div>
-
-      <!-- Tier 2 -->
-      <div style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px;margin-bottom:8px">
-        <div style="display:flex;align-items:center;gap:10px">
-          <div style="width:44px;height:44px;border-radius:12px;background:linear-gradient(135deg,#4f8ef7,#7c5cbf);display:flex;align-items:center;justify-content:center;font-size:22px;flex-shrink:0">🌟</div>
-          <div style="flex:1;min-width:0">
-            <div style="font-size:13px;font-weight:700;color:var(--text)">1 Batch Premium — 1 Din</div>
-            <div style="font-size:11px;color:var(--text2);margin-top:2px">Apni pasand ka <strong style="color:var(--accent)">ek premium batch</strong> 1 din ke liye</div>
-          </div>
-          <div style="font-size:16px;font-weight:800;color:#f59e0b;flex-shrink:0">5 pts</div>
+      <div style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--surface2);border-radius:var(--radius-sm);margin-bottom:8px">
+        <span style="font-size:22px">⭐</span>
+        <div>
+          <div style="font-size:12px;font-weight:600;color:var(--text)">Bonus Points</div>
+          <div style="font-size:11px;color:var(--text2)">Extra points for milestone referrals</div>
         </div>
-        <button onclick="redeemPoints('premium_1d')" id="redeemBtn_premium_1d"
-          style="margin-top:10px;width:100%;background:linear-gradient(135deg,#4f8ef7,#7c5cbf);color:#fff;border:none;border-radius:8px;padding:9px;font-size:12px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px">
-          <i class="ti ti-crown"></i> Redeem — 5 Points
-        </button>
+        <span class="coming-soon-badge" style="margin-left:auto">🔜 Soon</span>
       </div>
-
-      <!-- Tier 3 -->
-      <div style="background:var(--surface2);border:1px solid rgba(245,158,11,0.3);border-radius:var(--radius-sm);padding:12px">
-        <div style="display:flex;align-items:center;gap:10px">
-          <div style="width:44px;height:44px;border-radius:12px;background:linear-gradient(135deg,#f59e0b,#d97706);display:flex;align-items:center;justify-content:center;font-size:22px;flex-shrink:0">👑</div>
-          <div style="flex:1;min-width:0">
-            <div style="font-size:13px;font-weight:700;color:var(--text)">1 Batch Premium — 1 Hafta</div>
-            <div style="font-size:11px;color:var(--text2);margin-top:2px">Apni pasand ka <strong style="color:#f59e0b">ek premium batch</strong> poore 7 din ke liye</div>
-          </div>
-          <div style="font-size:16px;font-weight:800;color:#f59e0b;flex-shrink:0">20 pts</div>
+      <div style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--surface2);border-radius:var(--radius-sm)">
+        <span style="font-size:22px">🎟️</span>
+        <div>
+          <div style="font-size:12px;font-weight:600;color:var(--text)">Special Batch Access</div>
+          <div style="font-size:11px;color:var(--text2)">Unlock premium batches with points</div>
         </div>
-        <button onclick="redeemPoints('premium_7d')" id="redeemBtn_premium_7d"
-          style="margin-top:10px;width:100%;background:linear-gradient(135deg,#f59e0b,#d97706);color:#fff;border:none;border-radius:8px;padding:9px;font-size:12px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px">
-          <i class="ti ti-crown"></i> Redeem — 20 Points
-        </button>
+        <span class="coming-soon-badge" style="margin-left:auto">🔜 Soon</span>
       </div>
-
       <div style="margin-top:12px;font-size:11px;color:var(--text3);text-align:center">
-        1 referral = <strong style="color:#f59e0b">1 point</strong> · Points sirf available balance se katenge
+        Each referral = <strong style="color:#f59e0b">1 point</strong> · Rewards launching soon!
       </div>
     </div>
 
@@ -922,11 +862,11 @@ body.ready{transition:none}
         </div>
         <div style="display:flex;align-items:center;gap:10px">
           <div style="width:24px;height:24px;border-radius:50%;background:var(--accent);color:#fff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0">3</div>
-          <div style="font-size:12px;color:var(--text2)">Friend bot open kare = tumhe <strong style="color:#f59e0b">1 point</strong> milta hai</div>
+          <div style="font-size:12px;color:var(--text2)">When they open the bot using your link, you get <strong style="color:#f59e0b">1 point</strong></div>
         </div>
         <div style="display:flex;align-items:center;gap:10px">
           <div style="width:24px;height:24px;border-radius:50%;background:var(--accent);color:#fff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0">4</div>
-          <div style="font-size:12px;color:var(--text2)">Points se rewards redeem karo upar se!</div>
+          <div style="font-size:12px;color:var(--text2)">Redeem points for rewards (coming soon!)</div>
         </div>
       </div>
     </div>
@@ -3458,7 +3398,7 @@ async function loadReferStats() {
   var box = document.getElementById('referLinkBox');
   if (box) box.textContent = _referLink || 'Open via Telegram to see your link';
 
-  // Fetch referral count stats
+  // Fetch stats from server
   try {
     var r = await fetch('/api/refer/stats/' + uid);
     var data = await r.json();
@@ -3468,142 +3408,6 @@ async function loadReferStats() {
     if (pointsEl) pointsEl.textContent = data.points || 0;
   } catch(e) {
     console.error('Refer stats error:', e);
-  }
-
-  // Fetch available points (with used deducted)
-  try {
-    var r2 = await fetch('/api/refer/points/' + uid);
-    var pd = await r2.json();
-    var avEl = document.getElementById('availablePoints');
-    var totEl = document.getElementById('totalPointsEarned');
-    var usedEl = document.getElementById('usedPointsCount');
-    if (avEl) avEl.textContent = pd.availablePoints || 0;
-    if (totEl) totEl.textContent = pd.totalPoints || 0;
-    if (usedEl) usedEl.textContent = pd.usedPoints || 0;
-    _availablePoints = pd.availablePoints || 0;
-  } catch(e) {
-    console.error('Points fetch error:', e);
-    _availablePoints = 0;
-  }
-
-  _updateRedeemButtons();
-}
-
-var _availablePoints = 0;
-var _pendingRedeemTier = null;
-
-function _updateRedeemButtons() {
-  var tiers = { access_24h: 1, premium_1d: 5, premium_7d: 20 };
-  Object.keys(tiers).forEach(function(tier) {
-    var btn = document.getElementById('redeemBtn_' + tier);
-    if (!btn) return;
-    var enough = _availablePoints >= tiers[tier];
-    btn.disabled = !enough;
-    btn.style.opacity = enough ? '1' : '0.45';
-    btn.style.cursor = enough ? 'pointer' : 'not-allowed';
-  });
-}
-
-function closeRedeemModal() {
-  var m = document.getElementById('redeemBatchModal');
-  if (m) m.style.display = 'none';
-  _pendingRedeemTier = null;
-}
-
-async function redeemPoints(tier) {
-  var uid = getUserId();
-  if (!uid) return toast('Telegram se open karo', 'error');
-  var costs = { access_24h: 1, premium_1d: 5, premium_7d: 20 };
-  var cost = costs[tier];
-  if (_availablePoints < cost) return toast('Insufficient points! ' + cost + ' chahiye, tumhare paas ' + _availablePoints + ' hain.', 'error');
-
-  // For premium tiers — need batch selection
-  if (tier === 'premium_1d' || tier === 'premium_7d') {
-    _pendingRedeemTier = tier;
-    var premiumBatches = batches.filter(function(b) { return b.isPremium; });
-    var listEl = document.getElementById('redeemBatchList');
-    var titleEl = document.getElementById('redeemModalTitle');
-    var descEl = document.getElementById('redeemModalDesc');
-    if (titleEl) titleEl.textContent = tier === 'premium_1d' ? '1-Din Premium — Batch Choose Karo' : '1-Hafta Premium — Batch Choose Karo';
-    if (descEl) descEl.textContent = 'Kaunsa premium batch unlock karna hai? (' + cost + ' points lagenge)';
-    if (listEl) {
-      if (!premiumBatches.length) {
-        listEl.innerHTML = '<div style="text-align:center;padding:20px;color:var(--text2);font-size:13px">Abhi koi premium batch available nahi hai.</div>';
-      } else {
-        listEl.innerHTML = premiumBatches.map(function(b) {
-          return '<div onclick="confirmRedeemBatch('' + b._id + '')" style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px 14px;display:flex;align-items:center;gap:12px;cursor:pointer;transition:border-color 0.2s" onmouseover="this.style.borderColor='var(--accent)'" onmouseout="this.style.borderColor='var(--border)'">' +
-            '<div style="width:44px;height:44px;border-radius:10px;background:linear-gradient(135deg,#f59e0b,#d97706);display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0">👑</div>' +
-            '<div style="flex:1;min-width:0">' +
-              '<div style="font-size:14px;font-weight:600;color:var(--text)">' + _escFj(b.name) + '</div>' +
-              (b.description ? '<div style="font-size:11px;color:var(--text2);margin-top:2px">' + _escFj(b.description) + '</div>' : '') +
-            '</div>' +
-            '<i class="ti ti-chevron-right" style="color:var(--text3)"></i>' +
-          '</div>';
-        }).join('');
-      }
-    }
-    var m = document.getElementById('redeemBatchModal');
-    if (m) m.style.display = 'flex';
-    return;
-  }
-
-  // Tier 1: access_24h — direct redeem
-  await _doRedeem(tier, null);
-}
-
-async function confirmRedeemBatch(batchId) {
-  closeRedeemModal();
-  await _doRedeem(_pendingRedeemTier, batchId);
-}
-
-async function _doRedeem(tier, batchId) {
-  var uid = getUserId();
-  var tierLabels = { access_24h: '24h Free Access', premium_1d: '1-Din Premium', premium_7d: '1-Hafta Premium' };
-  var btn = document.getElementById('redeemBtn_' + tier);
-  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader-2" style="animation:spin 0.8s linear infinite;display:inline-block"></i> Redeeming...'; }
-
-  try {
-    var r = await fetch('/api/refer/redeem', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ userId: uid, tier: tier, batchId: batchId || null })
-    });
-    var d = await r.json();
-    if (!r.ok) throw new Error(d.error || 'Redeem failed');
-
-    _availablePoints = d.newPoints || 0;
-    var avEl = document.getElementById('availablePoints');
-    if (avEl) avEl.textContent = _availablePoints;
-
-    if (tier === 'access_24h') {
-      accessExpiresAt = d.expiresAt;
-      try { localStorage.setItem('edubot_access_expires', d.expiresAt); } catch(e){}
-      renderAccessCard();
-      startCountdown();
-      var dot = document.getElementById('accessDot');
-      if (dot) dot.style.background = 'var(--green)';
-      toast('✅ 24h access add ho gaya! Points: ' + _availablePoints + ' baki', 'success');
-    } else {
-      // Refresh batches to get updated premiumUsers
-      try {
-        var br = await fetch('/api/batches', { headers: { 'x-tg-init-data': tg ? tg.initData : '' } });
-        batches = await br.json();
-        renderBatches(batches);
-      } catch(e) {}
-      var days = tier === 'premium_1d' ? '1 din' : '7 din';
-      toast('✅ ' + d.batchName + ' ' + days + ' ke liye unlock! Points: ' + _availablePoints + ' baki', 'success');
-    }
-
-    _updateRedeemButtons();
-    loadReferStats();
-  } catch(e) {
-    toast('Error: ' + (e.message || 'Please try again'), 'error');
-    if (btn) {
-      btn.disabled = false;
-      var icons = { access_24h: 'ti-bolt', premium_1d: 'ti-crown', premium_7d: 'ti-crown' };
-      var costs = { access_24h: 1, premium_1d: 5, premium_7d: 20 };
-      btn.innerHTML = '<i class="ti ' + (icons[tier]||'ti-gift') + '"></i> Redeem — ' + costs[tier] + ' Points';
-    }
   }
 }
 
