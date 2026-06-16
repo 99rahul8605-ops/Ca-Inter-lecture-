@@ -145,11 +145,10 @@ async function autoAddLecture({ batchId, subjectId, chapterId, unitId, name, lin
 router.get("/batches", async (req, res) => {
   try {
     const admin = isAdminRequest(req);
-    // Admin: fresh from MongoDB
-    if (admin) { return res.json(await Batch.find({}).sort({ order: 1 })); }
-
-    // Users: from SQLite ⚡
+    // SQLite for everyone ⚡ (MongoDB sirf backup hai)
     const batches = db.batch.getAll();
+    if (admin) { return res.json(batches); }
+
     const userId = getRequestUserId(req);
     res.json(batches.map(b => {
       if (!b.isPremium) return b;
@@ -162,12 +161,12 @@ router.get("/batches", async (req, res) => {
 router.get("/batches/:bid", async (req, res) => {
   try {
     const admin = isAdminRequest(req);
-    if (admin) {
-      const b = await Batch.findById(req.params.bid);
-      if (!b) return res.status(404).json({ error: "Not found" });
-      return res.json(b.toObject());
-    }
     const b = db.batch.getOne(req.params.bid);
+    if (admin) {
+      if (!b) return res.status(404).json({ error: "Not found" });
+      return res.json(b);
+    }
+    // (b already fetched above for non-admin path too)
     if (!b) return res.status(404).json({ error: "Not found" });
     const userId = getRequestUserId(req);
     const hasAccess = userId && (b.premiumUsers||[]).includes(userId);
@@ -697,13 +696,15 @@ router.post('/refer/redeem', async (req, res) => {
 
     // Current points check
     const totalPoints = db.referral.countByReferrer(userId);
-    const usedPoints = db.referral.getUsedPoints ? db.referral.getUsedPoints(userId) : 0;
+    const usedPoints = db.pointsUsage.getTotalUsed(userId);
     const availablePoints = totalPoints - usedPoints;
     if (availablePoints < tierInfo.cost) {
       return res.status(400).json({ error: `Insufficient points. ${tierInfo.cost} chahiye, tumhare paas ${availablePoints} hain.` });
     }
 
-    // Record points usage in MongoDB (SQLite fallback)
+    // Record points usage in SQLite (primary) + MongoDB (backup)
+    const usageId = db.generateId();
+    db.pointsUsage.insert({ id: usageId, userId, pointsUsed: tierInfo.cost, tier, batchId: batchId || null });
     const PointsUsage = mongoose.models.PointsUsage || mongoose.model('PointsUsage', new mongoose.Schema({
       userId: { type: String, required: true },
       pointsUsed: { type: Number, required: true },
@@ -711,8 +712,7 @@ router.post('/refer/redeem', async (req, res) => {
       batchId: String,
       createdAt: { type: Date, default: Date.now }
     }));
-
-    await PointsUsage.create({ userId, pointsUsed: tierInfo.cost, tier, batchId: batchId || null });
+    PointsUsage.create({ userId, pointsUsed: tierInfo.cost, tier, batchId: batchId || null }).catch(() => {});
 
     // Helper: get user info from Telegram (best-effort)
     async function getTgUserInfo(uid) {
@@ -844,20 +844,8 @@ router.get('/refer/points/:userId', async (req, res) => {
   try {
     const userId = req.params.userId;
     const totalPoints = db.referral.countByReferrer(userId);
-
-    // Sum used points from MongoDB
-    const PointsUsage = mongoose.models.PointsUsage || mongoose.model('PointsUsage', new mongoose.Schema({
-      userId: { type: String, required: true },
-      pointsUsed: { type: Number, required: true },
-      tier: String, batchId: String, createdAt: { type: Date, default: Date.now }
-    }));
-    const usageAgg = await PointsUsage.aggregate([
-      { $match: { userId } },
-      { $group: { _id: null, total: { $sum: '$pointsUsed' } } }
-    ]);
-    const usedPoints = (usageAgg[0] && usageAgg[0].total) || 0;
+    const usedPoints = db.pointsUsage.getTotalUsed(userId);
     const availablePoints = Math.max(0, totalPoints - usedPoints);
-
     res.json({ totalPoints, usedPoints, availablePoints });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
