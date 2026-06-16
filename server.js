@@ -18,7 +18,8 @@ const CONTACT_LINK = process.env.CONTACT_LINK || "";
 let BOT_USERNAME = "";
 let bot = null;
 
-if (!TOKEN || !MONGO_URI || !WEB_URL || !OWNER_ID) { console.error("Missing env: BOT_TOKEN, MONGO_URI, WEB_URL, OWNER_ID are required."); process.exit(1); }
+if (!TOKEN || !WEB_URL || !OWNER_ID) { console.error("Missing env: BOT_TOKEN, WEB_URL, OWNER_ID are required."); process.exit(1); }
+if (!MONGO_URI) console.warn("⚠️  MONGO_URI not set — SQLite-only mode (no Mongo backup).");
 if (!STORAGE_CHANNEL_ID) console.warn("Warning: STORAGE_CHANNEL_ID not set.");
 
 function isOwner(userId) { return userId === OWNER_ID; }
@@ -41,14 +42,22 @@ const dailyLimitSchema = new mongoose.Schema({ userId: { type: Number, required:
 const DailyVideoLimit = mongoose.model("DailyVideoLimit", dailyLimitSchema);
 const DAILY_VIDEO_LIMIT = 10;
 
-// ── MongoDB connect ───────────────────────────────────────────────────────────
-mongoose.connect(MONGO_URI).then(async () => {
-  console.log("MongoDB connected");
-  try { await mongoose.connection.collection("filerecords").dropIndex("expires_at_1"); } catch (e) {}
-  try { await mongoose.connection.collection("filerecords").updateMany({ expires_at: { $ne: null } }, { $set: { expires_at: null } }); } catch (e) {}
-  // Sync all MongoDB → SQLite on startup
-  await db.syncFromMongo(mongoose);
-}).catch((err) => { console.error("MongoDB error:", err.message); process.exit(1); });
+// ── MongoDB connect (optional — SQLite is primary) ────────────────────────────
+let mongoConnected = false;
+if (MONGO_URI) {
+  mongoose.connect(MONGO_URI).then(async () => {
+    mongoConnected = true;
+    console.log("✅ MongoDB connected (backup mode)");
+    try { await mongoose.connection.collection("filerecords").dropIndex("expires_at_1"); } catch (e) {}
+    try { await mongoose.connection.collection("filerecords").updateMany({ expires_at: { $ne: null } }, { $set: { expires_at: null } }); } catch (e) {}
+    // Sync MongoDB → SQLite on startup
+    await db.syncFromMongo(mongoose);
+  }).catch((err) => {
+    console.warn("⚠️  MongoDB connection failed:", err.message, "— running SQLite-only.");
+  });
+} else {
+  console.log("ℹ️  No MONGO_URI — SQLite-only mode.");
+}
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function getTodayIST() { const now = new Date(); return new Date(now.getTime() + 5.5*60*60*1000).toISOString().slice(0,10); }
@@ -60,7 +69,7 @@ function checkAndIncrementVideoLimit(userId) {
   if (rec.count >= DAILY_VIDEO_LIMIT) return { allowed: false, used: rec.count, remaining: 0 };
   const newCount = rec.count + 1;
   db.dailyVideoLimit.upsert({ userId, count: newCount, resetDate: today });
-  DailyVideoLimit.findOneAndUpdate({ userId }, { userId, count: newCount, resetDate: today }, { upsert: true }).catch(() => {});
+  if (mongoConnected) DailyVideoLimit.findOneAndUpdate({ userId }, { userId, count: newCount, resetDate: today }, { upsert: true }).catch(() => {});
   return { allowed: true, used: newCount, remaining: DAILY_VIDEO_LIMIT - newCount };
 }
 
@@ -131,12 +140,12 @@ function cleanFileName(name) {
 async function scheduleDelete(bot, chatId, messageId, deleteAt) {
   const id = db.generateId();
   db.pendingDelete.create({ id, chat_id: chatId, message_id: messageId, delete_at: deleteAt });
-  PendingDelete.create({ chat_id: chatId, message_id: messageId, delete_at: deleteAt }).catch(() => {});
+  if (mongoConnected) PendingDelete.create({ chat_id: chatId, message_id: messageId, delete_at: deleteAt }).catch(() => {});
   const delay = Math.max(0, new Date(deleteAt) - Date.now());
   setTimeout(async () => {
     try { await bot.deleteMessage(chatId, messageId); } catch (err) { if (!err.message?.includes("message to delete not found")) console.error("Auto DM deletion error:", err.message); }
     db.pendingDelete.deleteByChatMsg(chatId, messageId);
-    PendingDelete.deleteOne({ chat_id: chatId, message_id: messageId }).catch(() => {});
+    if (mongoConnected) PendingDelete.deleteOne({ chat_id: chatId, message_id: messageId }).catch(() => {});
   }, delay);
 }
 
@@ -148,7 +157,7 @@ async function recoverPendingDeletes(bot) {
     setTimeout(async () => {
       try { await bot.deleteMessage(p.chat_id, p.message_id); } catch (err) { console.error("Recovered deletion error:", err.message); }
       db.pendingDelete.deleteById(p._id);
-      PendingDelete.deleteOne({ _id: p._id }).catch(() => {});
+      if (mongoConnected) PendingDelete.deleteOne({ _id: p._id }).catch(() => {});
     }, delay);
   }
 }
@@ -230,7 +239,7 @@ async function startBot() {
 
     if (userId) {
       db.user.upsert({ userId: String(userId), firstName: msg.from.first_name||"", lastName: msg.from.last_name||"", username: msg.from.username||"", firstSeen: new Date(), lastSeen: new Date() });
-      User.findOneAndUpdate({ userId: String(userId) }, { userId: String(userId), firstName: msg.from.first_name||"", lastName: msg.from.last_name||"", username: msg.from.username||"", lastSeen: new Date() }, { upsert: true }).catch(() => {});
+      if (mongoConnected) User.findOneAndUpdate({ userId: String(userId) }, { userId: String(userId), firstName: msg.from.first_name||"", lastName: msg.from.last_name||"", username: msg.from.username||"", lastSeen: new Date() }, { upsert: true }).catch(() => {});
     }
 
     if (param) {
@@ -280,8 +289,8 @@ async function startBot() {
           const sentMsg = await sendFile(bot, chatId, record);
           await scheduleDelete(bot,chatId,sentMsg.message_id,new Date(Date.now()+6*60*60*1000));
           db.fileRecord.addDeliveredTo(record.id,chatId);
-          FileRecord.updateOne({ code:record.code },{ $addToSet:{ delivered_to:chatId } }).catch(() => {});
-          setTimeout(() => { db.fileRecord.removeDeliveredTo(record.id,chatId); FileRecord.updateOne({ code:record.code },{ $pull:{ delivered_to:chatId } }).catch(() => {}); }, 6*60*60*1000);
+          if (mongoConnected) FileRecord.updateOne({ code:record.code },{ $addToSet:{ delivered_to:chatId } }).catch(() => {});
+          setTimeout(() => { db.fileRecord.removeDeliveredTo(record.id,chatId); if (mongoConnected) FileRecord.updateOne({ code:record.code },{ $pull:{ delivered_to:chatId } }).catch(() => {}); }, 6*60*60*1000);
 
           // Pehla lecture watch hone pe referral confirm karo aur referrer ko point do
           (async () => {
@@ -315,8 +324,8 @@ async function startBot() {
         if (isVideo) {
           await scheduleDelete(bot,chatId,sentMsg.message_id,new Date(Date.now()+6*60*60*1000));
           db.fileRecord.addDeliveredTo(record.id,chatId);
-          FileRecord.updateOne({ code:record.code },{ $addToSet:{ delivered_to:chatId } }).catch(() => {});
-          setTimeout(() => { db.fileRecord.removeDeliveredTo(record.id,chatId); FileRecord.updateOne({ code:record.code },{ $pull:{ delivered_to:chatId } }).catch(() => {}); }, 6*60*60*1000);
+          if (mongoConnected) FileRecord.updateOne({ code:record.code },{ $addToSet:{ delivered_to:chatId } }).catch(() => {});
+          setTimeout(() => { db.fileRecord.removeDeliveredTo(record.id,chatId); if (mongoConnected) FileRecord.updateOne({ code:record.code },{ $pull:{ delivered_to:chatId } }).catch(() => {}); }, 6*60*60*1000);
           await bot.sendMessage(chatId, `⚠️ This video auto-deletes in 6 hours.`);
         }
       } catch (err) { console.error("Deep link error:", err.message); bot.sendMessage(chatId, `Error occurred. Please try again.`); }
@@ -354,7 +363,7 @@ async function startBot() {
       for (const f of session.files) storedFiles.push(await saveToStorageChannel(bot,f));
       const id=db.generateId();
       db.bulkBatch.create({ id, batch_code:batchCode, user_id:userId, files:storedFiles });
-      BulkBatch.create({ batch_code:batchCode, user_id:userId, files:storedFiles }).catch(() => {});
+      if (mongoConnected) BulkBatch.create({ batch_code:batchCode, user_id:userId, files:storedFiles }).catch(() => {});
       const link=`https://t.me/${BOT_USERNAME}?start=${batchCode}`;
       await bot.deleteMessage(chatId,processing.message_id);
       const fileList=session.files.map((f,i)=>`${i+1}. ${f.file_name}`).join("\n");
@@ -411,18 +420,10 @@ async function startBot() {
       const batchId=parts[0]; const targetUserId=parts[1];
       if (isApprove) {
         try {
-          const batchData = db.batch.getOne(batchId);
-          if (batchData) {
-            if (!batchData.premiumUsers) batchData.premiumUsers = [];
-            if (!batchData.premiumUsers.includes(String(targetUserId))) {
-              batchData.premiumUsers.push(String(targetUserId));
-              db.batch.upsert(batchData);
-              // MongoDB backup
-              const Course = require("./models/Course");
-              Course.findByIdAndUpdate(batchId, { $addToSet: { premiumUsers: String(targetUserId) } }).catch(() => {});
-            }
-          }
-          bot.sendMessage(parseInt(targetUserId),`✅ <b>Payment Approved!</b>\n\nAccess to <b>${esc(batchData?.name||"the batch")}</b> unlocked! 🚀`,{parse_mode:"HTML",reply_markup:{inline_keyboard:[[{text:"📚 Open App",web_app:{url:WEB_URL}}]]}}).catch(()=>{});
+          const Batch=require("./models/Course");
+          const batch=await Batch.findById(batchId);
+          if(batch){if(!batch.premiumUsers)batch.premiumUsers=[];if(!batch.premiumUsers.includes(String(targetUserId))){batch.premiumUsers.push(String(targetUserId));await batch.save();}db.batch.upsert(batch.toObject());}
+          bot.sendMessage(parseInt(targetUserId),`✅ <b>Payment Approved!</b>\n\nAccess to <b>${esc(batch?.name||"the batch")}</b> unlocked! 🚀`,{parse_mode:"HTML",reply_markup:{inline_keyboard:[[{text:"📚 Open App",web_app:{url:WEB_URL}}]]}}).catch(()=>{});
           await bot.editMessageCaption(`${query.message.caption||""}\n\n✅ <b>APPROVED</b> by ${esc(query.from.first_name||"Admin")}`,{chat_id:chatId,message_id:msgId,parse_mode:"HTML",reply_markup:{inline_keyboard:[]}}).catch(()=>bot.editMessageText(`${query.message.text||""}\n\n✅ <b>APPROVED</b>`,{chat_id:chatId,message_id:msgId,parse_mode:"HTML",reply_markup:{inline_keyboard:[]}}).catch(()=>{}));
           await bot.answerCallbackQuery(query.id,{text:"✅ Approved!"});
         } catch(err){await bot.answerCallbackQuery(query.id,{text:"❌ Error: "+err.message});}
@@ -443,8 +444,8 @@ async function startBot() {
     if(isGroupChat(msg)||!isOwner(msg.from?.id)) return;
     const chatId=msg.chat.id; const code=match[1].trim();
     try {
-      if(db.fileRecord.deleteByCode(code,msg.from.id)){FileRecord.deleteOne({code:{$regex:new RegExp(`^${code}$`,"i")},uploaded_by:msg.from.id}).catch(()=>{});return bot.sendMessage(chatId,`✅ File deleted!`);}
-      if(db.bulkBatch.deleteByCode(code,msg.from.id)){BulkBatch.deleteOne({batch_code:{$regex:new RegExp(`^${code}$`,"i")},user_id:msg.from.id}).catch(()=>{});return bot.sendMessage(chatId,`✅ Batch deleted!`);}
+      if(db.fileRecord.deleteByCode(code,msg.from.id)){if (mongoConnected) FileRecord.deleteOne({code:{$regex:new RegExp(`^${code}$`,"i")},uploaded_by:msg.from.id}).catch(()=>{});return bot.sendMessage(chatId,`✅ File deleted!`);}
+      if(db.bulkBatch.deleteByCode(code,msg.from.id)){if (mongoConnected) BulkBatch.deleteOne({batch_code:{$regex:new RegExp(`^${code}$`,"i")},user_id:msg.from.id}).catch(()=>{});return bot.sendMessage(chatId,`✅ Batch deleted!`);}
       bot.sendMessage(chatId,`Code not found.`);
     } catch(_){bot.sendMessage(chatId,`Deletion failed.`);}
   });
@@ -486,7 +487,7 @@ async function startBot() {
         const stored=await saveToStorageChannel(bot,fileInfo); stored.file_name=cleanFileName(stored.file_name);
         const code=getUniqueCode(); const id=db.generateId();
         db.fileRecord.create({id,code,file_id:stored.file_id,file_type:stored.file_type,file_name:stored.file_name,uploaded_by:userId,channel_msg_id:stored.channel_msg_id||null});
-        FileRecord.create({code,file_id:stored.file_id,file_type:stored.file_type,file_name:stored.file_name,uploaded_by:userId,expires_at:null,channel_msg_id:stored.channel_msg_id||null}).catch(()=>{});
+        if (mongoConnected) FileRecord.create({code,file_id:stored.file_id,file_type:stored.file_type,file_name:stored.file_name,uploaded_by:userId,expires_at:null,channel_msg_id:stored.channel_msg_id||null}).catch(()=>{});
         const link=`https://t.me/${BOT_USERNAME}?start=${code}`;
         await bot.deleteMessage(chatId,processing.message_id);
         if(autoLectureSession&&autoLectureSession.active){
@@ -522,7 +523,7 @@ async function startBot() {
         const stored=await saveToStorageChannel(bot,fileInfo); stored.file_name=cleanFileName(stored.file_name);
         const code=getUniqueCode(); const id=db.generateId();
         db.fileRecord.create({id,code,file_id:stored.file_id,file_type:stored.file_type,file_name:stored.file_name,uploaded_by:userId,channel_msg_id:stored.channel_msg_id||null});
-        FileRecord.create({code,file_id:stored.file_id,file_type:stored.file_type,file_name:stored.file_name,uploaded_by:userId,expires_at:null,channel_msg_id:stored.channel_msg_id||null}).catch(()=>{});
+        if (mongoConnected) FileRecord.create({code,file_id:stored.file_id,file_type:stored.file_type,file_name:stored.file_name,uploaded_by:userId,expires_at:null,channel_msg_id:stored.channel_msg_id||null}).catch(()=>{});
         const link=`https://t.me/${BOT_USERNAME}?start=${code}`;
         await bot.deleteMessage(chatId,processing.message_id);
         if(autoLectureSession&&autoLectureSession.active){
