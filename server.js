@@ -1,3 +1,5 @@
+require("dotenv").config();
+
 const TelegramBot = require("node-telegram-bot-api");
 const mongoose = require("mongoose");
 const express = require("express");
@@ -343,10 +345,24 @@ async function startBot() {
       return;
     }
 
-    const welcomeText = isOwner(userId)
-      ? `👋 Hello Admin!\n\nTap below to browse lectures! 📚\n\n📁 File Store:\n/bulk — bulk upload\n/myfiles — view files\n/delete <code> — delete file\n/rmword 'word' — remove word from names\n/cancel — cancel bulk\n\n📡 Broadcast:\n/broadcast <text> or reply to media`
-      : `👋 Hello ${msg.from.first_name}!\n\nTap below to browse all lectures! 📚`;
-    bot.sendMessage(chatId, welcomeText, { reply_markup:{ inline_keyboard:[[{ text:"📚 Browse Lectures", web_app:{ url:WEB_URL } }]] } });
+    if (isOwner(userId)) {
+      const adminText = `👋 Hello Admin!\n\nTap below to browse lectures! 📚\n\n📁 File Store:\n/bulk — bulk upload\n/myfiles — view files\n/delete <code> — delete file\n/rmword 'word' — remove word from names\n/cancel — cancel bulk\n\n📡 Broadcast:\n/broadcast <text> or reply to media`;
+      return bot.sendMessage(chatId, adminText, { reply_markup:{ inline_keyboard:[[{ text:"📚 Browse Lectures", web_app:{ url:WEB_URL } }]] } });
+    }
+
+    // Normal user — welcome + invite link
+    const refLink = `https://t.me/${BOT_USERNAME}?start=ref_${userId}`;
+    const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(refLink)}&text=${encodeURIComponent('Join aur free lectures dekho! 📚')}`;
+    const welcomeText = `👋 Hello ${msg.from.first_name}!\n\nTap below to browse all lectures! 📚\n\n🔗 <b>Tera Invite Link:</b>\n<code>${refLink}</code>\n\nFriends ko share karo — jab wo pehla video dekhe, tujhe <b>+1 Point</b> milega! 🎉`;
+    bot.sendMessage(chatId, welcomeText, {
+      parse_mode: "HTML",
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "📚 Browse Lectures", web_app: { url: WEB_URL } }],
+          [{ text: "🔗 Invite Friends", url: shareUrl }]
+        ]
+      }
+    });
   });
 
   // ── /bulk ─────────────────────────────────────────────────────────────────
