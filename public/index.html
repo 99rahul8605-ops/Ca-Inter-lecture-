@@ -3459,17 +3459,23 @@ function collapseContact(){
 var _referLink = '';
 
 function getReferLink() {
-  var uid = getUserId();
-  if (!uid) return '';
-  return 'https://t.me/' + (window._botUsername || '') + '?start=ref_' + uid;
+  var tgUser = tg && tg.initDataUnsafe && tg.initDataUnsafe.user;
+  var uid = tgUser ? String(tgUser.id) : null;
+  if (!uid || !window._botUsername) return '';
+  return 'https://t.me/' + window._botUsername + '?start=ref_' + uid;
 }
 
 async function loadReferStats() {
-  var uid = getUserId();
-  // guest_ user ke liye refer link nahi dikhana
-  var isTgUser = uid && !uid.startsWith('guest_');
+  var tgUser = tg && tg.initDataUnsafe && tg.initDataUnsafe.user;
+  var uid = tgUser ? String(tgUser.id) : null;
+  var box = document.getElementById('referLinkBox');
 
-  // Agar botUsername abhi tak nahi aaya (config fetch pending) to max 5s wait karo
+  if (!uid) {
+    if (box) box.textContent = 'Open via Telegram to see your link';
+    return;
+  }
+
+  // botUsername milne ka wait karo (max 5s)
   if (!window._botUsername) {
     for (var _wi = 0; _wi < 25; _wi++) {
       await new Promise(function(r){ setTimeout(r, 200); });
@@ -3477,15 +3483,9 @@ async function loadReferStats() {
     }
   }
 
-  // Set referral link
-  var box = document.getElementById('referLinkBox');
-  if (isTgUser) {
-    _referLink = getReferLink();
-    if (box) box.textContent = _referLink || 'Open via Telegram to see your link';
-  } else {
-    if (box) box.textContent = 'Open via Telegram to see your link';
-    return;
-  }
+  // Referral link set karo
+  _referLink = getReferLink();
+  if (box) box.textContent = _referLink || 'Open via Telegram to see your link';
 
   // Fetch referral count stats
   try {
