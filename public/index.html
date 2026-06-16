@@ -110,17 +110,6 @@ body.ready{transition:none}
 .pay-ss-label{font-size:12px;color:var(--text2);display:flex;flex-direction:column;align-items:center;gap:6px}
 .pay-submit-btn{width:100%;padding:13px;border-radius:12px;border:none;background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff;font-size:14px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;margin-top:4px}
 .pay-submit-btn:disabled{opacity:0.6}
-/* Coupon */
-.pay-coupon-row{display:flex;gap:8px;margin-bottom:10px}
-.pay-coupon-input{flex:1;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:9px 12px;border-radius:var(--radius-sm);font-size:13px;outline:none;text-transform:uppercase;letter-spacing:1px}
-.pay-coupon-input:focus{border-color:var(--accent)}
-.pay-coupon-btn{background:var(--accent);border:none;color:#fff;border-radius:var(--radius-sm);padding:9px 14px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;flex-shrink:0}
-.pay-coupon-btn:disabled{opacity:0.5}
-.pay-coupon-status{font-size:12px;margin-bottom:10px;min-height:18px;display:none;padding:7px 10px;border-radius:8px}
-.pay-coupon-status.success{display:block;background:rgba(34,197,94,0.1);color:var(--green);border:1px solid rgba(34,197,94,0.3)}
-.pay-coupon-status.error{display:block;background:rgba(239,68,68,0.1);color:var(--red);border:1px solid rgba(239,68,68,0.3)}
-.pay-amount-original{font-size:13px;color:var(--text2);text-decoration:line-through;margin-right:6px}
-.pay-amount-final{font-size:20px;font-weight:800;color:var(--green)}
 .batch-tabs{display:flex;gap:8px;padding:14px 16px 8px;flex-shrink:0}
 .batch-tab{flex:1;display:flex;align-items:center;justify-content:center;gap:6px;padding:9px 12px;border-radius:10px;border:1.5px solid var(--border);background:var(--surface);color:var(--text2);font-size:13px;font-weight:600;cursor:pointer;transition:all 0.18s}
 .batch-tab.active-free{background:rgba(34,197,94,0.1);border-color:var(--green);color:var(--green)}
@@ -359,7 +348,7 @@ body.ready{transition:none}
   <div class="vs-bar"><div class="vs-fill" id="vsFill"></div></div>
   <div style="margin-top:32px;text-align:center">
     <div style="font-size:11px;color:var(--text3);margin-bottom:10px">Having trouble? Contact us</div>
-    <button onclick="var _cl=window._contactLink||('https://t.me/'+(window._botUsername||''));if(tg){tg.openLink(_cl,{try_instant_view:false});}else{window.open(_cl,'_blank');}" style="display:inline-flex;align-items:center;gap:7px;background:var(--surface2);border:1px solid var(--border);color:var(--text2);padding:9px 18px;border-radius:20px;font-size:13px;font-weight:600;cursor:pointer;">
+    <button onclick="var _bu=window._botUsername||'';if(tg){tg.openLink('https://t.me/'+_bu,{try_instant_view:false});}else{window.open('https://t.me/'+_bu,'_blank');}" style="display:inline-flex;align-items:center;gap:7px;background:var(--surface2);border:1px solid var(--border);color:var(--text2);padding:9px 18px;border-radius:20px;font-size:13px;font-weight:600;cursor:pointer;">
       📩 Contact Support
     </button>
   </div>
@@ -592,7 +581,6 @@ body.ready{transition:none}
       <button class="tab-btn" onclick="switchTab('unit')">+ Unit</button>
       <button class="tab-btn" onclick="switchTab('lecture')">+ Lecture</button>
       <button class="tab-btn" onclick="switchTab('manage')">Manage</button>
-      <button class="tab-btn" onclick="switchTab('coupons')">🎟 Coupons</button>
     </div>
 
     <!-- Add Batch -->
@@ -707,34 +695,6 @@ body.ready{transition:none}
   <div id="manageBreadcrumb"></div>
   <div id="manageList"></div>
 </div>
-
-    <!-- Coupons -->
-    <div class="tab-content" id="tab-coupons">
-      <div class="form-group">
-        <label class="form-label">Coupon Code</label>
-        <input class="form-input" id="cpnCode" placeholder="e.g. SAVE20" maxlength="20" style="text-transform:uppercase" oninput="this.value=this.value.toUpperCase()">
-      </div>
-      <div class="form-group">
-        <label class="form-label">Discount %</label>
-        <input class="form-input" id="cpnDiscount" type="number" min="1" max="100" placeholder="e.g. 20 (means 20% off)">
-      </div>
-      <div class="form-group">
-        <label class="form-label">Expires On</label>
-        <input class="form-input" id="cpnExpiry" type="datetime-local">
-      </div>
-      <div class="form-group">
-        <label class="form-label">Apply To <span style="color:var(--text3);font-weight:400">(leave empty = all batches)</span></label>
-        <select class="form-select" id="cpnBatchSelect" multiple style="height:90px;padding:6px 10px;font-size:13px" title="Ctrl/Cmd+click to select multiple">
-          <!-- populated by JS -->
-        </select>
-        <div style="font-size:10px;color:var(--text3);margin-top:4px">Hold Ctrl/Cmd to select multiple batches</div>
-      </div>
-      <button class="btn-add" id="cpnAddBtn" onclick="adminCreateCoupon()"><i class="ti ti-plus"></i> Create Coupon</button>
-      <div style="margin-top:16px">
-        <div style="font-size:12px;font-weight:600;color:var(--text2);margin-bottom:8px;letter-spacing:0.5px">EXISTING COUPONS</div>
-        <div id="couponList"><div class="loading"><i class="ti ti-loader-2"></i></div></div>
-      </div>
-    </div>
   </div>
 </div>
 
@@ -784,26 +744,6 @@ body.ready{transition:none}
   </button>
 </div>
 
-<!-- Points Redeem — Batch Select Modal -->
-<div id="redeemBatchModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:600;align-items:flex-end;justify-content:center" onclick="if(event.target===this)closeRedeemModal()">
-  <div style="background:var(--surface);border-radius:20px 20px 0 0;width:100%;max-width:480px;max-height:85vh;overflow-y:auto;padding-bottom:24px">
-    <div style="width:40px;height:4px;background:var(--border);border-radius:2px;margin:14px auto 0;display:block"></div>
-    <div style="padding:14px 16px 10px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border)">
-      <div style="font-size:15px;font-weight:700;display:flex;align-items:center;gap:7px">
-        <i class="ti ti-crown" style="color:#f59e0b"></i>
-        <span id="redeemModalTitle">Batch Select Karo</span>
-      </div>
-      <button onclick="closeRedeemModal()" style="background:var(--surface2);border:none;color:var(--text2);width:30px;height:30px;border-radius:50%;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:15px"><i class="ti ti-x"></i></button>
-    </div>
-    <div style="padding:12px 16px 4px">
-      <div style="font-size:12px;color:var(--text2);margin-bottom:10px" id="redeemModalDesc">Premium batch choose karo jise unlock karna hai</div>
-      <div id="redeemBatchList" style="display:flex;flex-direction:column;gap:8px">
-        <!-- JS se fill hoga -->
-      </div>
-    </div>
-  </div>
-</div>
-
 <!-- Refer Page -->
 <div class="page" id="page-refer">
   <div class="page-header">
@@ -836,75 +776,35 @@ body.ready{transition:none}
       </div>
     </div>
 
-    <!-- Points Balance -->
-    <div class="card" id="pointsBalanceCard" style="margin-bottom:14px;background:linear-gradient(135deg,rgba(245,158,11,0.12),rgba(217,119,6,0.06));border:1px solid rgba(245,158,11,0.35)">
-      <div style="display:flex;align-items:center;justify-content:space-between">
-        <div>
-          <div style="font-size:11px;color:var(--text2);font-weight:500;margin-bottom:3px">AVAILABLE POINTS</div>
-          <div style="display:flex;align-items:baseline;gap:5px">
-            <span id="availablePoints" style="font-size:36px;font-weight:800;color:#f59e0b">-</span>
-            <span style="font-size:13px;color:var(--text2)">pts</span>
-          </div>
-          <div style="font-size:11px;color:var(--text3);margin-top:2px">Total: <span id="totalPointsEarned" style="color:var(--text2)">-</span> pts · Used: <span id="usedPointsCount" style="color:var(--text2)">-</span> pts</div>
-        </div>
-        <div style="font-size:44px">🪙</div>
-      </div>
-    </div>
-
     <!-- Rewards card -->
     <div class="card" style="margin-bottom:14px;border:1px solid rgba(245,158,11,0.25)">
-      <div style="font-size:13px;font-weight:600;margin-bottom:12px;color:var(--text)">🎁 Points Redeem Karo</div>
-
-      <!-- Tier 1 -->
-      <div style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px;margin-bottom:8px">
-        <div style="display:flex;align-items:center;gap:10px">
-          <div style="width:44px;height:44px;border-radius:12px;background:linear-gradient(135deg,#22c55e,#16a34a);display:flex;align-items:center;justify-content:center;font-size:22px;flex-shrink:0">⚡</div>
-          <div style="flex:1;min-width:0">
-            <div style="font-size:13px;font-weight:700;color:var(--text)">24h Free Access</div>
-            <div style="font-size:11px;color:var(--text2);margin-top:2px">Saare free batches 24 ghante ke liye unlock</div>
-          </div>
-          <div style="font-size:16px;font-weight:800;color:#f59e0b;flex-shrink:0">1 pt</div>
+      <div style="font-size:13px;font-weight:600;margin-bottom:10px;color:var(--text)">🎁 Rewards</div>
+      <div style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--surface2);border-radius:var(--radius-sm);margin-bottom:8px">
+        <span style="font-size:22px">🏆</span>
+        <div>
+          <div style="font-size:12px;font-weight:600;color:var(--text)">Free Access Pass</div>
+          <div style="font-size:11px;color:var(--text2)">Redeem with points for free lecture access</div>
         </div>
-        <button onclick="redeemPoints('access_24h')" id="redeemBtn_access_24h"
-          style="margin-top:10px;width:100%;background:linear-gradient(135deg,#22c55e,#16a34a);color:#fff;border:none;border-radius:8px;padding:9px;font-size:12px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px">
-          <i class="ti ti-bolt"></i> Redeem — 1 Point
-        </button>
+        <span class="coming-soon-badge" style="margin-left:auto">🔜 Soon</span>
       </div>
-
-      <!-- Tier 2 -->
-      <div style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px;margin-bottom:8px">
-        <div style="display:flex;align-items:center;gap:10px">
-          <div style="width:44px;height:44px;border-radius:12px;background:linear-gradient(135deg,#4f8ef7,#7c5cbf);display:flex;align-items:center;justify-content:center;font-size:22px;flex-shrink:0">🌟</div>
-          <div style="flex:1;min-width:0">
-            <div style="font-size:13px;font-weight:700;color:var(--text)">1 Batch Premium — 1 Din</div>
-            <div style="font-size:11px;color:var(--text2);margin-top:2px">Apni pasand ka <strong style="color:var(--accent)">ek premium batch</strong> 1 din ke liye</div>
-          </div>
-          <div style="font-size:16px;font-weight:800;color:#f59e0b;flex-shrink:0">5 pts</div>
+      <div style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--surface2);border-radius:var(--radius-sm);margin-bottom:8px">
+        <span style="font-size:22px">⭐</span>
+        <div>
+          <div style="font-size:12px;font-weight:600;color:var(--text)">Bonus Points</div>
+          <div style="font-size:11px;color:var(--text2)">Extra points for milestone referrals</div>
         </div>
-        <button onclick="redeemPoints('premium_1d')" id="redeemBtn_premium_1d"
-          style="margin-top:10px;width:100%;background:linear-gradient(135deg,#4f8ef7,#7c5cbf);color:#fff;border:none;border-radius:8px;padding:9px;font-size:12px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px">
-          <i class="ti ti-crown"></i> Redeem — 5 Points
-        </button>
+        <span class="coming-soon-badge" style="margin-left:auto">🔜 Soon</span>
       </div>
-
-      <!-- Tier 3 -->
-      <div style="background:var(--surface2);border:1px solid rgba(245,158,11,0.3);border-radius:var(--radius-sm);padding:12px">
-        <div style="display:flex;align-items:center;gap:10px">
-          <div style="width:44px;height:44px;border-radius:12px;background:linear-gradient(135deg,#f59e0b,#d97706);display:flex;align-items:center;justify-content:center;font-size:22px;flex-shrink:0">👑</div>
-          <div style="flex:1;min-width:0">
-            <div style="font-size:13px;font-weight:700;color:var(--text)">1 Batch Premium — 1 Hafta</div>
-            <div style="font-size:11px;color:var(--text2);margin-top:2px">Apni pasand ka <strong style="color:#f59e0b">ek premium batch</strong> poore 7 din ke liye</div>
-          </div>
-          <div style="font-size:16px;font-weight:800;color:#f59e0b;flex-shrink:0">20 pts</div>
+      <div style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--surface2);border-radius:var(--radius-sm)">
+        <span style="font-size:22px">🎟️</span>
+        <div>
+          <div style="font-size:12px;font-weight:600;color:var(--text)">Special Batch Access</div>
+          <div style="font-size:11px;color:var(--text2)">Unlock premium batches with points</div>
         </div>
-        <button onclick="redeemPoints('premium_7d')" id="redeemBtn_premium_7d"
-          style="margin-top:10px;width:100%;background:linear-gradient(135deg,#f59e0b,#d97706);color:#fff;border:none;border-radius:8px;padding:9px;font-size:12px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px">
-          <i class="ti ti-crown"></i> Redeem — 20 Points
-        </button>
+        <span class="coming-soon-badge" style="margin-left:auto">🔜 Soon</span>
       </div>
-
       <div style="margin-top:12px;font-size:11px;color:var(--text3);text-align:center">
-        1 referral = <strong style="color:#f59e0b">1 point</strong> · Points sirf available balance se katenge
+        Each referral = <strong style="color:#f59e0b">1 point</strong> · Rewards launching soon!
       </div>
     </div>
 
@@ -922,11 +822,11 @@ body.ready{transition:none}
         </div>
         <div style="display:flex;align-items:center;gap:10px">
           <div style="width:24px;height:24px;border-radius:50%;background:var(--accent);color:#fff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0">3</div>
-          <div style="font-size:12px;color:var(--text2)">Friend bot open kare = tumhe <strong style="color:#f59e0b">1 point</strong> milta hai</div>
+          <div style="font-size:12px;color:var(--text2)">When they open the bot using your link, you get <strong style="color:#f59e0b">1 point</strong></div>
         </div>
         <div style="display:flex;align-items:center;gap:10px">
           <div style="width:24px;height:24px;border-radius:50%;background:var(--accent);color:#fff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0">4</div>
-          <div style="font-size:12px;color:var(--text2)">Points se rewards redeem karo upar se!</div>
+          <div style="font-size:12px;color:var(--text2)">Redeem points for rewards (coming soon!)</div>
         </div>
       </div>
     </div>
@@ -1144,7 +1044,7 @@ function openChapter(bid, sid, cid) {
               ? '<div style="margin-top:6px"><span class="coming-soon-badge">🔜 Coming Soon</span></div>'
               : `<div class="lec-mini-btns">
                   ${l.isDemo ? '<span class="demo-badge" style="margin-right:4px">DEMO</span>' : ''}
-                  <button class="lec-mini-btn lec-mini-watch" data-lid="${l._id}" onclick="openLecLink(_popupLectures[this.dataset.lid].link,'lecture')"><i class="ti ti-player-play-filled"></i> Lecture</button>
+                  <button class="lec-mini-btn lec-mini-watch" data-lid="${l._id}" onclick="openLink(_popupLectures[this.dataset.lid].link,'lecture')"><i class="ti ti-player-play-filled"></i> Lecture</button>
                   ${l.notes ? `<button class="lec-mini-btn lec-mini-notes" data-lid="${l._id}" onclick="openLink(_popupLectures[this.dataset.lid].notes,'notes')"><i class="ti ti-notes"></i> Notes</button>` : ''}
                 </div>`}
           </div>
@@ -1164,7 +1064,7 @@ function openChapter(bid, sid, cid) {
           <div class="lec-info">
             <div class="lec-name">${l.name}</div>
             <div class="lec-mini-btns">
-              <button class="lec-mini-btn lec-mini-watch" data-lid="${l._id}" onclick="openLecLink(_popupLectures[this.dataset.lid].link,'lecture')"><i class="ti ti-player-play-filled"></i> Lecture</button>
+              <button class="lec-mini-btn lec-mini-watch" data-lid="${l._id}" onclick="openLink(_popupLectures[this.dataset.lid].link,'lecture')"><i class="ti ti-player-play-filled"></i> Lecture</button>
               ${l.notes ? `<button class="lec-mini-btn lec-mini-notes" data-lid="${l._id}" onclick="openLink(_popupLectures[this.dataset.lid].notes,'notes')"><i class="ti ti-notes"></i> Notes</button>` : ''}
             </div>
           </div>
@@ -1198,7 +1098,7 @@ function openUnit(bid, sid, cid, uid) {
             ? '<div style="margin-top:6px"><span class="coming-soon-badge">🔜 Coming Soon</span></div>'
             : `<div class="lec-mini-btns">
                 ${l.isDemo ? '<span class="demo-badge" style="margin-right:4px">DEMO</span>' : ''}
-                <button class="lec-mini-btn lec-mini-watch" data-lid="${l._id}" onclick="openLecLink(_popupLectures[this.dataset.lid].link,'lecture')"><i class="ti ti-player-play-filled"></i> Lecture</button>
+                <button class="lec-mini-btn lec-mini-watch" data-lid="${l._id}" onclick="openLink(_popupLectures[this.dataset.lid].link,'lecture')"><i class="ti ti-player-play-filled"></i> Lecture</button>
                 ${l.notes ? `<button class="lec-mini-btn lec-mini-notes" data-lid="${l._id}" onclick="openLink(_popupLectures[this.dataset.lid].notes,'notes')"><i class="ti ti-notes"></i> Notes</button>` : ''}
               </div>`}
         </div>
@@ -1366,9 +1266,6 @@ function renderBatches(list) {
   // Determine which batches are visible
   var visible = isAdmin ? list : list.filter(b => b.isPublic === true);
 
-  // New to old — reverse order
-  visible = visible.slice().reverse();
-
   // Split into free and premium
   var free = visible.filter(b => !b.isPremium);
   var premium = visible.filter(b => b.isPremium === true);
@@ -1459,7 +1356,6 @@ async function checkAdminAccess() {
     var ownerId = config.ownerId;
     if (config.botUsername) window._botUsername = config.botUsername;
     if (config.upiId) window._upiId = config.upiId;
-    if (config.contactLink) window._contactLink = config.contactLink;
     // Store force-join requirement
     _fjRequired = !!config.forceJoinRequired;
     if (!ownerId) return;
@@ -1503,13 +1399,12 @@ function closeAdmin() {
 function closeModalOutside(e) { if (e.target.id==='adminModal') closeAdmin(); }
 
 function switchTab(name) {
-  var tabs = ['batch','subject','chapter','unit','lecture','manage','coupons'];
+  var tabs = ['batch','subject','chapter','unit','lecture','manage'];
   document.querySelectorAll('.tab-btn').forEach((b,i)=>b.classList.toggle('active',tabs[i]===name));
   document.querySelectorAll('.tab-content').forEach(t=>t.classList.remove('active'));
   document.getElementById('tab-'+name).classList.add('active');
   if (name==='manage') renderManage();
   if (name==='lecture') _syncAutoModeStatus();
-  if (name==='coupons') adminLoadCoupons();
 }
 
 function batchOpts() { return batches.map(b=>`<option value="${b._id}">${b.name}</option>`).join('')||'<option>Add a batch first</option>'; }
@@ -1932,28 +1827,7 @@ function _renderBreadcrumb() {
 // ── Edit Modal ────────────────────────────────────────────────────────────────
 var _editCtx = {};
 
-var _editPicBase64 = null; // tracks new pic during edit
-
-function handleEditPic(e) {
-  var file = e.target.files[0];
-  if (!file) return;
-  var reader = new FileReader();
-  reader.onload = function(ev) {
-    _editPicBase64 = ev.target.result;
-    var prev = document.getElementById('ei_pic_preview');
-    if (prev) prev.innerHTML = '<img src="' + _editPicBase64 + '" style="width:100%;height:100%;object-fit:cover">';
-  };
-  reader.readAsDataURL(file);
-}
-
-function clearEditPic() {
-  _editPicBase64 = '';
-  var prev = document.getElementById('ei_pic_preview');
-  if (prev) prev.innerHTML = '<span style="font-size:11px;color:var(--text3)">📷 Tap to add image</span>';
-}
-
 async function openEdit(type, bid, sid, cid, uid, lid) {
-  _editPicBase64 = null;
   _editCtx = { type, bid, sid, cid, uid, lid };
   var body = '';
   var title = '';
@@ -1963,14 +1837,6 @@ async function openEdit(type, bid, sid, cid, uid, lid) {
     title = 'Edit Batch';
     body = `<div class="form-group"><label class="form-label">Batch Name</label><input class="form-input" id="ei_name" value="${b.name}"></div>
             <div class="form-group"><label class="form-label">Description</label><input class="form-input" id="ei_desc" value="${b.description||''}"></div>
-            <div class="form-group">
-              <label class="form-label">Batch Image</label>
-              <div id="ei_pic_preview" onclick="document.getElementById('ei_pic_input').click()" style="width:100%;height:90px;border-radius:10px;border:2px dashed var(--border);overflow:hidden;cursor:pointer;display:flex;align-items:center;justify-content:center;background:var(--surface2)">
-                ${b.pic ? '<img src="' + b.pic + '" style="width:100%;height:100%;object-fit:cover">' : '<span style="font-size:11px;color:var(--text3)">📷 Tap to add image</span>'}
-              </div>
-              <input type="file" id="ei_pic_input" accept="image/*" style="display:none" onchange="handleEditPic(event)">
-              ${b.pic ? '<button onclick="clearEditPic()" style="margin-top:6px;background:none;border:1px solid var(--red);color:var(--red);border-radius:8px;padding:4px 12px;font-size:11px;font-weight:600;cursor:pointer;width:100%">🗑 Remove Image</button>' : ''}
-            </div>
             <div class="form-group" style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:linear-gradient(135deg,rgba(245,158,11,0.08),rgba(217,119,6,0.05));border:1px solid rgba(245,158,11,0.25);border-radius:var(--radius-sm)">
               <input type="checkbox" id="ei_isPremium" ${b.isPremium?'checked':''} style="width:18px;height:18px;cursor:pointer;accent-color:#f59e0b">
               <label for="ei_isPremium" style="font-size:13px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:6px"><i class="ti ti-crown" style="color:#f59e0b"></i> Premium Batch</label>
@@ -2049,14 +1915,12 @@ async function saveEdit() {
   try {
     var updated;
     if (type === 'batch') {
-      var payload = {
+      updated = await apiFetch(`/api/batches/${bid}/edit`, 'PATCH', {
         name: document.getElementById('ei_name').value.trim(),
         description: document.getElementById('ei_desc').value.trim(),
         isPremium: document.getElementById('ei_isPremium').checked,
-        price: parseInt(document.getElementById('ei_price').value) || 0,
-      };
-      if (_editPicBase64 !== null) payload.pic = _editPicBase64; // '' = remove, base64 = new pic
-      updated = await apiFetch(`/api/batches/${bid}/edit`, 'PATCH', payload);
+        price: parseInt(document.getElementById('ei_price').value) || 0
+      });
       var idx = batches.findIndex(x => x._id === bid);
       if (idx >= 0) batches[idx] = updated;
     } else if (type === 'subject') {
@@ -2138,7 +2002,7 @@ function openDemoModal(bid) {
           <div class="lec-name">${l.name} <span class="demo-badge" style="margin-left:4px">DEMO</span></div>
           <div class="lec-sub" style="font-size:10px;color:var(--text2);margin-top:2px">${l._subj} · ${l._chap}${l._unit ? ' · ' + l._unit : ''}</div>
           <div class="lec-mini-btns" style="margin-top:6px">
-            <button class="lec-mini-btn lec-mini-watch" onclick="openLecLink('${l.link}','lecture')"><i class="ti ti-player-play-filled"></i> Watch</button>
+            <button class="lec-mini-btn lec-mini-watch" onclick="openLink('${l.link}','lecture')"><i class="ti ti-player-play-filled"></i> Watch</button>
             ${l.notes ? `<button class="lec-mini-btn lec-mini-notes" onclick="openLink('${l.notes}','notes')"><i class="ti ti-notes"></i> Notes</button>` : ''}
           </div>
         </div>
@@ -2154,21 +2018,16 @@ function closeDemoOutside(e) { if (e.target.id === 'demoModal') closeDemoModal()
 // ── Payment Modal ─────────────────────────────────────────────────────────────
 var _payBatchId = null;
 var _paySsBase64 = null;
-var _payOriginalPrice = 0;
-var _payAppliedCoupon = null; // { code, discountPct, finalAmount }
 
 function buyBatch(bid) {
   var b = batches.find(x => x._id === bid);
   if (!b) return;
   _payBatchId = bid;
   _paySsBase64 = null;
-  _payOriginalPrice = b.price || 0;
-  _payAppliedCoupon = null;
 
   // Set batch info
   document.getElementById('payBatchName').textContent = b.name;
   document.getElementById('payAmount').textContent = b.price ? '₹' + b.price : 'Contact Admin';
-  document.getElementById('payAmount').className = 'pay-amount';
 
   // Set UPI ID
   var upi = window._upiId || '';
@@ -2184,13 +2043,6 @@ function buyBatch(bid) {
     document.getElementById('payQrImg').src = '';
   }
 
-  // Reset coupon
-  document.getElementById('payCouponInput').value = '';
-  var cs = document.getElementById('payCouponStatus');
-  cs.className = 'pay-coupon-status'; cs.textContent = '';
-  var applyBtn = document.getElementById('payCouponApplyBtn');
-  if (applyBtn) { applyBtn.textContent = 'Apply'; applyBtn.disabled = false; }
-
   // Reset form
   document.getElementById('payTxnId').value = '';
   document.getElementById('paySsPreview').style.display = 'none';
@@ -2204,7 +2056,7 @@ function buyBatch(bid) {
 
 function closePayModal() {
   document.getElementById('payModal').classList.remove('show');
-  _payBatchId = null; _paySsBase64 = null; _payAppliedCoupon = null;
+  _payBatchId = null; _paySsBase64 = null;
 }
 function closePayOutside(e) { if (e.target.id === 'payModal') closePayModal(); }
 
@@ -2232,64 +2084,9 @@ function handleSsUpload(e) {
   reader.readAsDataURL(file);
 }
 
-function validateUtr(val) {
-  var errEl = document.getElementById('utrError');
-  if (!errEl) return true;
-  if (!val) { errEl.textContent = ''; return false; }
-  if (!/^\d+$/.test(val)) { errEl.textContent = 'Sirf numbers allowed hain'; return false; }
-  if (val.length < 12) { errEl.textContent = '12 digits zaroori hain (' + val.length + '/12)'; return false; }
-  errEl.textContent = '';
-  return true;
-}
-
-async function applyCoupon() {
-  var code = document.getElementById('payCouponInput').value.trim().toUpperCase();
-  var cs = document.getElementById('payCouponStatus');
-  var btn = document.getElementById('payCouponApplyBtn');
-  if (!code) { cs.className = 'pay-coupon-status error'; cs.textContent = 'Coupon code daalo!'; return; }
-  btn.disabled = true; btn.textContent = '...';
-  cs.className = 'pay-coupon-status'; cs.textContent = '';
-  try {
-    var r = await fetch('/api/coupons/validate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code, batchId: _payBatchId }) });
-    var d = await r.json();
-    if (!r.ok) {
-      _payAppliedCoupon = null;
-      cs.className = 'pay-coupon-status error'; cs.textContent = '❌ ' + (d.error || 'Invalid coupon');
-      // Reset amount display
-      document.getElementById('payAmount').textContent = _payOriginalPrice ? '₹' + _payOriginalPrice : 'Contact Admin';
-      document.getElementById('payAmount').className = 'pay-amount';
-      _updatePayQr(_payOriginalPrice);
-    } else {
-      var disc = d.discountPct;
-      var final = Math.round(_payOriginalPrice * (1 - disc / 100));
-      _payAppliedCoupon = { code: d.code, discountPct: disc, finalAmount: final };
-      cs.className = 'pay-coupon-status success'; cs.textContent = '✅ ' + disc + '% off applied! You pay ₹' + final + ' instead of ₹' + _payOriginalPrice;
-      // Update amount display
-      var amtEl = document.getElementById('payAmount');
-      amtEl.innerHTML = '<span class="pay-amount-original">₹' + _payOriginalPrice + '</span><span class="pay-amount-final">₹' + final + '</span>';
-      amtEl.className = '';
-      _updatePayQr(final);
-      btn.textContent = '✓';
-    }
-  } catch(e) {
-    cs.className = 'pay-coupon-status error'; cs.textContent = '❌ Error validating coupon';
-  }
-  btn.disabled = false; if (btn.textContent === '...') btn.textContent = 'Apply';
-}
-
-function _updatePayQr(amount) {
-  var upi = window._upiId || '';
-  var b = batches.find(x => x._id === _payBatchId);
-  if (upi && amount) {
-    var upiStr = 'upi://pay?pa=' + encodeURIComponent(upi) + '&am=' + amount + '&cu=INR&tn=' + encodeURIComponent(b ? b.name : '');
-    document.getElementById('payQrImg').src = 'https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=' + encodeURIComponent(upiStr);
-  }
-}
-
 async function submitPayment() {
   var txnId = document.getElementById('payTxnId').value.trim();
-  if (!txnId) return toast('UTR number daalo!', 'error');
-  if (!/^\d{12}$/.test(txnId)) return toast('UTR 12-digit number hona chahiye!', 'error');
+  if (!txnId) return toast('Transaction ID daalo!', 'error');
   if (!_paySsBase64) return toast('Screenshot upload karo!', 'error');
   if (!_payBatchId) return;
 
@@ -2307,9 +2104,6 @@ async function submitPayment() {
       username: tgUser ? (tgUser.username || '') : '',
       txnId: txnId,
       screenshotBase64: _paySsBase64,
-      couponCode: _payAppliedCoupon ? _payAppliedCoupon.code : null,
-      discountPct: _payAppliedCoupon ? _payAppliedCoupon.discountPct : null,
-      finalAmount: _payAppliedCoupon ? _payAppliedCoupon.finalAmount : null,
     };
     var r = await fetch('/api/pay-request', {
       method: 'POST',
@@ -2432,26 +2226,6 @@ var currentTab = 'home';
 var userId = null;
 var claimsToday = 0;    // 0-3 claims today
 var _adWatching = false; // prevent double-click while ad loads
-
-// ── Lecture link helper ───────────────────────────────────────────────────────
-// Handles both: plain code (e.g. "Abc123") and full links (legacy "https://t.me/bot?start=Abc123")
-// Bot username comes from config — so bot change = no manual DB update needed
-function openLecLink(codeOrLink, type) {
-  if (!codeOrLink) return openLink('', type || 'lecture');
-  var url;
-  if (codeOrLink.startsWith('http')) {
-    // Legacy full link — extract code and rebuild with current bot username
-    var match = codeOrLink.match(/[?&]start=([^&]+)/);
-    var code = match ? match[1] : null;
-    url = code && window._botUsername
-      ? 'https://t.me/' + window._botUsername + '?start=' + code
-      : codeOrLink; // fallback to original if no match
-  } else {
-    // New format — just the code
-    url = 'https://t.me/' + (window._botUsername || '') + '?start=' + codeOrLink;
-  }
-  openLink(url, type || 'lecture');
-}
 
 function getUserId() {
   var tgUser = tg && tg.initDataUnsafe && tg.initDataUnsafe.user;
@@ -3035,7 +2809,7 @@ function showLecturePopup(lid) {
   var lecture = _popupLectures[lid];
   if (!lecture) return;
   if (lecture.link) {
-    openLecLink(lecture.link);
+    openLink(lecture.link);
   } else if (lecture.notes) {
     openLink(lecture.notes, 'notes');
   } else {
@@ -3308,23 +3082,13 @@ body.light-mode .lec-mini-notes{background:var(--surface2);color:var(--text)}
         1️⃣ Scan QR or copy UPI ID<br>
         2️⃣ Pay the exact amount shown above<br>
         3️⃣ Take a screenshot of payment confirmation<br>
-        4️⃣ Enter UTR Number (12-digit) &amp; upload screenshot below<br>
+        4️⃣ Enter Transaction ID &amp; upload screenshot below<br>
         5️⃣ Submit — admin will verify &amp; unlock your batch
       </div>
-      <!-- Coupon Code -->
-      <div style="margin-bottom:4px">
-        <label class="form-label" style="margin-bottom:5px;display:block">🎟 Coupon Code (optional)</label>
-        <div class="pay-coupon-row">
-          <input class="pay-coupon-input" id="payCouponInput" placeholder="ENTER CODE" maxlength="30" oninput="this.value=this.value.toUpperCase()">
-          <button class="pay-coupon-btn" id="payCouponApplyBtn" onclick="applyCoupon()">Apply</button>
-        </div>
-        <div class="pay-coupon-status" id="payCouponStatus"></div>
-      </div>
-      <!-- UTR Number -->
-      <div class="form-group" style="margin-bottom:6px">
-        <label class="form-label">UTR Number <span style="color:var(--text3);font-weight:400">(12-digit, numbers only)</span></label>
-        <input class="form-input" id="payTxnId" placeholder="e.g. 123456789012" maxlength="12" inputmode="numeric" oninput="this.value=this.value.replace(/\D/g,'').slice(0,12);validateUtr(this.value)">
-        <div id="utrError" style="font-size:11px;color:var(--red);margin-top:4px;min-height:16px"></div>
+      <!-- Transaction ID -->
+      <div class="form-group" style="margin-bottom:10px">
+        <label class="form-label">Transaction ID / UTR Number</label>
+        <input class="form-input" id="payTxnId" placeholder="e.g. 4234XXXXXXXX">
       </div>
       <!-- Screenshot upload -->
       <div class="pay-ss-box" id="paySsBox" onclick="document.getElementById('paySsInput').click()">
@@ -3428,9 +3192,9 @@ function handleContact(){
     _contactTimer=setTimeout(collapseContact, 4000);
   } else {
     clearTimeout(_contactTimer);
-    var _cl = window._contactLink || ('https://t.me/' + (window._botUsername||''));
-    if(tg){tg.openLink(_cl,{try_instant_view:false});}
-    else{window.open(_cl,'_blank');}
+    var _bu=window._botUsername||'';
+    if(tg){tg.openLink('https://t.me/'+_bu,{try_instant_view:false});}
+    else{window.open('https://t.me/'+_bu,'_blank');}
     collapseContact();
   }
 }
@@ -3458,7 +3222,7 @@ async function loadReferStats() {
   var box = document.getElementById('referLinkBox');
   if (box) box.textContent = _referLink || 'Open via Telegram to see your link';
 
-  // Fetch referral count stats
+  // Fetch stats from server
   try {
     var r = await fetch('/api/refer/stats/' + uid);
     var data = await r.json();
@@ -3468,142 +3232,6 @@ async function loadReferStats() {
     if (pointsEl) pointsEl.textContent = data.points || 0;
   } catch(e) {
     console.error('Refer stats error:', e);
-  }
-
-  // Fetch available points (with used deducted)
-  try {
-    var r2 = await fetch('/api/refer/points/' + uid);
-    var pd = await r2.json();
-    var avEl = document.getElementById('availablePoints');
-    var totEl = document.getElementById('totalPointsEarned');
-    var usedEl = document.getElementById('usedPointsCount');
-    if (avEl) avEl.textContent = pd.availablePoints || 0;
-    if (totEl) totEl.textContent = pd.totalPoints || 0;
-    if (usedEl) usedEl.textContent = pd.usedPoints || 0;
-    _availablePoints = pd.availablePoints || 0;
-  } catch(e) {
-    console.error('Points fetch error:', e);
-    _availablePoints = 0;
-  }
-
-  _updateRedeemButtons();
-}
-
-var _availablePoints = 0;
-var _pendingRedeemTier = null;
-
-function _updateRedeemButtons() {
-  var tiers = { access_24h: 1, premium_1d: 5, premium_7d: 20 };
-  Object.keys(tiers).forEach(function(tier) {
-    var btn = document.getElementById('redeemBtn_' + tier);
-    if (!btn) return;
-    var enough = _availablePoints >= tiers[tier];
-    btn.disabled = !enough;
-    btn.style.opacity = enough ? '1' : '0.45';
-    btn.style.cursor = enough ? 'pointer' : 'not-allowed';
-  });
-}
-
-function closeRedeemModal() {
-  var m = document.getElementById('redeemBatchModal');
-  if (m) m.style.display = 'none';
-  _pendingRedeemTier = null;
-}
-
-async function redeemPoints(tier) {
-  var uid = getUserId();
-  if (!uid) return toast('Telegram se open karo', 'error');
-  var costs = { access_24h: 1, premium_1d: 5, premium_7d: 20 };
-  var cost = costs[tier];
-  if (_availablePoints < cost) return toast('Insufficient points! ' + cost + ' chahiye, tumhare paas ' + _availablePoints + ' hain.', 'error');
-
-  // For premium tiers — need batch selection
-  if (tier === 'premium_1d' || tier === 'premium_7d') {
-    _pendingRedeemTier = tier;
-    var premiumBatches = batches.filter(function(b) { return b.isPremium; });
-    var listEl = document.getElementById('redeemBatchList');
-    var titleEl = document.getElementById('redeemModalTitle');
-    var descEl = document.getElementById('redeemModalDesc');
-    if (titleEl) titleEl.textContent = tier === 'premium_1d' ? '1-Din Premium — Batch Choose Karo' : '1-Hafta Premium — Batch Choose Karo';
-    if (descEl) descEl.textContent = 'Kaunsa premium batch unlock karna hai? (' + cost + ' points lagenge)';
-    if (listEl) {
-      if (!premiumBatches.length) {
-        listEl.innerHTML = '<div style="text-align:center;padding:20px;color:var(--text2);font-size:13px">Abhi koi premium batch available nahi hai.</div>';
-      } else {
-        listEl.innerHTML = premiumBatches.map(function(b) {
-          return '<div onclick="confirmRedeemBatch('' + b._id + '')" style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px 14px;display:flex;align-items:center;gap:12px;cursor:pointer;transition:border-color 0.2s" onmouseover="this.style.borderColor='var(--accent)'" onmouseout="this.style.borderColor='var(--border)'">' +
-            '<div style="width:44px;height:44px;border-radius:10px;background:linear-gradient(135deg,#f59e0b,#d97706);display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0">👑</div>' +
-            '<div style="flex:1;min-width:0">' +
-              '<div style="font-size:14px;font-weight:600;color:var(--text)">' + _escFj(b.name) + '</div>' +
-              (b.description ? '<div style="font-size:11px;color:var(--text2);margin-top:2px">' + _escFj(b.description) + '</div>' : '') +
-            '</div>' +
-            '<i class="ti ti-chevron-right" style="color:var(--text3)"></i>' +
-          '</div>';
-        }).join('');
-      }
-    }
-    var m = document.getElementById('redeemBatchModal');
-    if (m) m.style.display = 'flex';
-    return;
-  }
-
-  // Tier 1: access_24h — direct redeem
-  await _doRedeem(tier, null);
-}
-
-async function confirmRedeemBatch(batchId) {
-  closeRedeemModal();
-  await _doRedeem(_pendingRedeemTier, batchId);
-}
-
-async function _doRedeem(tier, batchId) {
-  var uid = getUserId();
-  var tierLabels = { access_24h: '24h Free Access', premium_1d: '1-Din Premium', premium_7d: '1-Hafta Premium' };
-  var btn = document.getElementById('redeemBtn_' + tier);
-  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader-2" style="animation:spin 0.8s linear infinite;display:inline-block"></i> Redeeming...'; }
-
-  try {
-    var r = await fetch('/api/refer/redeem', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ userId: uid, tier: tier, batchId: batchId || null })
-    });
-    var d = await r.json();
-    if (!r.ok) throw new Error(d.error || 'Redeem failed');
-
-    _availablePoints = d.newPoints || 0;
-    var avEl = document.getElementById('availablePoints');
-    if (avEl) avEl.textContent = _availablePoints;
-
-    if (tier === 'access_24h') {
-      accessExpiresAt = d.expiresAt;
-      try { localStorage.setItem('edubot_access_expires', d.expiresAt); } catch(e){}
-      renderAccessCard();
-      startCountdown();
-      var dot = document.getElementById('accessDot');
-      if (dot) dot.style.background = 'var(--green)';
-      toast('✅ 24h access add ho gaya! Points: ' + _availablePoints + ' baki', 'success');
-    } else {
-      // Refresh batches to get updated premiumUsers
-      try {
-        var br = await fetch('/api/batches', { headers: { 'x-tg-init-data': tg ? tg.initData : '' } });
-        batches = await br.json();
-        renderBatches(batches);
-      } catch(e) {}
-      var days = tier === 'premium_1d' ? '1 din' : '7 din';
-      toast('✅ ' + d.batchName + ' ' + days + ' ke liye unlock! Points: ' + _availablePoints + ' baki', 'success');
-    }
-
-    _updateRedeemButtons();
-    loadReferStats();
-  } catch(e) {
-    toast('Error: ' + (e.message || 'Please try again'), 'error');
-    if (btn) {
-      btn.disabled = false;
-      var icons = { access_24h: 'ti-bolt', premium_1d: 'ti-crown', premium_7d: 'ti-crown' };
-      var costs = { access_24h: 1, premium_1d: 5, premium_7d: 20 };
-      btn.innerHTML = '<i class="ti ' + (icons[tier]||'ti-gift') + '"></i> Redeem — ' + costs[tier] + ' Points';
-    }
   }
 }
 
@@ -3759,101 +3387,6 @@ async function deleteAnnouncement(id) {
   } catch(e) {
     toast('Error', 'error');
   }
-}
-
-// ── Coupon Admin Functions ────────────────────────────────────────────────────
-async function adminLoadCoupons() {
-  // Populate batch select options
-  var sel = document.getElementById('cpnBatchSelect');
-  if (sel) {
-    sel.innerHTML = batches.map(function(b) {
-      return '<option value="' + b._id + '">' + b.name + '</option>';
-    }).join('');
-  }
-
-  var el = document.getElementById('couponList');
-  if (!el) return;
-  el.innerHTML = '<div style="font-size:12px;color:var(--text2);padding:10px">Loading...</div>';
-  try {
-    var list = await apiFetch('/api/coupons');
-    if (!list.length) { el.innerHTML = '<div style="font-size:12px;color:var(--text2);padding:10px">No coupons yet.</div>'; return; }
-    var now = Date.now();
-    el.innerHTML = list.map(function(c) {
-      var expired = new Date(c.expiresAt) < now;
-      var expStr = new Date(c.expiresAt).toLocaleDateString('en-IN', { day:'numeric', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' });
-      var statusColor = !c.isActive ? 'var(--text3)' : expired ? 'var(--red)' : 'var(--green)';
-      var statusLabel = !c.isActive ? 'Inactive' : expired ? 'Expired' : 'Active';
-      // Batch names
-      var batchLabel = '';
-      if (c.batchIds && c.batchIds.length > 0) {
-        var names = c.batchIds.map(function(id) {
-          var b = batches.find(function(x){ return x._id === id; });
-          return b ? b.name : id;
-        });
-        batchLabel = '<div style="font-size:10px;color:var(--accent);margin-top:2px">📚 ' + names.join(', ') + '</div>';
-      } else {
-        batchLabel = '<div style="font-size:10px;color:var(--text3);margin-top:2px">📚 All batches</div>';
-      }
-      return '<div class="manage-item" style="flex-direction:column;align-items:stretch;gap:6px">' +
-        '<div style="display:flex;align-items:center;gap:8px">' +
-          '<div style="font-size:15px">🎟</div>' +
-          '<div style="flex:1">' +
-            '<div style="font-size:13px;font-weight:700;font-family:monospace;letter-spacing:1px">' + c.code + '</div>' +
-            '<div style="font-size:11px;color:var(--text2)">' + c.discountPct + '% off &nbsp;·&nbsp; Expires: ' + expStr + '</div>' +
-            batchLabel +
-          '</div>' +
-          '<span style="font-size:10px;font-weight:700;color:' + statusColor + '">' + statusLabel + '</span>' +
-        '</div>' +
-        '<div style="display:flex;gap:6px">' +
-          '<button onclick="adminToggleCoupon(\'' + c._id + '\')" style="flex:1;background:var(--surface3);border:none;color:var(--text);font-size:11px;font-weight:600;padding:5px 10px;border-radius:6px;cursor:pointer">' +
-            (c.isActive ? '⏸ Deactivate' : '▶ Activate') + '</button>' +
-          '<button onclick="adminDeleteCoupon(\'' + c._id + '\')" style="background:none;border:1px solid rgba(239,68,68,0.3);color:var(--red);font-size:11px;padding:5px 10px;border-radius:6px;cursor:pointer"><i class="ti ti-trash"></i></button>' +
-        '</div>' +
-      '</div>';
-    }).join('');
-  } catch(e) {
-    el.innerHTML = '<div style="font-size:12px;color:var(--red);padding:10px">Error: ' + e.message + '</div>';
-  }
-}
-
-async function adminCreateCoupon() {
-  var code = (document.getElementById('cpnCode').value || '').trim().toUpperCase();
-  var disc = parseInt(document.getElementById('cpnDiscount').value || '0', 10);
-  var expiry = document.getElementById('cpnExpiry').value;
-  // Collect selected batch IDs (multi-select)
-  var sel = document.getElementById('cpnBatchSelect');
-  var batchIds = sel ? Array.from(sel.selectedOptions).map(function(o){ return o.value; }) : [];
-  if (!code) return toast('Coupon code daalo!', 'error');
-  if (!disc || disc < 1 || disc > 100) return toast('Discount 1-100 ke beech hona chahiye!', 'error');
-  if (!expiry) return toast('Expiry date daalo!', 'error');
-  var btn = document.getElementById('cpnAddBtn');
-  btn.disabled = true;
-  try {
-    await apiFetch('/api/coupons', 'POST', { code, discountPct: disc, expiresAt: new Date(expiry).toISOString(), batchIds });
-    document.getElementById('cpnCode').value = '';
-    document.getElementById('cpnDiscount').value = '';
-    document.getElementById('cpnExpiry').value = '';
-    if (sel) Array.from(sel.options).forEach(function(o){ o.selected = false; });
-    toast('✅ Coupon created!', 'success');
-    adminLoadCoupons();
-  } catch(e) { toast('Error: ' + e.message, 'error'); }
-  btn.disabled = false;
-}
-
-async function adminToggleCoupon(id) {
-  try {
-    await apiFetch('/api/coupons/' + id + '/toggle', 'PATCH');
-    adminLoadCoupons();
-  } catch(e) { toast('Error', 'error'); }
-}
-
-async function adminDeleteCoupon(id) {
-  if (!confirm('Delete this coupon?')) return;
-  try {
-    await apiFetch('/api/coupons/' + id, 'DELETE');
-    toast('Deleted!', 'success');
-    adminLoadCoupons();
-  } catch(e) { toast('Error', 'error'); }
 }
 </script>
 
