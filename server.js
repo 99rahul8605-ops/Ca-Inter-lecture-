@@ -411,10 +411,18 @@ async function startBot() {
       const batchId=parts[0]; const targetUserId=parts[1];
       if (isApprove) {
         try {
-          const Batch=require("./models/Course");
-          const batch=await Batch.findById(batchId);
-          if(batch){if(!batch.premiumUsers)batch.premiumUsers=[];if(!batch.premiumUsers.includes(String(targetUserId))){batch.premiumUsers.push(String(targetUserId));await batch.save();}db.batch.upsert(batch.toObject());}
-          bot.sendMessage(parseInt(targetUserId),`✅ <b>Payment Approved!</b>\n\nAccess to <b>${esc(batch?.name||"the batch")}</b> unlocked! 🚀`,{parse_mode:"HTML",reply_markup:{inline_keyboard:[[{text:"📚 Open App",web_app:{url:WEB_URL}}]]}}).catch(()=>{});
+          const batchData = db.batch.getOne(batchId);
+          if (batchData) {
+            if (!batchData.premiumUsers) batchData.premiumUsers = [];
+            if (!batchData.premiumUsers.includes(String(targetUserId))) {
+              batchData.premiumUsers.push(String(targetUserId));
+              db.batch.upsert(batchData);
+              // MongoDB backup
+              const Course = require("./models/Course");
+              Course.findByIdAndUpdate(batchId, { $addToSet: { premiumUsers: String(targetUserId) } }).catch(() => {});
+            }
+          }
+          bot.sendMessage(parseInt(targetUserId),`✅ <b>Payment Approved!</b>\n\nAccess to <b>${esc(batchData?.name||"the batch")}</b> unlocked! 🚀`,{parse_mode:"HTML",reply_markup:{inline_keyboard:[[{text:"📚 Open App",web_app:{url:WEB_URL}}]]}}).catch(()=>{});
           await bot.editMessageCaption(`${query.message.caption||""}\n\n✅ <b>APPROVED</b> by ${esc(query.from.first_name||"Admin")}`,{chat_id:chatId,message_id:msgId,parse_mode:"HTML",reply_markup:{inline_keyboard:[]}}).catch(()=>bot.editMessageText(`${query.message.text||""}\n\n✅ <b>APPROVED</b>`,{chat_id:chatId,message_id:msgId,parse_mode:"HTML",reply_markup:{inline_keyboard:[]}}).catch(()=>{}));
           await bot.answerCallbackQuery(query.id,{text:"✅ Approved!"});
         } catch(err){await bot.answerCallbackQuery(query.id,{text:"❌ Error: "+err.message});}
