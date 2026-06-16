@@ -602,25 +602,264 @@ router.get('/refer/stats/:userId', (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// Pending referral schema (sirf store karo, confirmed nahi)
+const pendingReferralSchema = new mongoose.Schema({
+  referrerId: { type: String, required: true },
+  referredId: { type: String, required: true, unique: true },
+  confirmed: { type: Boolean, default: false },
+  createdAt: { type: Date, default: Date.now }
+});
+const PendingReferral = mongoose.models.PendingReferral || mongoose.model('PendingReferral', pendingReferralSchema);
+
 router.post('/refer/record', async (req, res) => {
   try {
-    const { referrerId, referredId } = req.body;
+    const { referrerId, referredId, isNewUser, pending } = req.body;
     if (!referrerId || !referredId) return res.status(400).json({ error: 'Missing fields' });
     if (referrerId === referredId) return res.status(400).json({ error: 'Cannot refer yourself' });
-    if (!req.body.isNewUser) return res.json({ success: false, isNew: false, reason: 'Not a new user' });
+    if (!isNewUser) return res.json({ success: false, isNew: false, reason: 'Not a new user' });
 
-    const existing = db.referral.findByReferred(referredId);
-    if (existing) return res.json({ success: false, isNew: false, reason: 'Already referred' });
+    // Already confirmed referral hai?
+    const existingConfirmed = db.referral.findByReferred(referredId);
+    if (existingConfirmed) return res.json({ success: false, isNew: false, reason: 'Already referred' });
 
+    if (pending) {
+      // Sirf pending store karo — point baad mein milega
+      const existingPending = db.pendingReferral.findByReferred(referredId);
+      if (!existingPending) {
+        db.pendingReferral.upsert({ referredId, referrerId });
+        PendingReferral.create({ referrerId, referredId }).catch(() => {});
+      }
+      return res.json({ success: true, isNew: true, pending: true });
+    }
+
+    // Direct confirm (legacy fallback)
     const id = db.generateId();
     db.referral.insert({ id, referrerId, referredId });
-    // MongoDB backup
     Referral.create({ referrerId, referredId }).catch(() => {});
     res.json({ success: true, isNew: true });
   } catch (e) {
     if (e.code === 11000) return res.json({ success: false, reason: 'Already referred' });
     res.status(500).json({ error: e.message });
   }
+});
+
+// Pehla lecture watch hone pe pending referral confirm karo
+router.post('/refer/confirm-first-watch', async (req, res) => {
+  try {
+    const { referredId } = req.body;
+    if (!referredId) return res.status(400).json({ error: 'referredId required' });
+
+    // Already confirmed?
+    const existingConfirmed = db.referral.findByReferred(referredId);
+    if (existingConfirmed) return res.json({ confirmed: false, reason: 'Already confirmed' });
+
+    // Pending referral dhundo — SQLite first, MongoDB fallback
+    let pendingRef = db.pendingReferral.findByReferred(referredId);
+    if (!pendingRef) {
+      // MongoDB fallback
+      const mongoRef = await PendingReferral.findOne({ referredId, confirmed: false });
+      if (!mongoRef) return res.json({ confirmed: false, reason: 'No pending referral' });
+      pendingRef = { referrerId: mongoRef.referrerId, referredId };
+    }
+
+    // Confirm karo — SQLite + MongoDB
+    db.pendingReferral.confirm(referredId);
+    PendingReferral.findOneAndUpdate({ referredId }, { confirmed: true }).catch(() => {});
+
+    const id = db.generateId();
+    db.referral.insert({ id, referrerId: pendingRef.referrerId, referredId });
+    Referral.create({ referrerId: pendingRef.referrerId, referredId }).catch(() => {});
+
+    res.json({ confirmed: true, referrerId: pendingRef.referrerId });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Points Redeem ─────────────────────────────────────────────────────────────
+// Reward tiers:
+//   1 point  → 24h free access (ad-style)
+//   5 points → 24h premium access to 1 chosen batch
+//  20 points → 7-day premium access to 1 chosen batch
+
+router.post('/refer/redeem', async (req, res) => {
+  try {
+    const { userId, tier, batchId } = req.body;
+    if (!userId || !tier) return res.status(400).json({ error: 'userId aur tier required hai' });
+
+    // Tier validate
+    const TIERS = {
+      access_24h:   { cost: 1,  label: '24h Free Access' },
+      premium_1d:   { cost: 5,  label: '1 Batch 1-Day Premium', needsBatch: true },
+      premium_7d:   { cost: 20, label: '1 Batch 7-Day Premium', needsBatch: true },
+    };
+    const tierInfo = TIERS[tier];
+    if (!tierInfo) return res.status(400).json({ error: 'Invalid tier' });
+    if (tierInfo.needsBatch && !batchId) return res.status(400).json({ error: 'Batch select karo' });
+
+    // Current points check
+    const totalPoints = db.referral.countByReferrer(userId);
+    const usedPoints = db.referral.getUsedPoints ? db.referral.getUsedPoints(userId) : 0;
+    const availablePoints = totalPoints - usedPoints;
+    if (availablePoints < tierInfo.cost) {
+      return res.status(400).json({ error: `Insufficient points. ${tierInfo.cost} chahiye, tumhare paas ${availablePoints} hain.` });
+    }
+
+    // Record points usage in MongoDB (SQLite fallback)
+    const PointsUsage = mongoose.models.PointsUsage || mongoose.model('PointsUsage', new mongoose.Schema({
+      userId: { type: String, required: true },
+      pointsUsed: { type: Number, required: true },
+      tier: String,
+      batchId: String,
+      createdAt: { type: Date, default: Date.now }
+    }));
+
+    await PointsUsage.create({ userId, pointsUsed: tierInfo.cost, tier, batchId: batchId || null });
+
+    // Helper: get user info from Telegram (best-effort)
+    async function getTgUserInfo(uid) {
+      try {
+        const userRec = db.user.findOne ? db.user.findOne(uid) : null;
+        if (userRec) return userRec;
+      } catch(_) {}
+      return null;
+    }
+
+    // Helper: send Telegram message to owner
+    async function notifyOwner(text) {
+      if (!BOT_TOKEN || !OWNER_ID) return;
+      try {
+        await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ chat_id: OWNER_ID, text, parse_mode: 'HTML' })
+        });
+      } catch(_) {}
+    }
+
+    // Format IST time
+    const now = new Date();
+    const istStr = new Date(now.getTime() + 5.5 * 60 * 60 * 1000)
+      .toISOString().replace('T', ' ').slice(0, 19) + ' IST';
+
+    // Apply the reward
+    if (tier === 'access_24h') {
+      // Extend free access by 24h
+      const existing = db.access.findOne(userId);
+      const baseTime = (existing && existing.expiresAt > new Date()) ? existing.expiresAt : new Date();
+      const expiresAt = new Date(baseTime.getTime() + 24 * 60 * 60 * 1000);
+      const today = new Date().toISOString().slice(0, 10);
+      const claimsToday = (existing && existing.claimDay === today) ? (existing.claimsToday || 0) : 0;
+      db.access.upsert({ userId, expiresAt, claimsToday, claimDay: today });
+      const Access = mongoose.models.Access;
+      if (Access) Access.findOneAndUpdate({ userId }, { userId, expiresAt, claimsToday, claimDay: today }, { upsert: true }).catch(() => {});
+
+      // Notify owner
+      const userRec = await getTgUserInfo(userId);
+      const userName = userRec ? [userRec.firstName, userRec.lastName].filter(Boolean).join(' ') || userRec.username || userId : userId;
+      const usernameTag = userRec && userRec.username ? ` (@${userRec.username})` : '';
+      const newPts = availablePoints - tierInfo.cost;
+      const expStr = new Date(expiresAt.getTime() + 5.5*60*60*1000).toISOString().replace('T',' ').slice(0,19) + ' IST';
+      notifyOwner(
+        `🎁 <b>Points Redeemed!</b>
+
+` +
+        `👤 <b>User:</b> ${userName}${usernameTag}
+` +
+        `🆔 <b>User ID:</b> <code>${userId}</code>
+
+` +
+        `🏆 <b>Reward:</b> ⚡ 24h Free Access
+` +
+        `🪙 <b>Points Used:</b> 1
+` +
+        `💰 <b>Points Remaining:</b> ${newPts}
+
+` +
+        `⏰ <b>Access Expires:</b> ${expStr}
+` +
+        `🕐 <b>Redeemed At:</b> ${istStr}`
+      ).catch(() => {});
+
+      return res.json({ success: true, reward: '24h_access', expiresAt, newPoints: newPts });
+    }
+
+    if (tier === 'premium_1d' || tier === 'premium_7d') {
+      const days = tier === 'premium_1d' ? 1 : 7;
+      // Add user to batch premiumUsers with expiry
+      const batch = await Batch.findById(batchId);
+      if (!batch) return res.status(404).json({ error: 'Batch not found' });
+      if (!batch.isPremium) return res.status(400).json({ error: 'Yeh batch premium nahi hai' });
+
+      const uid = String(userId);
+      if (!batch.premiumUsers) batch.premiumUsers = [];
+      if (!batch.premiumUsers.includes(uid)) {
+        batch.premiumUsers.push(uid);
+        await batch.save();
+        db.batch.upsert(batch.toObject());
+      }
+
+      // Schedule removal after N days (store expiry in MongoDB)
+      const PremiumExpiry = mongoose.models.PremiumExpiry || mongoose.model('PremiumExpiry', new mongoose.Schema({
+        userId: String, batchId: String, expiresAt: Date, removed: { type: Boolean, default: false }
+      }));
+      const expiresAt = new Date(Date.now() + days * 24 * 60 * 60 * 1000);
+      await PremiumExpiry.create({ userId: uid, batchId, expiresAt });
+
+      // Notify owner
+      const userRec2 = await getTgUserInfo(userId);
+      const userName2 = userRec2 ? [userRec2.firstName, userRec2.lastName].filter(Boolean).join(' ') || userRec2.username || userId : userId;
+      const usernameTag2 = userRec2 && userRec2.username ? ` (@${userRec2.username})` : '';
+      const newPts2 = availablePoints - tierInfo.cost;
+      const expStr2 = new Date(expiresAt.getTime() + 5.5*60*60*1000).toISOString().replace('T',' ').slice(0,19) + ' IST';
+      const rewardEmoji = days === 1 ? '🌟' : '👑';
+      notifyOwner(
+        `🎁 <b>Points Redeemed!</b>
+
+` +
+        `👤 <b>User:</b> ${userName2}${usernameTag2}
+` +
+        `🆔 <b>User ID:</b> <code>${userId}</code>
+
+` +
+        `${rewardEmoji} <b>Reward:</b> ${days === 1 ? '1-Din' : '1-Hafta'} Premium Access
+` +
+        `📚 <b>Batch:</b> ${batch.name}
+` +
+        `🪙 <b>Points Used:</b> ${tierInfo.cost}
+` +
+        `💰 <b>Points Remaining:</b> ${newPts2}
+
+` +
+        `⏰ <b>Access Expires:</b> ${expStr2}
+` +
+        `🕐 <b>Redeemed At:</b> ${istStr}`
+      ).catch(() => {});
+
+      return res.json({ success: true, reward: `premium_${days}d`, batchId, batchName: batch.name, expiresAt, newPoints: newPts2 });
+    }
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Get available (unused) points for a user
+router.get('/refer/points/:userId', async (req, res) => {
+  try {
+    const userId = req.params.userId;
+    const totalPoints = db.referral.countByReferrer(userId);
+
+    // Sum used points from MongoDB
+    const PointsUsage = mongoose.models.PointsUsage || mongoose.model('PointsUsage', new mongoose.Schema({
+      userId: { type: String, required: true },
+      pointsUsed: { type: Number, required: true },
+      tier: String, batchId: String, createdAt: { type: Date, default: Date.now }
+    }));
+    const usageAgg = await PointsUsage.aggregate([
+      { $match: { userId } },
+      { $group: { _id: null, total: { $sum: '$pointsUsed' } } }
+    ]);
+    const usedPoints = (usageAgg[0] && usageAgg[0].total) || 0;
+    const availablePoints = Math.max(0, totalPoints - usedPoints);
+
+    res.json({ totalPoints, usedPoints, availablePoints });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // ── Force Join ────────────────────────────────────────────────────────────────
