@@ -92,9 +92,7 @@ async function saveToStorageChannel(bot, fileInfo) {
   if (!STORAGE_CHANNEL_ID) return fileInfo;
   try {
     let sentMsg;
-    // Caption is just the plain file_name — same name as stored/shown in DB,
-    // no emoji prefix, no original Telegram caption.
-    const caption = fileInfo.file_name;
+    const caption = fileInfo.caption || `📎 ${fileInfo.file_name}`;
     switch(fileInfo.file_type) {
       case "photo":      sentMsg = await bot.sendPhoto(STORAGE_CHANNEL_ID, fileInfo.file_id, { caption }); break;
       case "video":      sentMsg = await bot.sendVideo(STORAGE_CHANNEL_ID, fileInfo.file_id, { caption }); break;
@@ -110,7 +108,7 @@ async function saveToStorageChannel(bot, fileInfo) {
 }
 
 async function sendFile(bot, chatId, record) {
-  const caption = record.file_name;
+  const caption = `📎 ${record.file_name}`;
   const protect = !isOwner(chatId);
   try {
     switch(record.file_type) {
@@ -123,16 +121,7 @@ async function sendFile(bot, chatId, record) {
     }
   } catch (err) {
     if (STORAGE_CHANNEL_ID && record.channel_msg_id) {
-      // Use copyMessage, NOT forwardMessage — forwardMessage shows a
-      // "Forwarded from <Storage Channel>" header to the user, leaking
-      // the storage channel's name/identity. copyMessage delivers the
-      // same content with no forward attribution.
-      // IMPORTANT: explicitly pass caption here too — without it,
-      // copyMessage just copies whatever caption is currently sitting
-      // on the storage channel message (which may be stale/original
-      // if that message was saved before the caption fix), instead of
-      // using record.file_name like the direct-send path above.
-      try { return await bot.copyMessage(chatId, STORAGE_CHANNEL_ID, record.channel_msg_id, { caption, protect_content: protect }); } catch (_) {}
+      try { return await bot.forwardMessage(chatId, STORAGE_CHANNEL_ID, record.channel_msg_id); } catch (_) {}
     }
     throw err;
   }
@@ -495,7 +484,7 @@ async function startBot() {
         await bot.deleteMessage(chatId,forwarded.message_id).catch(()=>{});
         const session=bulkSessions.get(userId);
         if(session){session.files.push(fileInfo);return bot.editMessageText(`✅ File ${session.files.length} added: ${fileInfo.file_name}\n📦 Total: ${session.files.length}\n\nSend more or /done`,{chat_id:chatId,message_id:processing.message_id});}
-        fileInfo.file_name=cleanFileName(fileInfo.file_name); const stored=await saveToStorageChannel(bot,fileInfo);
+        const stored=await saveToStorageChannel(bot,fileInfo); stored.file_name=cleanFileName(stored.file_name);
         const code=getUniqueCode(); const id=db.generateId();
         db.fileRecord.create({id,code,file_id:stored.file_id,file_type:stored.file_type,file_name:stored.file_name,uploaded_by:userId,channel_msg_id:stored.channel_msg_id||null});
         if (mongoConnected) FileRecord.create({code,file_id:stored.file_id,file_type:stored.file_type,file_name:stored.file_name,uploaded_by:userId,expires_at:null,channel_msg_id:stored.channel_msg_id||null}).catch(()=>{});
@@ -531,7 +520,7 @@ async function startBot() {
     enqueueFile(userId, async () => {
       const processing=await bot.sendMessage(chatId,`⏳ Saving: ${fileInfo.file_name}...`);
       try {
-        fileInfo.file_name=cleanFileName(fileInfo.file_name); const stored=await saveToStorageChannel(bot,fileInfo);
+        const stored=await saveToStorageChannel(bot,fileInfo); stored.file_name=cleanFileName(stored.file_name);
         const code=getUniqueCode(); const id=db.generateId();
         db.fileRecord.create({id,code,file_id:stored.file_id,file_type:stored.file_type,file_name:stored.file_name,uploaded_by:userId,channel_msg_id:stored.channel_msg_id||null});
         if (mongoConnected) FileRecord.create({code,file_id:stored.file_id,file_type:stored.file_type,file_name:stored.file_name,uploaded_by:userId,expires_at:null,channel_msg_id:stored.channel_msg_id||null}).catch(()=>{});
