@@ -127,7 +127,12 @@ async function sendFile(bot, chatId, record) {
       // "Forwarded from <Storage Channel>" header to the user, leaking
       // the storage channel's name/identity. copyMessage delivers the
       // same content with no forward attribution.
-      try { return await bot.copyMessage(chatId, STORAGE_CHANNEL_ID, record.channel_msg_id, { protect_content: protect }); } catch (_) {}
+      // IMPORTANT: explicitly pass caption here too — without it,
+      // copyMessage just copies whatever caption is currently sitting
+      // on the storage channel message (which may be stale/original
+      // if that message was saved before the caption fix), instead of
+      // using record.file_name like the direct-send path above.
+      try { return await bot.copyMessage(chatId, STORAGE_CHANNEL_ID, record.channel_msg_id, { caption, protect_content: protect }); } catch (_) {}
     }
     throw err;
   }
