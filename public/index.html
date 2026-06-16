@@ -1463,10 +1463,6 @@ async function checkAdminAccess() {
     var ownerId = config.ownerId;
     if (config.botUsername) {
       window._botUsername = config.botUsername;
-      // botUsername mil gaya — referral link abhi set karo
-      _referLink = getReferLink();
-      var _rlBox = document.getElementById('referLinkBox');
-      if (_rlBox && _referLink) _rlBox.textContent = _referLink;
     }
     if (config.upiId) window._upiId = config.upiId;
     if (config.contactLink) window._contactLink = config.contactLink;
@@ -3470,7 +3466,8 @@ function getReferLink() {
 
 async function loadReferStats() {
   var uid = getUserId();
-  if (!uid) return;
+  // guest_ user ke liye refer link nahi dikhana
+  var isTgUser = uid && !uid.startsWith('guest_');
 
   // Agar botUsername abhi tak nahi aaya (config fetch pending) to max 5s wait karo
   if (!window._botUsername) {
@@ -3481,9 +3478,14 @@ async function loadReferStats() {
   }
 
   // Set referral link
-  _referLink = getReferLink();
   var box = document.getElementById('referLinkBox');
-  if (box) box.textContent = _referLink || 'Open via Telegram to see your link';
+  if (isTgUser) {
+    _referLink = getReferLink();
+    if (box) box.textContent = _referLink || 'Open via Telegram to see your link';
+  } else {
+    if (box) box.textContent = 'Open via Telegram to see your link';
+    return;
+  }
 
   // Fetch referral count stats
   try {
