@@ -11,18 +11,6 @@ function isMongo() { return mongoose.connection.readyState === 1; }
 // Helper: find subdoc by _id (replaces mongoose .id() on plain objects)
 function _findById(arr, id) { return (arr||[]).find(x => String(x._id) === String(id)) || null; }
 
-// Helper: fetch with a hard timeout so a slow/hanging Telegram API call
-// can never block a route forever (root cause of "verifying" screen stuck).
-async function fetchWithTimeout(url, opts = {}, ms = 6000) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), ms);
-  try {
-    return await fetch(url, { ...opts, signal: controller.signal });
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const OWNER_ID = parseInt(process.env.OWNER_ID || "0");
 
@@ -900,7 +888,7 @@ async function getChannelInfo(chatId, botToken) {
   const cached = _channelInfoCache.get(chatId);
   if (cached && now - cached.cachedAt < 10 * 60 * 1000) return cached;
   try {
-    const chatRes = await fetchWithTimeout(`https://api.telegram.org/bot${botToken}/getChat?chat_id=${encodeURIComponent(chatId)}`, {}, 5000);
+    const chatRes = await fetch(`https://api.telegram.org/bot${botToken}/getChat?chat_id=${encodeURIComponent(chatId)}`);
     const chatData = await chatRes.json();
     const chat = chatData.ok ? chatData.result : null;
     const title = chat ? (chat.title||chat.first_name||'') : '';
@@ -908,7 +896,7 @@ async function getChannelInfo(chatId, botToken) {
     let photoUrl = null;
     if (chat && chat.photo && chat.photo.small_file_id) {
       try {
-        const fileRes = await fetchWithTimeout(`https://api.telegram.org/bot${botToken}/getFile?file_id=${encodeURIComponent(chat.photo.small_file_id)}`, {}, 5000);
+        const fileRes = await fetch(`https://api.telegram.org/bot${botToken}/getFile?file_id=${encodeURIComponent(chat.photo.small_file_id)}`);
         const fileData = await fileRes.json();
         if (fileData.ok && fileData.result && fileData.result.file_path) photoUrl = `https://api.telegram.org/file/bot${botToken}/${fileData.result.file_path}`;
       } catch (_) {}
@@ -917,13 +905,7 @@ async function getChannelInfo(chatId, botToken) {
     const info = { title, username, photoUrl, redirectLink, cachedAt: now };
     _channelInfoCache.set(chatId, info);
     return info;
-  } catch (e) {
-    // Cache the failure briefly too, so a hanging/erroring channel doesn't
-    // get hit on every single force-join check (was contributing to stalls).
-    const info = { title: '', username: '', photoUrl: null, redirectLink: null, cachedAt: now };
-    _channelInfoCache.set(chatId, info);
-    return info;
-  }
+  } catch (e) { return { title: '', username: '', photoUrl: null, redirectLink: null, cachedAt: now }; }
 }
 
 router.post('/force-join/check', async (req, res) => {
@@ -935,7 +917,7 @@ router.post('/force-join/check', async (req, res) => {
   if (!BOT_TOKEN) return res.status(500).json({ error: 'BOT_TOKEN not set' });
   const results = await Promise.all(channels.map(async (ch) => {
     const [memberData, info] = await Promise.all([
-      fetchWithTimeout(`https://api.telegram.org/bot${BOT_TOKEN}/getChatMember?chat_id=${encodeURIComponent(ch.id)}&user_id=${encodeURIComponent(userId)}`, {}, 5000).then(r => r.json()).catch(() => ({})),
+      fetch(`https://api.telegram.org/bot${BOT_TOKEN}/getChatMember?chat_id=${encodeURIComponent(ch.id)}&user_id=${encodeURIComponent(userId)}`).then(r => r.json()).catch(() => ({})),
       getChannelInfo(ch.id, BOT_TOKEN),
     ]);
     const status = memberData.result && memberData.result.status;
