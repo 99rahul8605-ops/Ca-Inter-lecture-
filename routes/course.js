@@ -611,8 +611,11 @@ const Referral = mongoose.model('Referral', referralSchema);
 
 router.get('/refer/stats/:userId', (req, res) => {
   try {
-    const referrals = db.referral.countByReferrer(req.params.userId);
-    res.json({ referrals, points: referrals });
+    const userId = req.params.userId;
+    const totalPoints = db.referral.countByReferrer(userId);
+    const usedPoints = (db.pointsUsage && db.pointsUsage.getTotalUsed) ? db.pointsUsage.getTotalUsed(userId) : 0;
+    const availablePoints = Math.max(0, totalPoints - usedPoints);
+    res.json({ referrals: totalPoints, points: availablePoints });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -711,8 +714,8 @@ router.post('/refer/redeem', async (req, res) => {
 
     // Current points check
     const totalPoints = db.referral.countByReferrer(userId);
-    const usedPoints = db.referral.getUsedPoints ? db.referral.getUsedPoints(userId) : 0;
-    const availablePoints = totalPoints - usedPoints;
+    const usedPoints = (db.pointsUsage && db.pointsUsage.getTotalUsed) ? db.pointsUsage.getTotalUsed(userId) : 0;
+    const availablePoints = Math.max(0, totalPoints - usedPoints);
     if (availablePoints < tierInfo.cost) {
       return res.status(400).json({ error: `Insufficient points. ${tierInfo.cost} chahiye, tumhare paas ${availablePoints} hain.` });
     }
@@ -795,7 +798,7 @@ router.post('/refer/redeem', async (req, res) => {
         `🕐 <b>Redeemed At:</b> ${istStr}`
       ).catch(() => {});
 
-      return res.json({ success: true, reward: '24h_access', expiresAt, newPoints: newPts });
+      return res.json({ success: true, reward: '24h_access', expiresAt, newPoints: newPts, points: newPts });
     }
 
     if (tier === 'premium_1d' || tier === 'premium_7d') {
@@ -803,7 +806,7 @@ router.post('/refer/redeem', async (req, res) => {
       // Add user to batch premiumUsers with expiry — SQLite first
       const batch = db.batch.getOne(batchId);
       if (!batch) return res.status(404).json({ error: 'Batch not found' });
-      if (!batch.isPremium) return res.status(400).json({ error: 'Yeh batch premium nahi hai' });
+      // Allow any public batch (not just isPremium ones)
 
       const uid = String(userId);
       if (!batch.premiumUsers) batch.premiumUsers = [];
@@ -850,7 +853,7 @@ router.post('/refer/redeem', async (req, res) => {
         `🕐 <b>Redeemed At:</b> ${istStr}`
       ).catch(() => {});
 
-      return res.json({ success: true, reward: `premium_${days}d`, batchId, batchName: batch.name, expiresAt, newPoints: newPts2 });
+      return res.json({ success: true, reward: `premium_${days}d`, batchId, batchName: batch.name, expiresAt, newPoints: newPts2, points: newPts2 });
     }
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
