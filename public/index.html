@@ -872,24 +872,49 @@ body.ready{transition:none}
 
     <!-- How it works -->
     <div class="card">
-      <div style="font-size:13px;font-weight:600;margin-bottom:10px;color:var(--text)">ℹ️ How It Works</div>
-      <div style="display:flex;flex-direction:column;gap:8px">
-        <div style="display:flex;align-items:center;gap:10px">
-          <div style="width:24px;height:24px;border-radius:50%;background:var(--accent);color:#fff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0">1</div>
-          <div style="font-size:12px;color:var(--text2)">Copy your unique referral link above</div>
+      <div style="font-size:13px;font-weight:600;margin-bottom:12px;color:var(--text)">ℹ️ Kaise Kaam Karta Hai?</div>
+      <div style="display:flex;flex-direction:column;gap:10px">
+
+        <div style="display:flex;align-items:flex-start;gap:10px">
+          <div style="width:26px;height:26px;border-radius:50%;background:var(--accent);color:#fff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px">1</div>
+          <div>
+            <div style="font-size:12px;font-weight:600;color:var(--text)">Apna referral link copy karo</div>
+            <div style="font-size:11px;color:var(--text2);margin-top:2px">Upar diye gaye "Copy Link" button se apna unique link lo</div>
+          </div>
         </div>
-        <div style="display:flex;align-items:center;gap:10px">
-          <div style="width:24px;height:24px;border-radius:50%;background:var(--accent);color:#fff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0">2</div>
-          <div style="font-size:12px;color:var(--text2)">Share it with your friends</div>
+
+        <div style="display:flex;align-items:flex-start;gap:10px">
+          <div style="width:26px;height:26px;border-radius:50%;background:var(--accent);color:#fff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px">2</div>
+          <div>
+            <div style="font-size:12px;font-weight:600;color:var(--text)">Dosto ke saath share karo</div>
+            <div style="font-size:11px;color:var(--text2);margin-top:2px">Link Telegram, WhatsApp ya kahin bhi share karo</div>
+          </div>
         </div>
-        <div style="display:flex;align-items:center;gap:10px">
-          <div style="width:24px;height:24px;border-radius:50%;background:var(--accent);color:#fff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0">3</div>
-          <div style="font-size:12px;color:var(--text2)">When they open the bot using your link, you get <strong style="color:#f59e0b">1 point</strong></div>
+
+        <div style="display:flex;align-items:flex-start;gap:10px">
+          <div style="width:26px;height:26px;border-radius:50%;background:var(--accent);color:#fff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px">3</div>
+          <div>
+            <div style="font-size:12px;font-weight:600;color:var(--text)">Dost koi bhi ek video dekhe</div>
+            <div style="font-size:11px;color:var(--text2);margin-top:2px">Sirf bot join karne se point nahi milega — dost ko <strong style="color:#f59e0b">kam se kam 1 video dekhna hoga</strong> (bot ya app se)</div>
+          </div>
         </div>
-        <div style="display:flex;align-items:center;gap:10px">
-          <div style="width:24px;height:24px;border-radius:50%;background:var(--accent);color:#fff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0">4</div>
-          <div style="font-size:12px;color:var(--text2)">Points se rewards redeem karo — access pao!</div>
+
+        <div style="display:flex;align-items:flex-start;gap:10px">
+          <div style="width:26px;height:26px;border-radius:50%;background:linear-gradient(135deg,#f59e0b,#d97706);color:#fff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px">4</div>
+          <div>
+            <div style="font-size:12px;font-weight:600;color:#f59e0b">Tumhe +1 Point milega! 🎉</div>
+            <div style="font-size:11px;color:var(--text2);margin-top:2px">Tumhare Telegram pe notification aayega jab point credit ho</div>
+          </div>
         </div>
+
+        <div style="display:flex;align-items:flex-start;gap:10px">
+          <div style="width:26px;height:26px;border-radius:50%;background:linear-gradient(135deg,#22c55e,#16a34a);color:#fff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px">5</div>
+          <div>
+            <div style="font-size:12px;font-weight:600;color:var(--text)">Points se rewards redeem karo</div>
+            <div style="font-size:11px;color:var(--text2);margin-top:2px">1 pt = 24h access &nbsp;·&nbsp; 5 pt = koi bhi batch 24h &nbsp;·&nbsp; 20 pt = koi bhi batch 7 din</div>
+          </div>
+        </div>
+
       </div>
     </div>
 
@@ -2400,6 +2425,19 @@ var _adWatching = false; // prevent double-click while ad loads
 // Bot username comes from config — so bot change = no manual DB update needed
 function openLecLink(codeOrLink, type) {
   if (!codeOrLink) return openLink('', type || 'lecture');
+
+  // Web app se lecture open hone pe referral confirm karo (fire-and-forget, sirf lecture type pe)
+  if ((type || 'lecture') === 'lecture') {
+    var uid = getUserId();
+    if (uid && !String(uid).startsWith('guest_')) {
+      fetch('/api/refer/confirm-first-watch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ referredId: String(uid) })
+      }).catch(function(){});
+    }
+  }
+
   var url;
   if (codeOrLink.startsWith('http')) {
     // Legacy full link — extract code and rebuild with current bot username
