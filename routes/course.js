@@ -5,6 +5,12 @@ const mongoose = require("mongoose");
 const Batch = require("../models/Course");
 const db = require("../sqlite-manager");
 
+// MongoDB connection check
+function isMongo() { return mongoose.connection.readyState === 1; }
+
+// Helper: find subdoc by _id (replaces mongoose .id() on plain objects)
+function _findById(arr, id) { return (arr||[]).find(x => String(x._id) === String(id)) || null; }
+
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const OWNER_ID = parseInt(process.env.OWNER_ID || "0");
 
@@ -81,6 +87,7 @@ function _mongoBackupBatch(batchId) {
   // Re-read from SQLite and push to MongoDB async — fire and forget
   setImmediate(async () => {
     try {
+      if (!isMongo()) return;
       const data = db.batch.getOne(batchId);
       if (!data) return;
       await Batch.findByIdAndUpdate(batchId, data, { upsert: true });
@@ -127,8 +134,9 @@ async function autoAddLecture({ batchId, subjectId, chapterId, unitId, name, lin
   // Write to SQLite
   db.batch.upsert(batchData);
 
-  // Write to MongoDB (source of truth backup)
-  const mongoBatch = await Batch.findById(batchId);
+  // MongoDB backup (async)
+  if (isMongo()) {
+  const mongoBatch = await Batch.findById(batchId).catch(() => null);
   if (mongoBatch) {
     const ms = mongoBatch.subjects.id(subjectId);
     const mc = ms && ms.chapters.id(chapterId);
@@ -138,6 +146,7 @@ async function autoAddLecture({ batchId, subjectId, chapterId, unitId, name, lin
       await mongoBatch.save();
     }
   }
+  }
 }
 
 // ── Batches ───────────────────────────────────────────────────────────────────
@@ -145,10 +154,11 @@ async function autoAddLecture({ batchId, subjectId, chapterId, unitId, name, lin
 router.get("/batches", async (req, res) => {
   try {
     const admin = isAdminRequest(req);
-    // SQLite for everyone ⚡ (MongoDB sirf backup hai)
-    const batches = db.batch.getAll();
-    if (admin) { return res.json(batches); }
+    // Admin: fresh from MongoDB
+    if (admin) { return res.json(db.batch.getAll()); }
 
+    // Users: from SQLite ⚡
+    const batches = db.batch.getAll();
     const userId = getRequestUserId(req);
     res.json(batches.map(b => {
       if (!b.isPremium) return b;
@@ -166,7 +176,6 @@ router.get("/batches/:bid", async (req, res) => {
       if (!b) return res.status(404).json({ error: "Not found" });
       return res.json(b);
     }
-    // (b already fetched above for non-admin path too)
     if (!b) return res.status(404).json({ error: "Not found" });
     const userId = getRequestUserId(req);
     const hasAccess = userId && (b.premiumUsers||[]).includes(userId);
@@ -176,55 +185,58 @@ router.get("/batches/:bid", async (req, res) => {
 
 router.post("/batches/migrate-publish", verifyAdmin, async (req, res) => {
   try {
-    const result = await Batch.updateMany({ isPublic: false }, { $set: { isPublic: true } });
-    // Sync all back to SQLite
-    const batches = await Batch.find({}).lean();
-    for (const b of batches) db.batch.upsert(b);
-    res.json({ success: true, updated: result.modifiedCount });
+    const allBatches = db.batch.getAll();
+    let updated = 0;
+    for (const b of allBatches) { if (!b.isPublic) { b.isPublic = true; db.batch.upsert(b); updated++; } }
+    if (isMongo()) Batch.updateMany({ isPublic: false }, { $set: { isPublic: true } }).catch(() => {});
+    res.json({ success: true, updated });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 router.post("/batches", verifyAdmin, async (req, res) => {
   try {
     const count = db.batch.count();
-    // Write to MongoDB first (gets real _id)
-    const batch = await Batch.create({ name: req.body.name, pic: req.body.pic||"", description: req.body.description||"", order: count, isPublic: false, isPremium: req.body.isPremium===true, premiumUsers: [], price: req.body.price ? Number(req.body.price) : 0 });
-    db.batch.upsert(batch.toObject());
-    res.json(batch);
+    // SQLite first — generate id locally
+    const newId = new (require('mongoose').Types.ObjectId)().toString();
+    const newBatch = { _id: newId, name: req.body.name, pic: req.body.pic||"", description: req.body.description||"", order: count, isPublic: false, isPremium: req.body.isPremium===true, premiumUsers: [], price: req.body.price ? Number(req.body.price) : 0, subjects: [] };
+    db.batch.upsert(newBatch);
+    // MongoDB backup (async)
+    if (isMongo()) Batch.create(newBatch).catch(e => console.error('Batch create mongo backup:', e.message));
+    res.json(newBatch);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 router.patch("/batches/:bid/publish", verifyAdmin, async (req, res) => {
   try {
-    const batch = await Batch.findById(req.params.bid);
-    if (!batch) return res.status(404).json({ error: "Batch not found" });
-    batch.isPublic = !batch.isPublic;
-    await batch.save();
-    db.batch.upsert(batch.toObject());
-    res.json({ success: true, isPublic: batch.isPublic });
+    const batchData = db.batch.getOne(req.params.bid);
+    if (!batchData) return res.status(404).json({ error: "Batch not found" });
+    batchData.isPublic = !batchData.isPublic;
+    db.batch.upsert(batchData);
+    if (isMongo()) Batch.findByIdAndUpdate(req.params.bid, { isPublic: batchData.isPublic }).catch(() => {});
+    res.json({ success: true, isPublic: batchData.isPublic });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 router.delete("/batches/:bid", verifyAdmin, async (req, res) => {
   try {
-    await Batch.findByIdAndDelete(req.params.bid);
     db.batch.delete(req.params.bid);
+    if (isMongo()) Batch.findByIdAndDelete(req.params.bid).catch(() => {});
     res.json({ success: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 router.patch("/batches/:bid/edit", verifyAdmin, async (req, res) => {
   try {
-    const batch = await Batch.findById(req.params.bid);
-    if (!batch) return res.status(404).json({ error: "Batch not found" });
-    if (req.body.name) batch.name = req.body.name;
-    if (req.body.description !== undefined) batch.description = req.body.description;
-    if (req.body.isPremium !== undefined) batch.isPremium = req.body.isPremium;
-    if (req.body.price !== undefined) batch.price = Number(req.body.price)||0;
-    if (req.body.pic !== undefined) batch.pic = req.body.pic;
-    await batch.save();
-    db.batch.upsert(batch.toObject());
-    res.json(batch);
+    const batchData = db.batch.getOne(req.params.bid);
+    if (!batchData) return res.status(404).json({ error: "Batch not found" });
+    if (req.body.name) batchData.name = req.body.name;
+    if (req.body.description !== undefined) batchData.description = req.body.description;
+    if (req.body.isPremium !== undefined) batchData.isPremium = req.body.isPremium;
+    if (req.body.price !== undefined) batchData.price = Number(req.body.price)||0;
+    if (req.body.pic !== undefined) batchData.pic = req.body.pic;
+    db.batch.upsert(batchData);
+    if (isMongo()) Batch.findByIdAndUpdate(req.params.bid, batchData).catch(() => {});
+    res.json(batchData);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -240,25 +252,26 @@ router.get("/batches/:bid/premium-users", verifyAdmin, async (req, res) => {
 
 router.post("/batches/:bid/premium-users", verifyAdmin, async (req, res) => {
   try {
-    const batch = await Batch.findById(req.params.bid);
-    if (!batch) return res.status(404).json({ error: "Batch not found" });
+    const batchData = db.batch.getOne(req.params.bid);
+    if (!batchData) return res.status(404).json({ error: "Batch not found" });
     const uid = String(req.body.userId||'').trim();
     if (!uid) return res.status(400).json({ error: "userId required" });
-    if (!batch.premiumUsers) batch.premiumUsers = [];
-    if (!batch.premiumUsers.includes(uid)) { batch.premiumUsers.push(uid); await batch.save(); }
-    db.batch.upsert(batch.toObject());
-    res.json({ success: true, premiumUsers: batch.premiumUsers });
+    if (!batchData.premiumUsers) batchData.premiumUsers = [];
+    if (!batchData.premiumUsers.includes(uid)) { batchData.premiumUsers.push(uid); }
+    db.batch.upsert(batchData);
+    if (isMongo()) Batch.findByIdAndUpdate(req.params.bid, { $addToSet: { premiumUsers: uid } }).catch(() => {});
+    res.json({ success: true, premiumUsers: batchData.premiumUsers });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 router.delete("/batches/:bid/premium-users/:uid", verifyAdmin, async (req, res) => {
   try {
-    const batch = await Batch.findById(req.params.bid);
-    if (!batch) return res.status(404).json({ error: "Batch not found" });
-    batch.premiumUsers = (batch.premiumUsers||[]).filter(u => u !== req.params.uid);
-    await batch.save();
-    db.batch.upsert(batch.toObject());
-    res.json({ success: true, premiumUsers: batch.premiumUsers });
+    const batchData = db.batch.getOne(req.params.bid);
+    if (!batchData) return res.status(404).json({ error: "Batch not found" });
+    batchData.premiumUsers = (batchData.premiumUsers||[]).filter(u => u !== req.params.uid);
+    db.batch.upsert(batchData);
+    if (isMongo()) Batch.findByIdAndUpdate(req.params.bid, { $pull: { premiumUsers: req.params.uid } }).catch(() => {});
+    res.json({ success: true, premiumUsers: batchData.premiumUsers });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -275,36 +288,36 @@ router.get("/batches/:bid/premium-check/:userId", async (req, res) => {
 
 router.post("/batches/:bid/subjects", verifyAdmin, async (req, res) => {
   try {
-    const batch = await Batch.findById(req.params.bid);
+    const batch = db.batch.getOne(req.params.bid);
     if (!batch) return res.status(404).json({ error: "Batch not found" });
     batch.subjects.push({ name: req.body.name, icon: req.body.icon||"📚", color: req.body.color||"#4f8ef7", order: batch.subjects.length });
-    await batch.save();
-    db.batch.upsert(batch.toObject());
+    db.batch.upsert(batch);
+    if (isMongo()) _mongoBackupBatch(req.params.bid);
     res.json(batch);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 router.delete("/batches/:bid/subjects/:sid", verifyAdmin, async (req, res) => {
   try {
-    const batch = await Batch.findById(req.params.bid);
+    const batch = db.batch.getOne(req.params.bid);
     if (!batch) return res.status(404).json({ error: "Batch not found" });
     batch.subjects = batch.subjects.filter(s => s._id.toString() !== req.params.sid);
-    await batch.save();
-    db.batch.upsert(batch.toObject());
+    db.batch.upsert(batch);
+    if (isMongo()) _mongoBackupBatch(req.params.bid);
     res.json({ success: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 router.patch("/batches/:bid/subjects/:sid/edit", verifyAdmin, async (req, res) => {
   try {
-    const batch = await Batch.findById(req.params.bid);
-    const subj = batch && batch.subjects.id(req.params.sid);
+    const batch = db.batch.getOne(req.params.bid);
+    const subj = batch && _findById(batch.subjects, req.params.sid);
     if (!subj) return res.status(404).json({ error: "Not found" });
     if (req.body.name) subj.name = req.body.name;
     if (req.body.icon) subj.icon = req.body.icon;
     if (req.body.color) subj.color = req.body.color;
-    await batch.save();
-    db.batch.upsert(batch.toObject());
+    db.batch.upsert(batch);
+    if (isMongo()) _mongoBackupBatch(req.params.bid);
     res.json(batch);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -313,38 +326,38 @@ router.patch("/batches/:bid/subjects/:sid/edit", verifyAdmin, async (req, res) =
 
 router.post("/batches/:bid/subjects/:sid/chapters", verifyAdmin, async (req, res) => {
   try {
-    const batch = await Batch.findById(req.params.bid);
-    const subj = batch && batch.subjects.id(req.params.sid);
+    const batch = db.batch.getOne(req.params.bid);
+    const subj = batch && _findById(batch.subjects, req.params.sid);
     if (!subj) return res.status(404).json({ error: "Not found" });
     subj.chapters.push({ name: req.body.name, order: subj.chapters.length });
-    await batch.save();
-    db.batch.upsert(batch.toObject());
+    db.batch.upsert(batch);
+    if (isMongo()) _mongoBackupBatch(req.params.bid);
     res.json(batch);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 router.delete("/batches/:bid/subjects/:sid/chapters/:cid", verifyAdmin, async (req, res) => {
   try {
-    const batch = await Batch.findById(req.params.bid);
-    const subj = batch && batch.subjects.id(req.params.sid);
+    const batch = db.batch.getOne(req.params.bid);
+    const subj = batch && _findById(batch.subjects, req.params.sid);
     if (!subj) return res.status(404).json({ error: "Not found" });
     subj.chapters = subj.chapters.filter(c => c._id.toString() !== req.params.cid);
-    await batch.save();
-    db.batch.upsert(batch.toObject());
+    db.batch.upsert(batch);
+    if (isMongo()) _mongoBackupBatch(req.params.bid);
     res.json({ success: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 router.patch("/batches/:bid/subjects/:sid/chapters/:cid/edit", verifyAdmin, async (req, res) => {
   try {
-    const batch = await Batch.findById(req.params.bid);
-    const subj = batch && batch.subjects.id(req.params.sid);
-    const chap = subj && subj.chapters.id(req.params.cid);
+    const batch = db.batch.getOne(req.params.bid);
+    const subj = batch && _findById(batch.subjects, req.params.sid);
+    const chap = subj && _findById(subj.chapters, req.params.cid);
     if (!chap) return res.status(404).json({ error: "Not found" });
     if (req.body.name) chap.name = req.body.name;
     if (req.body.comingSoon !== undefined) chap.comingSoon = req.body.comingSoon;
-    await batch.save();
-    db.batch.upsert(batch.toObject());
+    db.batch.upsert(batch);
+    if (isMongo()) _mongoBackupBatch(req.params.bid);
     res.json(batch);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -353,40 +366,40 @@ router.patch("/batches/:bid/subjects/:sid/chapters/:cid/edit", verifyAdmin, asyn
 
 router.post("/batches/:bid/subjects/:sid/chapters/:cid/units", verifyAdmin, async (req, res) => {
   try {
-    const batch = await Batch.findById(req.params.bid);
-    const subj = batch && batch.subjects.id(req.params.sid);
-    const chap = subj && subj.chapters.id(req.params.cid);
+    const batch = db.batch.getOne(req.params.bid);
+    const subj = batch && _findById(batch.subjects, req.params.sid);
+    const chap = subj && _findById(subj.chapters, req.params.cid);
     if (!chap) return res.status(404).json({ error: "Not found" });
     chap.units.push({ name: req.body.name, order: chap.units.length });
-    await batch.save();
-    db.batch.upsert(batch.toObject());
+    db.batch.upsert(batch);
+    if (isMongo()) _mongoBackupBatch(req.params.bid);
     res.json(batch);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 router.delete("/batches/:bid/subjects/:sid/chapters/:cid/units/:uid", verifyAdmin, async (req, res) => {
   try {
-    const batch = await Batch.findById(req.params.bid);
-    const subj = batch && batch.subjects.id(req.params.sid);
-    const chap = subj && subj.chapters.id(req.params.cid);
+    const batch = db.batch.getOne(req.params.bid);
+    const subj = batch && _findById(batch.subjects, req.params.sid);
+    const chap = subj && _findById(subj.chapters, req.params.cid);
     if (!chap) return res.status(404).json({ error: "Not found" });
     chap.units = chap.units.filter(u => u._id.toString() !== req.params.uid);
-    await batch.save();
-    db.batch.upsert(batch.toObject());
+    db.batch.upsert(batch);
+    if (isMongo()) _mongoBackupBatch(req.params.bid);
     res.json({ success: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 router.patch("/batches/:bid/subjects/:sid/chapters/:cid/units/:uid/edit", verifyAdmin, async (req, res) => {
   try {
-    const batch = await Batch.findById(req.params.bid);
-    const subj = batch && batch.subjects.id(req.params.sid);
-    const chap = subj && subj.chapters.id(req.params.cid);
-    const unit = chap && chap.units.id(req.params.uid);
+    const batch = db.batch.getOne(req.params.bid);
+    const subj = batch && _findById(batch.subjects, req.params.sid);
+    const chap = subj && _findById(subj.chapters, req.params.cid);
+    const unit = chap && _findById(chap.units, req.params.uid);
     if (!unit) return res.status(404).json({ error: "Not found" });
     if (req.body.name) unit.name = req.body.name;
-    await batch.save();
-    db.batch.upsert(batch.toObject());
+    db.batch.upsert(batch);
+    if (isMongo()) _mongoBackupBatch(req.params.bid);
     res.json(batch);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -395,44 +408,44 @@ router.patch("/batches/:bid/subjects/:sid/chapters/:cid/units/:uid/edit", verify
 
 router.post("/batches/:bid/subjects/:sid/chapters/:cid/lectures", verifyAdmin, async (req, res) => {
   try {
-    const batch = await Batch.findById(req.params.bid);
-    const subj = batch && batch.subjects.id(req.params.sid);
-    const chap = subj && subj.chapters.id(req.params.cid);
+    const batch = db.batch.getOne(req.params.bid);
+    const subj = batch && _findById(batch.subjects, req.params.sid);
+    const chap = subj && _findById(subj.chapters, req.params.cid);
     if (!chap) return res.status(404).json({ error: "Not found" });
     chap.lectures.push({ name: req.body.name, link: req.body.link, notes: req.body.notes||"", order: chap.lectures.length, isDemo: req.body.isDemo===true });
-    await batch.save();
-    db.batch.upsert(batch.toObject());
+    db.batch.upsert(batch);
+    if (isMongo()) _mongoBackupBatch(req.params.bid);
     res.json(batch);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 router.delete("/batches/:bid/subjects/:sid/chapters/:cid/lectures/:lid", verifyAdmin, async (req, res) => {
   try {
-    const batch = await Batch.findById(req.params.bid);
-    const subj = batch && batch.subjects.id(req.params.sid);
-    const chap = subj && subj.chapters.id(req.params.cid);
+    const batch = db.batch.getOne(req.params.bid);
+    const subj = batch && _findById(batch.subjects, req.params.sid);
+    const chap = subj && _findById(subj.chapters, req.params.cid);
     if (!chap) return res.status(404).json({ error: "Not found" });
     chap.lectures = chap.lectures.filter(l => l._id.toString() !== req.params.lid);
-    await batch.save();
-    db.batch.upsert(batch.toObject());
+    db.batch.upsert(batch);
+    if (isMongo()) _mongoBackupBatch(req.params.bid);
     res.json({ success: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 router.patch("/batches/:bid/subjects/:sid/chapters/:cid/lectures/:lid/edit", verifyAdmin, async (req, res) => {
   try {
-    const batch = await Batch.findById(req.params.bid);
-    const subj = batch && batch.subjects.id(req.params.sid);
-    const chap = subj && subj.chapters.id(req.params.cid);
-    const lec = chap && chap.lectures.id(req.params.lid);
+    const batch = db.batch.getOne(req.params.bid);
+    const subj = batch && _findById(batch.subjects, req.params.sid);
+    const chap = subj && _findById(subj.chapters, req.params.cid);
+    const lec = chap && _findById(chap.lectures, req.params.lid);
     if (!lec) return res.status(404).json({ error: "Not found" });
     if (req.body.name) lec.name = req.body.name;
     if (req.body.link !== undefined) lec.link = req.body.link;
     if (req.body.notes !== undefined) lec.notes = req.body.notes;
     if (req.body.comingSoon !== undefined) lec.comingSoon = req.body.comingSoon;
     if (req.body.isDemo !== undefined) lec.isDemo = req.body.isDemo;
-    await batch.save();
-    db.batch.upsert(batch.toObject());
+    db.batch.upsert(batch);
+    if (isMongo()) _mongoBackupBatch(req.params.bid);
     res.json(batch);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -441,47 +454,47 @@ router.patch("/batches/:bid/subjects/:sid/chapters/:cid/lectures/:lid/edit", ver
 
 router.post("/batches/:bid/subjects/:sid/chapters/:cid/units/:uid/lectures", verifyAdmin, async (req, res) => {
   try {
-    const batch = await Batch.findById(req.params.bid);
-    const subj = batch && batch.subjects.id(req.params.sid);
-    const chap = subj && subj.chapters.id(req.params.cid);
-    const unit = chap && chap.units.id(req.params.uid);
+    const batch = db.batch.getOne(req.params.bid);
+    const subj = batch && _findById(batch.subjects, req.params.sid);
+    const chap = subj && _findById(subj.chapters, req.params.cid);
+    const unit = chap && _findById(chap.units, req.params.uid);
     if (!unit) return res.status(404).json({ error: "Not found" });
     unit.lectures.push({ name: req.body.name, link: req.body.link, notes: req.body.notes||"", order: unit.lectures.length, isDemo: req.body.isDemo===true });
-    await batch.save();
-    db.batch.upsert(batch.toObject());
+    db.batch.upsert(batch);
+    if (isMongo()) _mongoBackupBatch(req.params.bid);
     res.json(batch);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 router.delete("/batches/:bid/subjects/:sid/chapters/:cid/units/:uid/lectures/:lid", verifyAdmin, async (req, res) => {
   try {
-    const batch = await Batch.findById(req.params.bid);
-    const subj = batch && batch.subjects.id(req.params.sid);
-    const chap = subj && subj.chapters.id(req.params.cid);
-    const unit = chap && chap.units.id(req.params.uid);
+    const batch = db.batch.getOne(req.params.bid);
+    const subj = batch && _findById(batch.subjects, req.params.sid);
+    const chap = subj && _findById(subj.chapters, req.params.cid);
+    const unit = chap && _findById(chap.units, req.params.uid);
     if (!unit) return res.status(404).json({ error: "Not found" });
     unit.lectures = unit.lectures.filter(l => l._id.toString() !== req.params.lid);
-    await batch.save();
-    db.batch.upsert(batch.toObject());
+    db.batch.upsert(batch);
+    if (isMongo()) _mongoBackupBatch(req.params.bid);
     res.json({ success: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 router.patch("/batches/:bid/subjects/:sid/chapters/:cid/units/:uid/lectures/:lid/edit", verifyAdmin, async (req, res) => {
   try {
-    const batch = await Batch.findById(req.params.bid);
-    const subj = batch && batch.subjects.id(req.params.sid);
-    const chap = subj && subj.chapters.id(req.params.cid);
-    const unit = chap && chap.units.id(req.params.uid);
-    const lec = unit && unit.lectures.id(req.params.lid);
+    const batch = db.batch.getOne(req.params.bid);
+    const subj = batch && _findById(batch.subjects, req.params.sid);
+    const chap = subj && _findById(subj.chapters, req.params.cid);
+    const unit = chap && _findById(chap.units, req.params.uid);
+    const lec = unit && _findById(unit.lectures, req.params.lid);
     if (!lec) return res.status(404).json({ error: "Not found" });
     if (req.body.name) lec.name = req.body.name;
     if (req.body.link !== undefined) lec.link = req.body.link;
     if (req.body.notes !== undefined) lec.notes = req.body.notes;
     if (req.body.comingSoon !== undefined) lec.comingSoon = req.body.comingSoon;
     if (req.body.isDemo !== undefined) lec.isDemo = req.body.isDemo;
-    await batch.save();
-    db.batch.upsert(batch.toObject());
+    db.batch.upsert(batch);
+    if (isMongo()) _mongoBackupBatch(req.params.bid);
     res.json(batch);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -501,16 +514,18 @@ router.post("/announcements", verifyAdmin, async (req, res) => {
     const { emoji, heading, body } = req.body;
     if (!heading || !body) return res.status(400).json({ error: "heading and body required" });
     // Write to MongoDB to get _id
-    const ann = await Announcement.create({ emoji: emoji||"📢", heading, body });
-    db.announcement.insert({ id: String(ann._id), emoji: ann.emoji, heading: ann.heading, body: ann.body, createdAt: ann.createdAt });
-    res.json({ ...ann.toObject(), _id: String(ann._id) });
+    const annId = new (require('mongoose').Types.ObjectId)().toString();
+    const annCreatedAt = new Date();
+    db.announcement.insert({ id: annId, emoji: emoji||"📢", heading, body, createdAt: annCreatedAt });
+    if (isMongo()) Announcement.create({ _id: annId, emoji: emoji||"📢", heading, body, createdAt: annCreatedAt }).catch(() => {});
+    res.json({ _id: annId, emoji: emoji||"📢", heading, body, createdAt: annCreatedAt });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 router.delete("/announcements/:id", verifyAdmin, async (req, res) => {
   try {
-    await Announcement.findByIdAndDelete(req.params.id);
     db.announcement.delete(req.params.id);
+    if (isMongo()) Announcement.findByIdAndDelete(req.params.id).catch(() => {});
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -544,7 +559,7 @@ router.post("/access/token/:userId", async (req, res) => {
     if (claimsToday >= 3) return res.status(429).json({ error: "Aaj ke 3 claims ho gaye! Kal wapas aao.", claimsToday: 3, claimsLeft: 0 });
 
     db.adToken.deleteByUser(userId);
-    await AdToken.deleteMany({ userId });
+    if (isMongo()) AdToken.deleteMany({ userId }).catch(() => {});
 
     const token = crypto.randomBytes(32).toString("hex");
     const tokenExpiry = new Date(Date.now() + 10 * 60 * 1000);
@@ -696,15 +711,13 @@ router.post('/refer/redeem', async (req, res) => {
 
     // Current points check
     const totalPoints = db.referral.countByReferrer(userId);
-    const usedPoints = db.pointsUsage.getTotalUsed(userId);
+    const usedPoints = db.referral.getUsedPoints ? db.referral.getUsedPoints(userId) : 0;
     const availablePoints = totalPoints - usedPoints;
     if (availablePoints < tierInfo.cost) {
       return res.status(400).json({ error: `Insufficient points. ${tierInfo.cost} chahiye, tumhare paas ${availablePoints} hain.` });
     }
 
-    // Record points usage in SQLite (primary) + MongoDB (backup)
-    const usageId = db.generateId();
-    db.pointsUsage.insert({ id: usageId, userId, pointsUsed: tierInfo.cost, tier, batchId: batchId || null });
+    // Record points usage in MongoDB (SQLite fallback)
     const PointsUsage = mongoose.models.PointsUsage || mongoose.model('PointsUsage', new mongoose.Schema({
       userId: { type: String, required: true },
       pointsUsed: { type: Number, required: true },
@@ -712,7 +725,10 @@ router.post('/refer/redeem', async (req, res) => {
       batchId: String,
       createdAt: { type: Date, default: Date.now }
     }));
-    PointsUsage.create({ userId, pointsUsed: tierInfo.cost, tier, batchId: batchId || null }).catch(() => {});
+
+    const usageId2 = new (require('mongoose').Types.ObjectId)().toString();
+    db.pointsUsage.insert({ id: usageId2, userId, pointsUsed: tierInfo.cost, tier, batchId: batchId || null });
+    if (isMongo()) PointsUsage.create({ userId, pointsUsed: tierInfo.cost, tier, batchId: batchId || null }).catch(() => {});
 
     // Helper: get user info from Telegram (best-effort)
     async function getTgUserInfo(uid) {
@@ -784,8 +800,8 @@ router.post('/refer/redeem', async (req, res) => {
 
     if (tier === 'premium_1d' || tier === 'premium_7d') {
       const days = tier === 'premium_1d' ? 1 : 7;
-      // Add user to batch premiumUsers with expiry
-      const batch = await Batch.findById(batchId);
+      // Add user to batch premiumUsers with expiry — SQLite first
+      const batch = db.batch.getOne(batchId);
       if (!batch) return res.status(404).json({ error: 'Batch not found' });
       if (!batch.isPremium) return res.status(400).json({ error: 'Yeh batch premium nahi hai' });
 
@@ -793,8 +809,8 @@ router.post('/refer/redeem', async (req, res) => {
       if (!batch.premiumUsers) batch.premiumUsers = [];
       if (!batch.premiumUsers.includes(uid)) {
         batch.premiumUsers.push(uid);
-        await batch.save();
-        db.batch.upsert(batch.toObject());
+        db.batch.upsert(batch);
+        if (isMongo()) Batch.findByIdAndUpdate(batchId, { $addToSet: { premiumUsers: uid } }).catch(() => {});
       }
 
       // Schedule removal after N days (store expiry in MongoDB)
@@ -802,7 +818,7 @@ router.post('/refer/redeem', async (req, res) => {
         userId: String, batchId: String, expiresAt: Date, removed: { type: Boolean, default: false }
       }));
       const expiresAt = new Date(Date.now() + days * 24 * 60 * 60 * 1000);
-      await PremiumExpiry.create({ userId: uid, batchId, expiresAt });
+      if (isMongo()) await PremiumExpiry.create({ userId: uid, batchId, expiresAt }).catch(() => {});
 
       // Notify owner
       const userRec2 = await getTgUserInfo(userId);
@@ -844,8 +860,10 @@ router.get('/refer/points/:userId', async (req, res) => {
   try {
     const userId = req.params.userId;
     const totalPoints = db.referral.countByReferrer(userId);
+
     const usedPoints = db.pointsUsage.getTotalUsed(userId);
     const availablePoints = Math.max(0, totalPoints - usedPoints);
+
     res.json({ totalPoints, usedPoints, availablePoints });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -980,10 +998,13 @@ router.post('/coupons', verifyAdmin, async (req, res) => {
   try {
     const { code, discountPct, expiresAt, isActive, batchIds } = req.body;
     if (!code || !discountPct || !expiresAt) return res.status(400).json({ error: 'code, discountPct, expiresAt required' });
-    // Write to MongoDB to get _id
-    const c = await Coupon.create({ code: code.toUpperCase().trim(), discountPct: Number(discountPct), expiresAt: new Date(expiresAt), isActive: isActive!==false, batchIds: Array.isArray(batchIds) ? batchIds.filter(Boolean) : [] });
-    db.coupon.insert({ id: String(c._id), code: c.code, discountPct: c.discountPct, expiresAt: c.expiresAt, isActive: c.isActive, batchIds: c.batchIds, createdAt: c.createdAt });
-    res.json(db.coupon.findById(String(c._id)));
+    const cId = new (require('mongoose').Types.ObjectId)().toString();
+    const cCode = code.toUpperCase().trim();
+    const cExpiry = new Date(expiresAt);
+    const cBatchIds = Array.isArray(batchIds) ? batchIds.filter(Boolean) : [];
+    db.coupon.insert({ id: cId, code: cCode, discountPct: Number(discountPct), expiresAt: cExpiry, isActive: isActive!==false, batchIds: cBatchIds, createdAt: new Date() });
+    if (isMongo()) Coupon.create({ _id: cId, code: cCode, discountPct: Number(discountPct), expiresAt: cExpiry, isActive: isActive!==false, batchIds: cBatchIds }).catch(() => {});
+    res.json(db.coupon.findById(cId));
   } catch (e) {
     if (e.code === 11000) return res.status(400).json({ error: 'Coupon code already exists' });
     res.status(500).json({ error: e.message });
@@ -992,8 +1013,8 @@ router.post('/coupons', verifyAdmin, async (req, res) => {
 
 router.delete('/coupons/:id', verifyAdmin, async (req, res) => {
   try {
-    await Coupon.findByIdAndDelete(req.params.id);
     db.coupon.delete(req.params.id);
+    if (isMongo()) Coupon.findByIdAndDelete(req.params.id).catch(() => {});
     res.json({ success: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
