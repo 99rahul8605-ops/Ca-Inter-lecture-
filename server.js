@@ -92,7 +92,9 @@ async function saveToStorageChannel(bot, fileInfo) {
   if (!STORAGE_CHANNEL_ID) return fileInfo;
   try {
     let sentMsg;
-    const caption = fileInfo.caption || `📎 ${fileInfo.file_name}`;
+    // Caption is just the plain file_name — same name as stored/shown in DB,
+    // no emoji prefix, no original Telegram caption.
+    const caption = fileInfo.file_name;
     switch(fileInfo.file_type) {
       case "photo":      sentMsg = await bot.sendPhoto(STORAGE_CHANNEL_ID, fileInfo.file_id, { caption }); break;
       case "video":      sentMsg = await bot.sendVideo(STORAGE_CHANNEL_ID, fileInfo.file_id, { caption }); break;
@@ -108,7 +110,7 @@ async function saveToStorageChannel(bot, fileInfo) {
 }
 
 async function sendFile(bot, chatId, record) {
-  const caption = `📎 ${record.file_name}`;
+  const caption = record.file_name;
   const protect = !isOwner(chatId);
   try {
     switch(record.file_type) {
@@ -488,7 +490,7 @@ async function startBot() {
         await bot.deleteMessage(chatId,forwarded.message_id).catch(()=>{});
         const session=bulkSessions.get(userId);
         if(session){session.files.push(fileInfo);return bot.editMessageText(`✅ File ${session.files.length} added: ${fileInfo.file_name}\n📦 Total: ${session.files.length}\n\nSend more or /done`,{chat_id:chatId,message_id:processing.message_id});}
-        const stored=await saveToStorageChannel(bot,fileInfo); stored.file_name=cleanFileName(stored.file_name);
+        fileInfo.file_name=cleanFileName(fileInfo.file_name); const stored=await saveToStorageChannel(bot,fileInfo);
         const code=getUniqueCode(); const id=db.generateId();
         db.fileRecord.create({id,code,file_id:stored.file_id,file_type:stored.file_type,file_name:stored.file_name,uploaded_by:userId,channel_msg_id:stored.channel_msg_id||null});
         if (mongoConnected) FileRecord.create({code,file_id:stored.file_id,file_type:stored.file_type,file_name:stored.file_name,uploaded_by:userId,expires_at:null,channel_msg_id:stored.channel_msg_id||null}).catch(()=>{});
@@ -524,7 +526,7 @@ async function startBot() {
     enqueueFile(userId, async () => {
       const processing=await bot.sendMessage(chatId,`⏳ Saving: ${fileInfo.file_name}...`);
       try {
-        const stored=await saveToStorageChannel(bot,fileInfo); stored.file_name=cleanFileName(stored.file_name);
+        fileInfo.file_name=cleanFileName(fileInfo.file_name); const stored=await saveToStorageChannel(bot,fileInfo);
         const code=getUniqueCode(); const id=db.generateId();
         db.fileRecord.create({id,code,file_id:stored.file_id,file_type:stored.file_type,file_name:stored.file_name,uploaded_by:userId,channel_msg_id:stored.channel_msg_id||null});
         if (mongoConnected) FileRecord.create({code,file_id:stored.file_id,file_type:stored.file_type,file_name:stored.file_name,uploaded_by:userId,expires_at:null,channel_msg_id:stored.channel_msg_id||null}).catch(()=>{});
