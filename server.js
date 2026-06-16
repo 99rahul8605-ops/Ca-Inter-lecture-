@@ -237,14 +237,13 @@ async function startBot() {
       if (param.startsWith("ref_")) {
         const referrerId = param.replace("ref_","");
         bot.sendMessage(chatId, `👋 Hello ${msg.from.first_name}!\n\nTap below to browse all lectures! 📚`, { reply_markup:{ inline_keyboard:[[{ text:"📚 Browse Lectures", web_app:{ url:WEB_URL } }]] } });
-        if (referrerId && referrerId !== String(userId)) {
+        // Sirf pending referral store karo — point milega pehla lecture dekhne ke baad
+        if (referrerId && referrerId !== String(userId) && isNewUser) {
           try {
-            const r = await fetch(`http://localhost:${PORT}/api/refer/record`, { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ referrerId, referredId: String(userId), isNewUser }) });
-            const d = await r.json();
-            if (d.isNew) {
-              const s = await (await fetch(`http://localhost:${PORT}/api/refer/stats/${referrerId}`)).json();
-              bot.sendMessage(parseInt(referrerId), `🎉 <b>New Referral!</b>\n\n${msg.from.first_name} joined using your link!\n⭐ <b>+1 Point!</b> Total: <b>${s.points}</b>`, { parse_mode:"HTML" }).catch(() => {});
-            }
+            await fetch(`http://localhost:${PORT}/api/refer/record`, {
+              method:"POST", headers:{"Content-Type":"application/json"},
+              body: JSON.stringify({ referrerId, referredId: String(userId), isNewUser, pending: true })
+            });
           } catch (_) {}
         }
         return;
@@ -283,6 +282,29 @@ async function startBot() {
           db.fileRecord.addDeliveredTo(record.id,chatId);
           FileRecord.updateOne({ code:record.code },{ $addToSet:{ delivered_to:chatId } }).catch(() => {});
           setTimeout(() => { db.fileRecord.removeDeliveredTo(record.id,chatId); FileRecord.updateOne({ code:record.code },{ $pull:{ delivered_to:chatId } }).catch(() => {}); }, 6*60*60*1000);
+
+          // Pehla lecture watch hone pe referral confirm karo aur referrer ko point do
+          (async () => {
+            try {
+              const r = await fetch(`http://localhost:${PORT}/api/refer/confirm-first-watch`, {
+                method:"POST", headers:{"Content-Type":"application/json"},
+                body: JSON.stringify({ referredId: String(userId) })
+              });
+              const d = await r.json();
+              if (d.confirmed && d.referrerId) {
+                const referrerInfo = db.user.findOne(d.referrerId);
+                const referrerName = referrerInfo ? (referrerInfo.firstName || 'User') : 'User';
+                const s = await (await fetch(`http://localhost:${PORT}/api/refer/stats/${d.referrerId}`)).json();
+                bot.sendMessage(parseInt(d.referrerId),
+                  `🎉 <b>Point Mila!</b>\n\n` +
+                  `${msg.from.first_name} ne apna pehla lecture dekha!\n` +
+                  `⭐ <b>+1 Point!</b> Total: <b>${s.points}</b>`,
+                  { parse_mode:"HTML" }
+                ).catch(() => {});
+              }
+            } catch (_) {}
+          })();
+
           const lines=[`⚠️ This video auto-deletes in 6 hours.`,``,`📊 <b>Today:</b> ${lim.used}/${DAILY_VIDEO_LIMIT} videos`];
           if(lim.remaining===0) lines.push(`🚫 Limit reached for today!`);
           else if(lim.remaining<=3) lines.push(`⚠️ Only <b>${lim.remaining}</b> left today!`);

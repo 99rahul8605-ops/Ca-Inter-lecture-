@@ -151,7 +151,26 @@ function _setupTables(db) {
       count     INTEGER DEFAULT 0,
       resetDate TEXT NOT NULL
     );
-  `);
+
+    -- Pending referrals (confirmed hone se pehle)
+    CREATE TABLE IF NOT EXISTS pending_referrals (
+      referredId  TEXT PRIMARY KEY,
+      referrerId  TEXT NOT NULL,
+      confirmed   INTEGER DEFAULT 0,
+      createdAt   INTEGER DEFAULT 0
+    );
+
+    -- Points usage (redeem history)
+    CREATE TABLE IF NOT EXISTS points_usage (
+      id          TEXT PRIMARY KEY,
+      userId      TEXT NOT NULL,
+      pointsUsed  INTEGER NOT NULL,
+      tier        TEXT,
+      batchId     TEXT,
+      createdAt   INTEGER DEFAULT 0
+    );
+    CREATE INDEX IF NOT EXISTS idx_points_usage_user ON points_usage(userId);
+  \`);
 }
 
 // ── Startup Sync from MongoDB ─────────────────────────────────────────────────
@@ -680,6 +699,34 @@ const dailyVideoLimit = {
   },
 };
 
+// ── PENDING REFERRAL Operations ──────────────────────────────────────────────
+
+const pendingReferral = {
+  upsert({ referredId, referrerId }) {
+    getDb().prepare(`INSERT INTO pending_referrals(referredId,referrerId,confirmed,createdAt)
+      VALUES(?,?,0,?) ON CONFLICT(referredId) DO NOTHING`)
+      .run(referredId, referrerId, Date.now());
+  },
+  findByReferred(referredId) {
+    return getDb().prepare(`SELECT * FROM pending_referrals WHERE referredId=? AND confirmed=0`).get(referredId);
+  },
+  confirm(referredId) {
+    getDb().prepare(`UPDATE pending_referrals SET confirmed=1 WHERE referredId=?`).run(referredId);
+  },
+};
+
+// ── POINTS USAGE Operations ───────────────────────────────────────────────────
+
+const pointsUsage = {
+  insert({ id, userId, pointsUsed, tier, batchId }) {
+    getDb().prepare(`INSERT INTO points_usage(id,userId,pointsUsed,tier,batchId,createdAt) VALUES(?,?,?,?,?,?)`)
+      .run(id, userId, pointsUsed, tier||null, batchId||null, Date.now());
+  },
+  getTotalUsed(userId) {
+    return getDb().prepare(`SELECT SUM(pointsUsed) as total FROM points_usage WHERE userId=?`).get(userId).total || 0;
+  },
+};
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function generateId() {
@@ -695,6 +742,8 @@ module.exports = {
   access,
   adToken,
   referral,
+  pendingReferral,
+  pointsUsage,
   coupon,
   autoLec,
   fileRecord,
