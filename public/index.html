@@ -1455,7 +1455,11 @@ function handlePic(input) {
 // ── Admin ─────────────────────────────────────────────────────────────────────
 async function checkAdminAccess() {
   try {
-    var config = await (await fetch('/api/config')).json();
+    var cfgController = new AbortController();
+    var cfgTimer = setTimeout(function(){ cfgController.abort(); }, 8000);
+    var configRes = await fetch('/api/config', { signal: cfgController.signal });
+    clearTimeout(cfgTimer);
+    var config = await configRes.json();
     var ownerId = config.ownerId;
     if (config.botUsername) window._botUsername = config.botUsername;
     if (config.upiId) window._upiId = config.upiId;
@@ -2882,11 +2886,15 @@ async function checkForceJoin() {
   }
 
   try {
+    var fjController = new AbortController();
+    var fjTimer = setTimeout(function(){ fjController.abort(); }, 8000); // hard cap — don't let verifying screen hang forever
     var r = await fetch('/api/force-join/check', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ userId }),
+      signal: fjController.signal,
     });
+    clearTimeout(fjTimer);
     var data = await r.json();
     _fjChannels = data.channels || [];
 
@@ -3006,26 +3014,31 @@ function _hideVS(cb){var el=document.getElementById('verifyingScreen');if(!el||e
 async function init() {
   initTheme();
   _animateVsBar();
-  await checkAdminAccess();
+  try {
+    await checkAdminAccess();
 
-  var passed = await checkForceJoin();
-  if (!passed) {
+    var passed = await checkForceJoin();
+    if (!passed) {
+      return;
+    }
+
+    await Promise.all([load(), loadAccess(), loadAnnouncements()]);
+    var dot = document.getElementById('accessDot');
+    if (dot) dot.style.background = hasAccess() ? 'var(--green)' : 'var(--red)';
+    var banner = document.getElementById('accessBanner');
+    if (banner) banner.innerHTML = '';
+    var lockedMsg = document.getElementById('lockedMsg');
+    if (lockedMsg) lockedMsg.style.display = 'none';
+    var batchSection = document.getElementById('batchSection');
+    if (batchSection) batchSection.style.display = '';
+    updateHomeTimer();
+    if (hasAccess()) startCountdown();
+  } catch (e) {
+    console.error('init() failed:', e);
+  } finally {
+    // No matter what happens above, never leave the user stuck on the verifying screen.
     _hideVS();
-    return;
   }
-
-  await Promise.all([load(), loadAccess(), loadAnnouncements()]);
-  var dot = document.getElementById('accessDot');
-  if (dot) dot.style.background = hasAccess() ? 'var(--green)' : 'var(--red)';
-  var banner = document.getElementById('accessBanner');
-  if (banner) banner.innerHTML = '';
-  var lockedMsg = document.getElementById('lockedMsg');
-  if (lockedMsg) lockedMsg.style.display = 'none';
-  var batchSection = document.getElementById('batchSection');
-  if (batchSection) batchSection.style.display = '';
-  updateHomeTimer();
-  if (hasAccess()) startCountdown();
-  _hideVS();
 }
 init();
 
