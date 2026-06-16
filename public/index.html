@@ -3563,7 +3563,7 @@ function _openRewardBatchPicker(type, cost) {
     iconEl.textContent = '🏆';
   }
 
-  var allBatches = batches.filter(function(b) { return b.isPublic === true; });
+  var allBatches = batches.filter(function(b) { return b.isPremium === true; });
   if (!allBatches.length) {
     listEl.innerHTML = '<div style="text-align:center;color:var(--text2);padding:20px;font-size:13px">Koi batch available nahi</div>';
   } else {
