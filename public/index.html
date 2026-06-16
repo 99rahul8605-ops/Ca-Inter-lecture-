@@ -818,33 +818,55 @@ body.ready{transition:none}
 
     <!-- Rewards card -->
     <div class="card" style="margin-bottom:14px;border:1px solid rgba(245,158,11,0.25)">
-      <div style="font-size:13px;font-weight:600;margin-bottom:10px;color:var(--text)">🎁 Rewards</div>
+      <div style="font-size:13px;font-weight:600;margin-bottom:4px;color:var(--text)">🎁 Rewards</div>
+      <div id="rewardPointsBar" style="font-size:11px;color:var(--text2);margin-bottom:12px">Points: <strong id="rewardPointsDisplay" style="color:#f59e0b">–</strong></div>
+
+      <!-- Reward 1: 1 Point → 24h general access -->
       <div style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--surface2);border-radius:var(--radius-sm);margin-bottom:8px">
-        <span style="font-size:22px">🏆</span>
-        <div>
-          <div style="font-size:12px;font-weight:600;color:var(--text)">Free Access Pass</div>
-          <div style="font-size:11px;color:var(--text2)">Redeem with points for free lecture access</div>
+        <span style="font-size:22px">🔓</span>
+        <div style="flex:1">
+          <div style="font-size:12px;font-weight:600;color:var(--text)">24h Free Access</div>
+          <div style="font-size:11px;color:var(--text2)">Sabhi free batches ke liye 24 ghante access</div>
+          <div style="font-size:11px;color:#f59e0b;font-weight:700;margin-top:2px">1 Point</div>
         </div>
-        <span class="coming-soon-badge" style="margin-left:auto">🔜 Soon</span>
+        <button onclick="redeemReward('access_24h', 1)" style="background:linear-gradient(135deg,#f59e0b,#d97706);border:none;color:#fff;border-radius:8px;padding:6px 12px;font-size:11px;font-weight:700;cursor:pointer;flex-shrink:0">Redeem</button>
       </div>
+
+      <!-- Reward 2: 5 Points → Any 1 batch 24h access -->
       <div style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--surface2);border-radius:var(--radius-sm);margin-bottom:8px">
-        <span style="font-size:22px">⭐</span>
-        <div>
-          <div style="font-size:12px;font-weight:600;color:var(--text)">Bonus Points</div>
-          <div style="font-size:11px;color:var(--text2)">Extra points for milestone referrals</div>
+        <span style="font-size:22px">📚</span>
+        <div style="flex:1">
+          <div style="font-size:12px;font-weight:600;color:var(--text)">Koi bhi 1 Batch — 24h Access</div>
+          <div style="font-size:11px;color:var(--text2)">Apni choice ka koi bhi batch 24 ghante ke liye unlock</div>
+          <div style="font-size:11px;color:#f59e0b;font-weight:700;margin-top:2px">5 Points</div>
         </div>
-        <span class="coming-soon-badge" style="margin-left:auto">🔜 Soon</span>
+        <button onclick="redeemReward('batch_24h', 5)" style="background:linear-gradient(135deg,var(--accent),var(--accent2));border:none;color:#fff;border-radius:8px;padding:6px 12px;font-size:11px;font-weight:700;cursor:pointer;flex-shrink:0">Redeem</button>
       </div>
+
+      <!-- Reward 3: 20 Points → Any 1 batch 7 days access -->
       <div style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--surface2);border-radius:var(--radius-sm)">
-        <span style="font-size:22px">🎟️</span>
-        <div>
-          <div style="font-size:12px;font-weight:600;color:var(--text)">Special Batch Access</div>
-          <div style="font-size:11px;color:var(--text2)">Unlock premium batches with points</div>
+        <span style="font-size:22px">🏆</span>
+        <div style="flex:1">
+          <div style="font-size:12px;font-weight:600;color:var(--text)">Koi bhi 1 Batch — 7 Din Access</div>
+          <div style="font-size:11px;color:var(--text2)">Apni choice ka koi bhi batch 7 din ke liye unlock</div>
+          <div style="font-size:11px;color:#f59e0b;font-weight:700;margin-top:2px">20 Points</div>
         </div>
-        <span class="coming-soon-badge" style="margin-left:auto">🔜 Soon</span>
+        <button onclick="redeemReward('batch_7d', 20)" style="background:linear-gradient(135deg,#22c55e,#16a34a);border:none;color:#fff;border-radius:8px;padding:6px 12px;font-size:11px;font-weight:700;cursor:pointer;flex-shrink:0">Redeem</button>
       </div>
+
       <div style="margin-top:12px;font-size:11px;color:var(--text3);text-align:center">
-        Each referral = <strong style="color:#f59e0b">1 point</strong> · Rewards launching soon!
+        Each referral = <strong style="color:#f59e0b">1 point</strong>
+      </div>
+    </div>
+
+    <!-- Reward Batch Picker Modal (shown when batch_24h or batch_7d selected) -->
+    <div id="rewardBatchPickerOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:600;align-items:flex-end;justify-content:center" onclick="if(event.target.id==='rewardBatchPickerOverlay')closeRewardBatchPicker()">
+      <div style="background:var(--surface);border-radius:20px 20px 0 0;width:100%;max-width:480px;max-height:80vh;overflow-y:auto;padding:20px 16px 32px">
+        <div style="width:40px;height:4px;background:var(--border);border-radius:2px;margin:0 auto 16px"></div>
+        <div style="font-size:15px;font-weight:700;margin-bottom:4px;display:flex;align-items:center;gap:8px"><span id="rewardBatchPickerIcon">📚</span><span id="rewardBatchPickerTitle">Batch chuno</span></div>
+        <div style="font-size:12px;color:var(--text2);margin-bottom:16px" id="rewardBatchPickerDesc">Jo batch unlock karni ho usse select karo</div>
+        <div id="rewardBatchPickerList" style="display:flex;flex-direction:column;gap:8px"></div>
+        <button onclick="closeRewardBatchPicker()" style="width:100%;margin-top:14px;background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:var(--radius-sm);padding:11px;font-size:13px;font-weight:600;cursor:pointer">Cancel</button>
       </div>
     </div>
 
@@ -866,7 +888,7 @@ body.ready{transition:none}
         </div>
         <div style="display:flex;align-items:center;gap:10px">
           <div style="width:24px;height:24px;border-radius:50%;background:var(--accent);color:#fff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0">4</div>
-          <div style="font-size:12px;color:var(--text2)">Redeem points for rewards (coming soon!)</div>
+          <div style="font-size:12px;color:var(--text2)">Points se rewards redeem karo — access pao!</div>
         </div>
       </div>
     </div>
@@ -3436,6 +3458,152 @@ function shareReferLink() {
     tg.openLink(shareUrl, { try_instant_view: false });
   } else {
     window.open(shareUrl, '_blank');
+  }
+}
+
+// ── Reward Redemption ─────────────────────────────────────────────────────────
+var _rewardType = null;   // 'access_24h' | 'batch_24h' | 'batch_7d'
+var _rewardCost = 0;
+var _currentReferPoints = 0;
+
+// Called on refer page load — sync points display
+var _origLoadReferStats = loadReferStats;
+loadReferStats = async function() {
+  await _origLoadReferStats();
+  // sync points to reward bar display
+  var pe = document.getElementById('referPoints');
+  var rd = document.getElementById('rewardPointsDisplay');
+  if (pe && rd) rd.textContent = pe.textContent;
+  try { _currentReferPoints = parseInt(pe && pe.textContent) || 0; } catch(e){}
+};
+
+async function redeemReward(type, cost) {
+  var uid = getUserId();
+  if (!uid) return toast('Telegram se open karo!', 'error');
+
+  // Fetch latest points first
+  try {
+    var r = await fetch('/api/refer/stats/' + uid);
+    var data = await r.json();
+    _currentReferPoints = data.points || 0;
+    var pd = document.getElementById('rewardPointsDisplay');
+    if (pd) pd.textContent = _currentReferPoints;
+    var pe = document.getElementById('referPoints');
+    if (pe) pe.textContent = _currentReferPoints;
+  } catch(e) {}
+
+  if (_currentReferPoints < cost) {
+    return toast('Points kam hain! Aapke paas ' + _currentReferPoints + ' points hain, ' + cost + ' chahiye.', 'error');
+  }
+
+  if (type === 'access_24h') {
+    // Direct redeem — no batch selection needed
+    if (!confirm('1 point use karke 24h access lena chahte ho?')) return;
+    await _executeReward(type, cost, null);
+  } else {
+    // batch_24h or batch_7d — show batch picker
+    _rewardType = type;
+    _rewardCost = cost;
+    _openRewardBatchPicker(type, cost);
+  }
+}
+
+function _openRewardBatchPicker(type, cost) {
+  var overlay = document.getElementById('rewardBatchPickerOverlay');
+  var titleEl = document.getElementById('rewardBatchPickerTitle');
+  var descEl = document.getElementById('rewardBatchPickerDesc');
+  var listEl = document.getElementById('rewardBatchPickerList');
+  var iconEl = document.getElementById('rewardBatchPickerIcon');
+
+  if (type === 'batch_24h') {
+    titleEl.textContent = '24h Batch Access';
+    descEl.textContent = '5 points use hoenge. Kaun sa batch unlock karna chahte ho?';
+    iconEl.textContent = '📚';
+  } else {
+    titleEl.textContent = '7 Din Batch Access';
+    descEl.textContent = '20 points use hoenge. Kaun sa batch unlock karna chahte ho?';
+    iconEl.textContent = '🏆';
+  }
+
+  var allBatches = batches.filter(function(b) { return b.isPublic === true; });
+  if (!allBatches.length) {
+    listEl.innerHTML = '<div style="text-align:center;color:var(--text2);padding:20px;font-size:13px">Koi batch available nahi</div>';
+  } else {
+    listEl.innerHTML = allBatches.map(function(b) {
+      return '<div onclick="selectRewardBatch(\'' + b._id + '\')" style="display:flex;align-items:center;gap:12px;padding:12px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);cursor:pointer;transition:border-color 0.15s" onmouseenter="this.style.borderColor=\'var(--accent)\'" onmouseleave="this.style.borderColor=\'var(--border)\'">' +
+        '<div style="width:40px;height:40px;border-radius:10px;background:var(--surface3);display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0;overflow:hidden">' +
+          (b.pic ? '<img src="' + b.pic + '" style="width:100%;height:100%;object-fit:cover;border-radius:10px">' : '🎓') +
+        '</div>' +
+        '<div style="flex:1;min-width:0">' +
+          '<div style="font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + b.name + '</div>' +
+          '<div style="font-size:11px;color:var(--text2);margin-top:2px">' + b.subjects.length + ' subjects</div>' +
+        '</div>' +
+        '<i class="ti ti-chevron-right" style="color:var(--text3);font-size:16px;flex-shrink:0"></i>' +
+      '</div>';
+    }).join('');
+  }
+
+  overlay.style.display = 'flex';
+}
+
+function closeRewardBatchPicker() {
+  document.getElementById('rewardBatchPickerOverlay').style.display = 'none';
+  _rewardType = null;
+  _rewardCost = 0;
+}
+
+async function selectRewardBatch(batchId) {
+  closeRewardBatchPicker();
+  var b = batches.find(function(x) { return x._id === batchId; });
+  var bName = b ? b.name : 'selected batch';
+  var duration = _rewardType === 'batch_24h' ? '24 ghante' : '7 din';
+  if (!confirm('"' + bName + '" ko ' + duration + ' ke liye unlock karna chahte ho? ' + _rewardCost + ' points use honge.')) return;
+  await _executeReward(_rewardType, _rewardCost, batchId);
+}
+
+async function _executeReward(type, cost, batchId) {
+  var uid = getUserId();
+  try {
+    var body = { type: type, cost: cost };
+    if (batchId) body.batchId = batchId;
+    var r = await fetch('/api/refer/redeem', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId: uid, ...body })
+    });
+    var data = await r.json();
+    if (data.error) return toast('Error: ' + data.error, 'error');
+
+    // Update UI points
+    _currentReferPoints = data.points != null ? data.points : (_currentReferPoints - cost);
+    var pe = document.getElementById('referPoints');
+    if (pe) pe.textContent = _currentReferPoints;
+    var pd = document.getElementById('rewardPointsDisplay');
+    if (pd) pd.textContent = _currentReferPoints;
+
+    // If general 24h access — update access timer
+    if (type === 'access_24h' && data.expiresAt) {
+      accessExpiresAt = data.expiresAt;
+      localStorage.setItem('edubot_access_expires', data.expiresAt);
+      updateHomeTimer();
+      startCountdown();
+      var dot = document.getElementById('accessDot');
+      if (dot) dot.style.background = 'var(--green)';
+      toast('🎉 24h access mil gaya! Points: ' + _currentReferPoints + ' bache.', 'success');
+    } else if (type === 'batch_24h') {
+      // Reload batches so premiumUsers updates
+      var fresh = await apiFetch('/api/batches').catch(function(){return null;});
+      if (fresh) { batches = fresh; renderBatches(batches); }
+      toast('🎉 Batch 24h ke liye unlock hua! Points: ' + _currentReferPoints + ' bache.', 'success');
+    } else if (type === 'batch_7d') {
+      var fresh = await apiFetch('/api/batches').catch(function(){return null;});
+      if (fresh) { batches = fresh; renderBatches(batches); }
+      toast('🎉 Batch 7 din ke liye unlock hua! Points: ' + _currentReferPoints + ' bache.', 'success');
+    } else {
+      toast('🎉 Reward redeem hua!', 'success');
+    }
+  } catch(e) {
+    toast('Redeem failed: ' + (e.message || 'Please try again'), 'error');
   }
 }
 
