@@ -121,7 +121,11 @@ async function sendFile(bot, chatId, record) {
     }
   } catch (err) {
     if (STORAGE_CHANNEL_ID && record.channel_msg_id) {
-      try { return await bot.forwardMessage(chatId, STORAGE_CHANNEL_ID, record.channel_msg_id); } catch (_) {}
+      // Use copyMessage, NOT forwardMessage — forwardMessage shows a
+      // "Forwarded from <Storage Channel>" header to the user, leaking
+      // the storage channel's name/identity. copyMessage delivers the
+      // same content with no forward attribution.
+      try { return await bot.copyMessage(chatId, STORAGE_CHANNEL_ID, record.channel_msg_id, { protect_content: protect }); } catch (_) {}
     }
     throw err;
   }
