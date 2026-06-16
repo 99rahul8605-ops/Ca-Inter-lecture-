@@ -1461,7 +1461,13 @@ async function checkAdminAccess() {
     clearTimeout(cfgTimer);
     var config = await configRes.json();
     var ownerId = config.ownerId;
-    if (config.botUsername) window._botUsername = config.botUsername;
+    if (config.botUsername) {
+      window._botUsername = config.botUsername;
+      // botUsername mil gaya — referral link abhi set karo
+      _referLink = getReferLink();
+      var _rlBox = document.getElementById('referLinkBox');
+      if (_rlBox && _referLink) _rlBox.textContent = _referLink;
+    }
     if (config.upiId) window._upiId = config.upiId;
     if (config.contactLink) window._contactLink = config.contactLink;
     // Store force-join requirement
@@ -3466,9 +3472,9 @@ async function loadReferStats() {
   var uid = getUserId();
   if (!uid) return;
 
-  // Wait for _botUsername to be set by checkAdminAccess (max 5s)
+  // Agar botUsername abhi tak nahi aaya (config fetch pending) to max 5s wait karo
   if (!window._botUsername) {
-    for (var _w = 0; _w < 25; _w++) {
+    for (var _wi = 0; _wi < 25; _wi++) {
       await new Promise(function(r){ setTimeout(r, 200); });
       if (window._botUsername) break;
     }
