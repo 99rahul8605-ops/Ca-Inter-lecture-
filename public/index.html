@@ -3563,25 +3563,30 @@ async function selectRewardBatch(batchId) {
 
 async function _executeReward(type, cost, batchId) {
   var uid = getUserId();
+  // Map frontend type → backend tier
+  var tierMap = { 'access_24h': 'access_24h', 'batch_24h': 'premium_1d', 'batch_7d': 'premium_7d' };
+  var tier = tierMap[type];
+  if (!tier) return toast('Invalid reward type', 'error');
+
   try {
-    var body = { type: type, cost: cost };
-    if (batchId) body.batchId = batchId;
+    var payload = { userId: uid, tier: tier };
+    if (batchId) payload.batchId = batchId;
+
     var r = await fetch('/api/refer/redeem', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ userId: uid, ...body })
+      body: JSON.stringify(payload)
     });
     var data = await r.json();
-    if (data.error) return toast('Error: ' + data.error, 'error');
+    if (data.error) return toast('❌ ' + data.error, 'error');
 
-    // Update UI points
-    _currentReferPoints = data.points != null ? data.points : (_currentReferPoints - cost);
+    // Update points in UI — backend returns newPoints
+    _currentReferPoints = (data.newPoints != null) ? data.newPoints : Math.max(0, _currentReferPoints - cost);
     var pe = document.getElementById('referPoints');
     if (pe) pe.textContent = _currentReferPoints;
     var pd = document.getElementById('rewardPointsDisplay');
     if (pd) pd.textContent = _currentReferPoints;
 
-    // If general 24h access — update access timer
     if (type === 'access_24h' && data.expiresAt) {
       accessExpiresAt = data.expiresAt;
       localStorage.setItem('edubot_access_expires', data.expiresAt);
@@ -3589,16 +3594,12 @@ async function _executeReward(type, cost, batchId) {
       startCountdown();
       var dot = document.getElementById('accessDot');
       if (dot) dot.style.background = 'var(--green)';
-      toast('🎉 24h access mil gaya! Points: ' + _currentReferPoints + ' bache.', 'success');
-    } else if (type === 'batch_24h') {
-      // Reload batches so premiumUsers updates
+      toast('🎉 24h access mil gaya! Points bache: ' + _currentReferPoints, 'success');
+    } else if (type === 'batch_24h' || type === 'batch_7d') {
       var fresh = await apiFetch('/api/batches').catch(function(){return null;});
       if (fresh) { batches = fresh; renderBatches(batches); }
-      toast('🎉 Batch 24h ke liye unlock hua! Points: ' + _currentReferPoints + ' bache.', 'success');
-    } else if (type === 'batch_7d') {
-      var fresh = await apiFetch('/api/batches').catch(function(){return null;});
-      if (fresh) { batches = fresh; renderBatches(batches); }
-      toast('🎉 Batch 7 din ke liye unlock hua! Points: ' + _currentReferPoints + ' bache.', 'success');
+      var dur = type === 'batch_24h' ? '24h' : '7 din';
+      toast('🎉 Batch ' + dur + ' ke liye unlock hua! Points bache: ' + _currentReferPoints, 'success');
     } else {
       toast('🎉 Reward redeem hua!', 'success');
     }
