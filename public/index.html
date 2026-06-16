@@ -1461,7 +1461,18 @@ async function checkAdminAccess() {
     clearTimeout(cfgTimer);
     var config = await configRes.json();
     var ownerId = config.ownerId;
-    if (config.botUsername) window._botUsername = config.botUsername;
+    if (config.botUsername) {
+      window._botUsername = config.botUsername;
+      // Refer link box abhi bhi "Loading..." pe ho toh update karo
+      var refBox = document.getElementById('referLinkBox');
+      if (refBox && (refBox.textContent === 'Loading...' || refBox.textContent === '')) {
+        var freshLink = getReferLink();
+        if (freshLink) {
+          _referLink = freshLink;
+          refBox.textContent = freshLink;
+        }
+      }
+    }
     if (config.upiId) window._upiId = config.upiId;
     if (config.contactLink) window._contactLink = config.contactLink;
     // Store force-join requirement
@@ -3465,6 +3476,13 @@ function getReferLink() {
 async function loadReferStats() {
   var uid = getUserId();
   if (!uid) return;
+
+  // botUsername load hone ka wait karo (max 3 seconds)
+  var attempts = 0;
+  while (!window._botUsername && attempts < 15) {
+    await new Promise(function(r){ setTimeout(r, 200); });
+    attempts++;
+  }
 
   // Set referral link
   _referLink = getReferLink();
