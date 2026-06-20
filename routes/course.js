@@ -124,9 +124,11 @@ async function autoAddLecture({ batchId, subjectId, chapterId, unitId, name, lin
   if (unitId) {
     const unit = (chap.units||[]).find(u => String(u._id) === unitId);
     if (!unit) throw new Error('Unit not found');
+    if (!unit.lectures) unit.lectures = [];
     newLec.order = unit.lectures.length;
     unit.lectures.push(newLec);
   } else {
+    if (!chap.lectures) chap.lectures = [];
     newLec.order = chap.lectures.length;
     chap.lectures.push(newLec);
   }
@@ -329,7 +331,7 @@ router.post("/batches/:bid/subjects/:sid/chapters", verifyAdmin, async (req, res
     const batch = db.batch.getOne(req.params.bid);
     const subj = batch && _findById(batch.subjects, req.params.sid);
     if (!subj) return res.status(404).json({ error: "Not found" });
-    subj.chapters.push({ name: req.body.name, order: subj.chapters.length });
+    subj.chapters.push({ name: req.body.name, order: subj.chapters.length, lectures: [], units: [] });
     db.batch.upsert(batch);
     if (isMongo()) _mongoBackupBatch(req.params.bid);
     res.json(batch);
@@ -370,7 +372,7 @@ router.post("/batches/:bid/subjects/:sid/chapters/:cid/units", verifyAdmin, asyn
     const subj = batch && _findById(batch.subjects, req.params.sid);
     const chap = subj && _findById(subj.chapters, req.params.cid);
     if (!chap) return res.status(404).json({ error: "Not found" });
-    chap.units.push({ name: req.body.name, order: chap.units.length });
+    chap.units.push({ name: req.body.name, order: chap.units.length, lectures: [] });
     db.batch.upsert(batch);
     if (isMongo()) _mongoBackupBatch(req.params.bid);
     res.json(batch);
