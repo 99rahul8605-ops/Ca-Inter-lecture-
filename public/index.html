@@ -6,37 +6,6 @@
 <title>EduBot</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <script src='//libtl.com/sdk.js' data-zone='11011844' data-sdk='show_11011844'></script>
-
-<script>
-function markLectureAsComplete() {
-  const currentUserId = window.Telegram?.WebApp?.initDataUnsafe?.user?.id || 'anonymous';
-  const key = 'completed_lectures_' + currentUserId;
-  let completed = JSON.parse(localStorage.getItem(key) || '[]');
-
-  // Get current lecture ID from the page
-  const lecId = document.querySelector('[data-lid]')?.dataset.lid;
-  if (lecId && !completed.includes(lecId)) {
-    completed.push(lecId);
-    localStorage.setItem(key, JSON.stringify(completed));
-    toast('Lecture marked as complete! 🎓', 'success');
-  }
-}
-
-function isLectureCompleted(lecId) {
-  const currentUserId = window.Telegram?.WebApp?.initDataUnsafe?.user?.id || 'anonymous';
-  const key = 'completed_lectures_' + currentUserId;
-  const completed = JSON.parse(localStorage.getItem(key) || '[]');
-  return completed.includes(lecId);
-}
-
-function updateLectureButton(lecId, btnElement) {
-  if (isLectureCompleted(lecId)) {
-    btnElement.innerHTML = '<i class="ti ti-check"></i> Completed';
-    btnElement.style.background = 'linear-gradient(135deg,var(--green),#16a34a)';
-    btnElement.disabled = true;
-  }
-}
-</script>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@2.44.0/tabler-icons.min.css">
 <style>
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
@@ -200,7 +169,7 @@ body.ready{transition:none}
 .unit-row:active{background:var(--surface2)}
 .unit-icon{width:34px;height:34px;border-radius:8px;background:var(--accent2);display:flex;align-items:center;justify-content:center;font-size:15px;flex-shrink:0}
 
-/* <button class="lec-mini-btn lec-mini-watch" onclick="markLectureAsComplete()"><i class="ti ti-player-play-filled"></i> Lecture</button> row — see bottom of file for full redesign styles */
+/* Lecture row — see bottom of file for full redesign styles */
 .lec-row{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:12px 14px;transition:background 0.15s}
 
 /* Section label */
@@ -536,7 +505,7 @@ body.ready{transition:none}
   </div>
 </div>
 
-<!-- PAGE: Units or <button class="lec-mini-btn lec-mini-watch" onclick="markLectureAsComplete()"><i class="ti ti-player-play-filled"></i> Lecture</button>s -->
+<!-- PAGE: Units or Lectures -->
 <div class="page" id="page-units">
   <div class="topbar">
     <button class="back-btn" onclick="goBack()"><i class="ti ti-arrow-left"></i></button>
@@ -560,7 +529,7 @@ body.ready{transition:none}
   </div>
 </div>
 
-<!-- PAGE: <button class="lec-mini-btn lec-mini-watch" onclick="markLectureAsComplete()"><i class="ti ti-player-play-filled"></i> Lecture</button>s (inside unit) -->
+<!-- PAGE: Lectures (inside unit) -->
 <div class="page" id="page-lectures">
   <div class="topbar">
     <button class="back-btn" onclick="goBack()"><i class="ti ti-arrow-left"></i></button>
@@ -579,17 +548,17 @@ body.ready{transition:none}
     </button>
   </div>
   <div class="page-body">
-    <div class="sec-label"><button class="lec-mini-btn lec-mini-watch" onclick="markLectureAsComplete()"><i class="ti ti-player-play-filled"></i> Lecture</button>s</div>
+    <div class="sec-label">Lectures</div>
     <div class="list" id="lectureList"></div>
   </div>
 </div>
 
-<!-- PAGE: <button class="lec-mini-btn lec-mini-watch" onclick="markLectureAsComplete()"><i class="ti ti-player-play-filled"></i> Lecture</button> Detail -->
+<!-- PAGE: Lecture Detail -->
 <div class="page" id="page-lecture-detail">
   <div class="topbar">
     <button class="back-btn" onclick="goBack()"><i class="ti ti-arrow-left"></i></button>
     <div style="flex:1;min-width:0">
-      <div class="topbar-title" id="lecDetailTitle"><button class="lec-mini-btn lec-mini-watch" onclick="markLectureAsComplete()"><i class="ti ti-player-play-filled"></i> Lecture</button></div>
+      <div class="topbar-title" id="lecDetailTitle">Lecture</div>
       <div class="topbar-sub" id="lecDetailSub"></div>
     </div>
   </div>
@@ -621,7 +590,7 @@ body.ready{transition:none}
       <button class="tab-btn" onclick="switchTab('subject')">+ Subject</button>
       <button class="tab-btn" onclick="switchTab('chapter')">+ Chapter</button>
       <button class="tab-btn" onclick="switchTab('unit')">+ Unit</button>
-      <button class="tab-btn" onclick="switchTab('lecture')">+ <button class="lec-mini-btn lec-mini-watch" onclick="markLectureAsComplete()"><i class="ti ti-player-play-filled"></i> Lecture</button></button>
+      <button class="tab-btn" onclick="switchTab('lecture')">+ Lecture</button>
       <button class="tab-btn" onclick="switchTab('manage')">Manage</button>
       <button class="tab-btn" onclick="switchTab('coupons')">🎟 Coupons</button>
     </div>
@@ -685,23 +654,23 @@ body.ready{transition:none}
       <button class="btn-add" id="btnUnit" onclick="addUnit()"><i class="ti ti-plus"></i> Add Unit</button>
     </div>
 
-    <!-- Add <button class="lec-mini-btn lec-mini-watch" onclick="markLectureAsComplete()"><i class="ti ti-player-play-filled"></i> Lecture</button> -->
+    <!-- Add Lecture -->
     <div class="tab-content" id="tab-lecture">
       <div class="form-group"><label class="form-label">Batch</label><select class="form-select" id="lBatch" onchange="_saveSel('lBatch',this.value);updateLSubjectSelect()"></select></div>
       <div class="form-group"><label class="form-label">Subject</label><select class="form-select" id="lSubject" onchange="_saveSel('lSubject',this.value);updateLChapterSelect()"></select></div>
       <div class="form-group"><label class="form-label">Chapter</label><select class="form-select" id="lChapter" onchange="_saveSel('lChapter',this.value);updateLUnitSelect()"></select></div>
       <div class="form-group"><label class="form-label">Unit (optional — leave empty if no unit)</label><select class="form-select" id="lUnit" onchange="_saveSel('lUnit',this.value)"></select></div>
-      <div class="form-group"><label class="form-label"><button class="lec-mini-btn lec-mini-watch" onclick="markLectureAsComplete()"><i class="ti ti-player-play-filled"></i> Lecture</button> Name</label><input class="form-input" id="lName" placeholder="e.g. Introduction to Limits"></div>
+      <div class="form-group"><label class="form-label">Lecture Name</label><input class="form-input" id="lName" placeholder="e.g. Introduction to Limits"></div>
       <div class="form-group"><label class="form-label">Bot Link</label><input class="form-input" id="lLink" placeholder="https://t.me/YourBot?start=CODE"></div>
       <div class="form-group"><label class="form-label">Class Notes Link <span style="color:var(--text3);font-weight:400">(optional)</span></label><input class="form-input" id="lNotes" placeholder="https://t.me/YourBot?start=NOTES_CODE"></div>
       <div class="form-group" style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:linear-gradient(135deg,rgba(79,142,247,0.08),rgba(124,92,191,0.05));border:1px solid rgba(79,142,247,0.25);border-radius:var(--radius-sm)">
         <input type="checkbox" id="lIsDemo" style="width:18px;height:18px;cursor:pointer;accent-color:var(--accent)">
         <label for="lIsDemo" style="font-size:13px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:6px">
-          <i class="ti ti-player-play" style="color:var(--accent);font-size:14px"></i> Mark as Demo <button class="lec-mini-btn lec-mini-watch" onclick="markLectureAsComplete()"><i class="ti ti-player-play-filled"></i> Lecture</button>
+          <i class="ti ti-player-play" style="color:var(--accent);font-size:14px"></i> Mark as Demo Lecture
           <span class="demo-badge">DEMO</span>
         </label>
       </div>
-      <button class="btn-add" id="btn<button class="lec-mini-btn lec-mini-watch" onclick="markLectureAsComplete()"><i class="ti ti-player-play-filled"></i> Lecture</button>" onclick="add<button class="lec-mini-btn lec-mini-watch" onclick="markLectureAsComplete()"><i class="ti ti-player-play-filled"></i> Lecture</button>()"><i class="ti ti-plus"></i> Add <button class="lec-mini-btn lec-mini-watch" onclick="markLectureAsComplete()"><i class="ti ti-player-play-filled"></i> Lecture</button></button>
+      <button class="btn-add" id="btnLecture" onclick="addLecture()"><i class="ti ti-plus"></i> Add Lecture</button>
 
       <!-- ── Auto Mode ─────────────────────────────────────────────────── -->
       <div style="border-top:1px solid var(--border);margin-top:16px;padding-top:14px">
@@ -711,7 +680,7 @@ body.ready{transition:none}
               🤖 Auto Mode
               <span id="autoModeLiveBadge" style="display:none;font-size:10px;font-weight:700;color:#fff;background:var(--green);border-radius:20px;padding:2px 8px;animation:pulse 1.5s ease-in-out infinite">LIVE</span>
             </div>
-            <div style="font-size:11px;color:var(--text2);margin-top:2px">Video bhejo → <button class="lec-mini-btn lec-mini-watch" onclick="markLectureAsComplete()"><i class="ti ti-player-play-filled"></i> Lecture</button> auto-save hoga</div>
+            <div style="font-size:11px;color:var(--text2);margin-top:2px">Video bhejo → Lecture auto-save hoga</div>
           </div>
           <label class="toggle-switch" style="width:44px;height:24px">
             <input type="checkbox" id="autoModeToggle" onchange="toggleAutoMode(this.checked)">
@@ -954,7 +923,7 @@ body.ready{transition:none}
 
 <div class="sending-popup" id="sendingPopup">
   <div class="sending-dot"></div>
-  <span class="sending-text"><button class="lec-mini-btn lec-mini-watch" onclick="markLectureAsComplete()"><i class="ti ti-player-play-filled"></i> Lecture</button> delivered to your bot! Check Telegram now 📩</span>
+  <span class="sending-text">Lecture delivered to your bot! Check Telegram now 📩</span>
 </div>
 <div class="toast" id="toast"></div>
 
@@ -995,7 +964,7 @@ function hardReload() {
 }
 
 var batches = [];
-var _popup<button class="lec-mini-btn lec-mini-watch" onclick="markLectureAsComplete()"><i class="ti ti-player-play-filled"></i> Lecture</button>s = {}; // stores lectures for popup reference by _id
+var _popupLectures = {}; // stores lectures for popup reference by _id
 var isAdmin = false;
 var pageStack = ['home'];
 var picBase64 = '';
@@ -1128,7 +1097,7 @@ function openChapter(bid, sid, cid) {
   var s = b && b.subjects.find(x => x._id === sid);
   var c = s && s.chapters.find(x => x._id === cid);
   if (!c) return;
-  _popup<button class="lec-mini-btn lec-mini-watch" onclick="markLectureAsComplete()"><i class="ti ti-player-play-filled"></i> Lecture</button>s = {}; // Reset on every chapter open
+  _popupLectures = {}; // Reset on every chapter open
   var color = s.color;
   document.getElementById('unitPageTitle').textContent = c.name;
 
@@ -1152,7 +1121,7 @@ function openChapter(bid, sid, cid) {
     if (c.lectures && c.lectures.length > 0) {
       html += `<div style="padding:14px 0 8px;font-size:11px;font-weight:600;color:var(--text2);letter-spacing:1.2px;text-transform:uppercase">OTHER LECTURES</div>`;
       html += c.lectures.map((l,i) => {
-        _popup<button class="lec-mini-btn lec-mini-watch" onclick="markLectureAsComplete()"><i class="ti ti-player-play-filled"></i> Lecture</button>s[l._id] = l;
+        _popupLectures[l._id] = l;
         return `
         <div class="lec-row">
           <div class="lec-num">${i+1}</div>
@@ -1162,8 +1131,8 @@ function openChapter(bid, sid, cid) {
               ? '<div style="margin-top:6px"><span class="coming-soon-badge">🔜 Coming Soon</span></div>'
               : `<div class="lec-mini-btns">
                   ${l.isDemo ? '<span class="demo-badge" style="margin-right:4px">DEMO</span>' : ''}
-                  <button class="lec-mini-btn lec-mini-watch" data-lid="${l._id}" onclick="openLecLink(_popup<button class="lec-mini-btn lec-mini-watch" onclick="markLectureAsComplete()"><i class="ti ti-player-play-filled"></i> Lecture</button>s[this.dataset.lid].link,'lecture')"><i class="ti ti-player-play-filled"></i> <button class="lec-mini-btn lec-mini-watch" onclick="markLectureAsComplete()"><i class="ti ti-player-play-filled"></i> Lecture</button></button>
-                  ${l.notes ? `<button class="lec-mini-btn lec-mini-notes" data-lid="${l._id}" onclick="openLink(_popup<button class="lec-mini-btn lec-mini-watch" onclick="markLectureAsComplete()"><i class="ti ti-player-play-filled"></i> Lecture</button>s[this.dataset.lid].notes,'notes')"><i class="ti ti-notes"></i> Notes</button>` : ''}
+                  <button class="lec-mini-btn lec-mini-watch" data-lid="${l._id}" onclick="openLecLink(_popupLectures[this.dataset.lid].link,'lecture')"><i class="ti ti-player-play-filled"></i> Lecture</button>
+                  ${l.notes ? `<button class="lec-mini-btn lec-mini-notes" data-lid="${l._id}" onclick="openLink(_popupLectures[this.dataset.lid].notes,'notes')"><i class="ti ti-notes"></i> Notes</button>` : ''}
                 </div>`}
           </div>
         </div>`;
@@ -1175,15 +1144,15 @@ function openChapter(bid, sid, cid) {
     document.getElementById('unitSecLabel').textContent = 'LECTURES';
     html = !c.lectures.length ? '<div class="empty"><i class="ti ti-video"></i>No lectures yet</div>' :
       c.lectures.map((l,i) => {
-        _popup<button class="lec-mini-btn lec-mini-watch" onclick="markLectureAsComplete()"><i class="ti ti-player-play-filled"></i> Lecture</button>s[l._id] = l;
+        _popupLectures[l._id] = l;
         return `
         <div class="lec-row">
           <div class="lec-num">${i+1}</div>
           <div class="lec-info">
             <div class="lec-name">${l.name}</div>
             <div class="lec-mini-btns">
-              <button class="lec-mini-btn lec-mini-watch" data-lid="${l._id}" onclick="openLecLink(_popup<button class="lec-mini-btn lec-mini-watch" onclick="markLectureAsComplete()"><i class="ti ti-player-play-filled"></i> Lecture</button>s[this.dataset.lid].link,'lecture')"><i class="ti ti-player-play-filled"></i> <button class="lec-mini-btn lec-mini-watch" onclick="markLectureAsComplete()"><i class="ti ti-player-play-filled"></i> Lecture</button></button>
-              ${l.notes ? `<button class="lec-mini-btn lec-mini-notes" data-lid="${l._id}" onclick="openLink(_popup<button class="lec-mini-btn lec-mini-watch" onclick="markLectureAsComplete()"><i class="ti ti-player-play-filled"></i> Lecture</button>s[this.dataset.lid].notes,'notes')"><i class="ti ti-notes"></i> Notes</button>` : ''}
+              <button class="lec-mini-btn lec-mini-watch" data-lid="${l._id}" onclick="openLecLink(_popupLectures[this.dataset.lid].link,'lecture')"><i class="ti ti-player-play-filled"></i> Lecture</button>
+              ${l.notes ? `<button class="lec-mini-btn lec-mini-notes" data-lid="${l._id}" onclick="openLink(_popupLectures[this.dataset.lid].notes,'notes')"><i class="ti ti-notes"></i> Notes</button>` : ''}
             </div>
           </div>
         </div>`;
@@ -1201,12 +1170,12 @@ function openUnit(bid, sid, cid, uid) {
   var c = s && s.chapters.find(x => x._id === cid);
   var u = c && c.units.find(x => x._id === uid);
   if (!u) return;
-  _popup<button class="lec-mini-btn lec-mini-watch" onclick="markLectureAsComplete()"><i class="ti ti-player-play-filled"></i> Lecture</button>s = {}; // Reset on every unit open
+  _popupLectures = {}; // Reset on every unit open
   document.getElementById('lecPageTitle').textContent = u.name;
   document.getElementById('lecPageSub').textContent = u.lectures.length + ' lectures';
   document.getElementById('lectureList').innerHTML = !u.lectures.length ? '<div class="empty"><i class="ti ti-video"></i>No lectures yet</div>' :
     u.lectures.map((l,i) => {
-      _popup<button class="lec-mini-btn lec-mini-watch" onclick="markLectureAsComplete()"><i class="ti ti-player-play-filled"></i> Lecture</button>s[l._id] = l;
+      _popupLectures[l._id] = l;
       return `
       <div class="lec-row">
         <div class="lec-num">${i+1}</div>
@@ -1216,8 +1185,8 @@ function openUnit(bid, sid, cid, uid) {
             ? '<div style="margin-top:6px"><span class="coming-soon-badge">🔜 Coming Soon</span></div>'
             : `<div class="lec-mini-btns">
                 ${l.isDemo ? '<span class="demo-badge" style="margin-right:4px">DEMO</span>' : ''}
-                <button class="lec-mini-btn lec-mini-watch" data-lid="${l._id}" onclick="openLecLink(_popup<button class="lec-mini-btn lec-mini-watch" onclick="markLectureAsComplete()"><i class="ti ti-player-play-filled"></i> Lecture</button>s[this.dataset.lid].link,'lecture')"><i class="ti ti-player-play-filled"></i> <button class="lec-mini-btn lec-mini-watch" onclick="markLectureAsComplete()"><i class="ti ti-player-play-filled"></i> Lecture</button></button>
-                ${l.notes ? `<button class="lec-mini-btn lec-mini-notes" data-lid="${l._id}" onclick="openLink(_popup<button class="lec-mini-btn lec-mini-watch" onclick="markLectureAsComplete()"><i class="ti ti-player-play-filled"></i> Lecture</button>s[this.dataset.lid].notes,'notes')"><i class="ti ti-notes"></i> Notes</button>` : ''}
+                <button class="lec-mini-btn lec-mini-watch" data-lid="${l._id}" onclick="openLecLink(_popupLectures[this.dataset.lid].link,'lecture')"><i class="ti ti-player-play-filled"></i> Lecture</button>
+                ${l.notes ? `<button class="lec-mini-btn lec-mini-notes" data-lid="${l._id}" onclick="openLink(_popupLectures[this.dataset.lid].notes,'notes')"><i class="ti ti-notes"></i> Notes</button>` : ''}
               </div>`}
         </div>
       </div>`;
@@ -1249,7 +1218,7 @@ function openLink(url, type) {
 function showSendingPopup(type) {
   var p = document.getElementById('sendingPopup');
   var txt = p.querySelector('.sending-text');
-  txt.textContent = type === 'notes' ? 'Notes delivered to your bot! Check Telegram now 📝' : '<button class="lec-mini-btn lec-mini-watch" onclick="markLectureAsComplete()"><i class="ti ti-player-play-filled"></i> Lecture</button> delivered to your bot! Check Telegram now 📩';
+  txt.textContent = type === 'notes' ? 'Notes delivered to your bot! Check Telegram now 📝' : 'Lecture delivered to your bot! Check Telegram now 📩';
   p.classList.add('show');
   setTimeout(() => p.classList.remove('show'), 2500);
 }
@@ -1357,10 +1326,10 @@ function _batchCard(b, isPremiumLocked) {
   var buyBtn = isPremiumLocked
     ? '<button class="batch-buy-btn" data-bid="' + b._id + '" onclick="event.stopPropagation();buyBatch(this.dataset.bid)"><i class="ti ti-shopping-cart" style="font-size:12px"></i> Buy' + (b.price ? ' ₹' + b.price : '') + '</button>'
     : '';
-  var demo<button class="lec-mini-btn lec-mini-watch" onclick="markLectureAsComplete()"><i class="ti ti-player-play-filled"></i> Lecture</button>s = _getAllDemo<button class="lec-mini-btn lec-mini-watch" onclick="markLectureAsComplete()"><i class="ti ti-player-play-filled"></i> Lecture</button>s(b);
+  var demoLectures = _getAllDemoLectures(b);
   var viewBtn = (!isPremiumLocked && b.isPremium)
     ? '' // purchased user — full access, no need for demo
-    : (demo<button class="lec-mini-btn lec-mini-watch" onclick="markLectureAsComplete()"><i class="ti ti-player-play-filled"></i> Lecture</button>s.length
+    : (demoLectures.length
         ? '<button class="batch-view-btn" data-bid="' + b._id + '" onclick="event.stopPropagation();openDemoModal(this.dataset.bid)"><i class="ti ti-player-play" style="font-size:12px"></i> View Demo</button>'
         : '');
   var actionBtns = (buyBtn || viewBtn)
@@ -1671,10 +1640,10 @@ async function addUnit() {
   setLoading('btnUnit',false,'<i class="ti ti-plus"></i> Add Unit');
 }
 
-async function add<button class="lec-mini-btn lec-mini-watch" onclick="markLectureAsComplete()"><i class="ti ti-player-play-filled"></i> Lecture</button>() {
+async function addLecture() {
   var bid=document.getElementById('lBatch').value, sid=document.getElementById('lSubject').value, cid=document.getElementById('lChapter').value, uid=document.getElementById('lUnit').value, name=document.getElementById('lName').value.trim(), link=document.getElementById('lLink').value.trim();
   if(!bid||!sid||!cid||!name||!link) return toast('Please fill all fields!','error');
-  setLoading('btn<button class="lec-mini-btn lec-mini-watch" onclick="markLectureAsComplete()"><i class="ti ti-player-play-filled"></i> Lecture</button>',true);
+  setLoading('btnLecture',true);
   try {
     var url = uid ? `/api/batches/${bid}/subjects/${sid}/chapters/${cid}/units/${uid}/lectures` : `/api/batches/${bid}/subjects/${sid}/chapters/${cid}/lectures`;
     var notes = document.getElementById('lNotes').value.trim();
@@ -1684,9 +1653,9 @@ async function add<button class="lec-mini-btn lec-mini-watch" onclick="markLectu
     populateAllSelects();
     document.getElementById('lName').value=''; document.getElementById('lLink').value=''; document.getElementById('lNotes').value='';
     document.getElementById('lIsDemo').checked = false;
-    toast('<button class="lec-mini-btn lec-mini-watch" onclick="markLectureAsComplete()"><i class="ti ti-player-play-filled"></i> Lecture</button> added!','success');
+    toast('Lecture added!','success');
   } catch(e){toast('Error: '+(e.message||'Something went wrong'),'error');} finally {
-    setLoading('btn<button class="lec-mini-btn lec-mini-watch" onclick="markLectureAsComplete()"><i class="ti ti-player-play-filled"></i> Lecture</button>',false,'<i class="ti ti-plus"></i> Add <button class="lec-mini-btn lec-mini-watch" onclick="markLectureAsComplete()"><i class="ti ti-player-play-filled"></i> Lecture</button>'); }
+    setLoading('btnLecture',false,'<i class="ti ti-plus"></i> Add Lecture'); }
 }
 
 // ── Auto Mode ─────────────────────────────────────────────────────────────────
@@ -1741,7 +1710,7 @@ async function toggleAutoMode(checked) {
       var path = subjectName + ' › ' + chapterName + (unitName ? ' › ' + unitName : '');
       _setAutoModeUI(true,
         '📍 <b>' + path + '</b><br>' +
-        '▶️ Next: <b><button class="lec-mini-btn lec-mini-watch" onclick="markLectureAsComplete()"><i class="ti ti-player-play-filled"></i> Lecture</button> ' + nextNum + '</b><br>' +
+        '▶️ Next: <b>Lecture ' + nextNum + '</b><br>' +
         '📊 Already saved: ' + r.session.lectureCount + ' lectures'
       );
       toast('🤖 Auto Mode ON! Bot mein video bhejo.', 'success');
@@ -1777,7 +1746,7 @@ async function _syncAutoModeStatus() {
       var path = r.subjectName + ' › ' + r.chapterName + (r.unitName ? ' › ' + r.unitName : '');
       _setAutoModeUI(true,
         '📍 <b>' + path + '</b><br>' +
-        '▶️ Next: <b><button class="lec-mini-btn lec-mini-watch" onclick="markLectureAsComplete()"><i class="ti ti-player-play-filled"></i> Lecture</button> ' + nextNum + '</b><br>' +
+        '▶️ Next: <b>Lecture ' + nextNum + '</b><br>' +
         '📊 Already saved: ' + r.lectureCount + ' lectures'
       );
       startBatchAutoRefresh(); // Auto-mode chal raha hai — background refresh shuru karo
@@ -1872,7 +1841,7 @@ function _renderManageLevel() {
           <button class="del-btn" onclick="delUnit('${b._id}','${s._id}','${ch._id}','${u._id}')"><i class="ti ti-trash"></i></button>
         </div>`;
       });
-      html += '<div style="font-size:11px;font-weight:600;color:var(--text2);letter-spacing:1px;text-transform:uppercase;padding:12px 0 6px"><button class="lec-mini-btn lec-mini-watch" onclick="markLectureAsComplete()"><i class="ti ti-player-play-filled"></i> Lecture</button>s (in units)</div>';
+      html += '<div style="font-size:11px;font-weight:600;color:var(--text2);letter-spacing:1px;text-transform:uppercase;padding:12px 0 6px">Lectures (in units)</div>';
       ch.units.forEach(u => {
         u.lectures.forEach(l => {
           var lcs = l.isDemo ? '<span class="demo-badge" style="margin-left:4px">DEMO</span>' : '';
@@ -1883,14 +1852,14 @@ function _renderManageLevel() {
               <div class="manage-item-sub">${u.name}</div>
             </div>
             <button class="edit-btn" onclick="openEdit('lecture','${b._id}','${s._id}','${ch._id}','${u._id}','${l._id}')"><i class="ti ti-pencil"></i></button>
-            <button class="del-btn" onclick="del<button class="lec-mini-btn lec-mini-watch" onclick="markLectureAsComplete()"><i class="ti ti-player-play-filled"></i> Lecture</button>('${b._id}','${s._id}','${ch._id}','${u._id}','${l._id}')"><i class="ti ti-trash"></i></button>
+            <button class="del-btn" onclick="delLecture('${b._id}','${s._id}','${ch._id}','${u._id}','${l._id}')"><i class="ti ti-trash"></i></button>
           </div>`;
         });
       });
     }
     // Direct lectures (no unit)
     if (ch.lectures && ch.lectures.length) {
-      html += '<div style="font-size:11px;font-weight:600;color:var(--text2);letter-spacing:1px;text-transform:uppercase;padding:12px 0 6px">Direct <button class="lec-mini-btn lec-mini-watch" onclick="markLectureAsComplete()"><i class="ti ti-player-play-filled"></i> Lecture</button>s</div>';
+      html += '<div style="font-size:11px;font-weight:600;color:var(--text2);letter-spacing:1px;text-transform:uppercase;padding:12px 0 6px">Direct Lectures</div>';
       ch.lectures.forEach(l => {
         var lcs = l.isDemo ? '<span class="demo-badge" style="margin-left:4px">DEMO</span>' : '';
         html += `<div class="manage-item">
@@ -1900,7 +1869,7 @@ function _renderManageLevel() {
             <div class="manage-item-sub">${ch.name}</div>
           </div>
           <button class="edit-btn" onclick="openEdit('lecture','${b._id}','${s._id}','${ch._id}','','${l._id}')"><i class="ti ti-pencil"></i></button>
-          <button class="del-btn" onclick="del<button class="lec-mini-btn lec-mini-watch" onclick="markLectureAsComplete()"><i class="ti ti-player-play-filled"></i> Lecture</button>('${b._id}','${s._id}','${ch._id}','','${l._id}')"><i class="ti ti-trash"></i></button>
+          <button class="del-btn" onclick="delLecture('${b._id}','${s._id}','${ch._id}','','${l._id}')"><i class="ti ti-trash"></i></button>
         </div>`;
       });
     }
@@ -2040,13 +2009,13 @@ async function openEdit(type, bid, sid, cid, uid, lid) {
     var lec = uid
       ? (c && (c.units||[]).find(x => x._id === uid) && (c.units||[]).find(x => x._id === uid).lectures.find(x => x._id === lid))
       : (c && (c.lectures||[]).find(x => x._id === lid));
-    title = 'Edit <button class="lec-mini-btn lec-mini-watch" onclick="markLectureAsComplete()"><i class="ti ti-player-play-filled"></i> Lecture</button>';
-    body = `<div class="form-group"><label class="form-label"><button class="lec-mini-btn lec-mini-watch" onclick="markLectureAsComplete()"><i class="ti ti-player-play-filled"></i> Lecture</button> Name</label><input class="form-input" id="ei_name" value="${lec.name}"></div>
+    title = 'Edit Lecture';
+    body = `<div class="form-group"><label class="form-label">Lecture Name</label><input class="form-input" id="ei_name" value="${lec.name}"></div>
             <div class="form-group"><label class="form-label">Bot Link</label><input class="form-input" id="ei_link" value="${lec.link||''}"></div>
             <div class="form-group"><label class="form-label">Notes Link <span style="color:var(--text3)">(optional)</span></label><input class="form-input" id="ei_notes" value="${lec.notes||''}"></div>
             <div class="form-group" style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:linear-gradient(135deg,rgba(79,142,247,0.08),rgba(124,92,191,0.05));border:1px solid rgba(79,142,247,0.25);border-radius:var(--radius-sm)">
               <input type="checkbox" id="ei_isDemo" ${lec.isDemo?'checked':''} style="width:18px;height:18px;cursor:pointer;accent-color:var(--accent)">
-              <label for="ei_isDemo" style="font-size:13px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:6px"><i class="ti ti-player-play" style="color:var(--accent);font-size:14px"></i> Mark as Demo <button class="lec-mini-btn lec-mini-watch" onclick="markLectureAsComplete()"><i class="ti ti-player-play-filled"></i> Lecture</button> <span class="demo-badge">DEMO</span></label>
+              <label for="ei_isDemo" style="font-size:13px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:6px"><i class="ti ti-player-play" style="color:var(--accent);font-size:14px"></i> Mark as Demo Lecture <span class="demo-badge">DEMO</span></label>
             </div>`;
   }
 
@@ -2125,8 +2094,8 @@ async function saveEdit() {
 
 async function delBatch(bid){if(!confirm('Batch delete?'))return;try{await apiFetch(`/api/batches/${bid}`,'DELETE');batches=batches.filter(x=>x._id!==bid);renderBatches(batches);populateAllSelects();_renderManageLevel();toast('Deleted!','success');}catch(e){toast('Error','error');}}
 
-// ── Demo <button class="lec-mini-btn lec-mini-watch" onclick="markLectureAsComplete()"><i class="ti ti-player-play-filled"></i> Lecture</button>s ─────────────────────────────────────────────────────────────
-function _getAllDemo<button class="lec-mini-btn lec-mini-watch" onclick="markLectureAsComplete()"><i class="ti ti-player-play-filled"></i> Lecture</button>s(batch) {
+// ── Demo Lectures ─────────────────────────────────────────────────────────────
+function _getAllDemoLectures(batch) {
   var demos = [];
   (batch.subjects || []).forEach(s => {
     (s.chapters || []).forEach(c => {
@@ -2142,9 +2111,9 @@ function _getAllDemo<button class="lec-mini-btn lec-mini-watch" onclick="markLec
 function openDemoModal(bid) {
   var b = batches.find(x => x._id === bid);
   if (!b) return;
-  var demos = _getAllDemo<button class="lec-mini-btn lec-mini-watch" onclick="markLectureAsComplete()"><i class="ti ti-player-play-filled"></i> Lecture</button>s(b);
+  var demos = _getAllDemoLectures(b);
   var modal = document.getElementById('demoModal');
-  document.getElementById('demoModalTitle').textContent = b.name + ' — Demo <button class="lec-mini-btn lec-mini-watch" onclick="markLectureAsComplete()"><i class="ti ti-player-play-filled"></i> Lecture</button>s';
+  document.getElementById('demoModalTitle').textContent = b.name + ' — Demo Lectures';
   var listEl = document.getElementById('demoLecList');
   if (!demos.length) {
     listEl.innerHTML = '<div class="empty"><i class="ti ti-video"></i>No demo lectures yet</div>';
@@ -2424,7 +2393,7 @@ async function removePremiumUser(uid) {
 async function delSubject(bid,sid){if(!confirm('Subject delete?'))return;try{await apiFetch(`/api/batches/${bid}/subjects/${sid}`,'DELETE');var b=batches.find(x=>x._id===bid);if(b)b.subjects=b.subjects.filter(x=>x._id!==sid);populateAllSelects();_renderManageLevel();toast('Deleted!','success');}catch(e){toast('Error','error');}}
 async function delChapter(bid,sid,cid){if(!confirm('Chapter delete?'))return;try{await apiFetch(`/api/batches/${bid}/subjects/${sid}/chapters/${cid}`,'DELETE');var b=batches.find(x=>x._id===bid);var s=b&&b.subjects.find(x=>x._id===sid);if(s)s.chapters=s.chapters.filter(x=>x._id!==cid);populateAllSelects();_renderManageLevel();toast('Deleted!','success');}catch(e){toast('Error','error');}}
 async function delUnit(bid,sid,cid,uid){if(!confirm('Unit delete?'))return;try{await apiFetch(`/api/batches/${bid}/subjects/${sid}/chapters/${cid}/units/${uid}`,'DELETE');var b=batches.find(x=>x._id===bid);var s=b&&b.subjects.find(x=>x._id===sid);var c=s&&s.chapters.find(x=>x._id===cid);if(c)c.units=c.units.filter(x=>x._id!==uid);populateAllSelects();_renderManageLevel();toast('Deleted!','success');}catch(e){toast('Error','error');}}
-async function del<button class="lec-mini-btn lec-mini-watch" onclick="markLectureAsComplete()"><i class="ti ti-player-play-filled"></i> Lecture</button>(bid,sid,cid,uid,lid){if(!confirm('<button class="lec-mini-btn lec-mini-watch" onclick="markLectureAsComplete()"><i class="ti ti-player-play-filled"></i> Lecture</button> delete?'))return;try{
+async function delLecture(bid,sid,cid,uid,lid){if(!confirm('Lecture delete?'))return;try{
   var url = uid ? `/api/batches/${bid}/subjects/${sid}/chapters/${cid}/units/${uid}/lectures/${lid}` : `/api/batches/${bid}/subjects/${sid}/chapters/${cid}/lectures/${lid}`;
   await apiFetch(url,'DELETE');
   var b=batches.find(x=>x._id===bid);var s=b&&b.subjects.find(x=>x._id===sid);var c=s&&s.chapters.find(x=>x._id===cid);
@@ -2451,7 +2420,7 @@ var userId = null;
 var claimsToday = 0;    // 0-3 claims today
 var _adWatching = false; // prevent double-click while ad loads
 
-// ── <button class="lec-mini-btn lec-mini-watch" onclick="markLectureAsComplete()"><i class="ti ti-player-play-filled"></i> Lecture</button> link helper ───────────────────────────────────────────────────────
+// ── Lecture link helper ───────────────────────────────────────────────────────
 // Handles both: plain code (e.g. "Abc123") and full links (legacy "https://t.me/bot?start=Abc123")
 // Bot username comes from config — so bot change = no manual DB update needed
 function openLecLink(codeOrLink, type) {
@@ -2701,7 +2670,7 @@ function renderAccessCard() {
   card.innerHTML =
     '<div class="access-card-header">' +
       '<i class="ti ti-lock status-locked"></i>' +
-      '<h2>Unlock <button class="lec-mini-btn lec-mini-watch" onclick="markLectureAsComplete()"><i class="ti ti-player-play-filled"></i> Lecture</button>s</h2>' +
+      '<h2>Unlock Lectures</h2>' +
       '<p>Ad dekho aur <strong>8h free access</strong> pao!<br>Din mein <strong>3 baar</strong> claim kar sakte ho.</p>' +
     '</div>' +
     _claimsDotRow() +
@@ -3062,8 +3031,8 @@ init();
 
 </script>
 <script>
-function show<button class="lec-mini-btn lec-mini-watch" onclick="markLectureAsComplete()"><i class="ti ti-player-play-filled"></i> Lecture</button>Popup(lid) {
-  var lecture = _popup<button class="lec-mini-btn lec-mini-watch" onclick="markLectureAsComplete()"><i class="ti ti-player-play-filled"></i> Lecture</button>s[lid];
+function showLecturePopup(lid) {
+  var lecture = _popupLectures[lid];
   if (!lecture) return;
   if (lecture.link) {
     openLecLink(lecture.link);
@@ -3073,18 +3042,18 @@ function show<button class="lec-mini-btn lec-mini-watch" onclick="markLectureAsC
     toast('No links available!', 'error');
   }
 }
-function close<button class="lec-mini-btn lec-mini-watch" onclick="markLectureAsComplete()"><i class="ti ti-player-play-filled"></i> Lecture</button>Popup() {}
-function close<button class="lec-mini-btn lec-mini-watch" onclick="markLectureAsComplete()"><i class="ti ti-player-play-filled"></i> Lecture</button>PopupOutside(e) {}
+function closeLecturePopup() {}
+function closeLecturePopupOutside(e) {}
 </script>
 
-<!-- <button class="lec-mini-btn lec-mini-watch" onclick="markLectureAsComplete()"><i class="ti ti-player-play-filled"></i> Lecture</button> Popup (hidden — no longer used) -->
-<div id="lecturePopup" onclick="close<button class="lec-mini-btn lec-mini-watch" onclick="markLectureAsComplete()"><i class="ti ti-player-play-filled"></i> Lecture</button>PopupOutside(event)">
+<!-- Lecture Popup (hidden — no longer used) -->
+<div id="lecturePopup" onclick="closeLecturePopupOutside(event)">
   <div class="lec-popup-sheet">
     <div class="lec-popup-header">
       <div class="lec-popup-handle"></div>
       <div class="lec-popup-icon-wrap"><i class="ti ti-player-play-filled"></i></div>
-      <div class="lec-popup-title" id="popupLecName"><button class="lec-mini-btn lec-mini-watch" onclick="markLectureAsComplete()"><i class="ti ti-player-play-filled"></i> Lecture</button></div>
-      <button class="lec-popup-close" onclick="close<button class="lec-mini-btn lec-mini-watch" onclick="markLectureAsComplete()"><i class="ti ti-player-play-filled"></i> Lecture</button>Popup()"><i class="ti ti-x"></i></button>
+      <div class="lec-popup-title" id="popupLecName">Lecture</div>
+      <button class="lec-popup-close" onclick="closeLecturePopup()"><i class="ti ti-x"></i></button>
     </div>
     <div class="lec-popup-body" id="popupButtons"></div>
   </div>
@@ -3118,7 +3087,7 @@ body.light-mode .hero-name{color:var(--text)}
 body.light-mode .access-card{background:var(--surface);border-color:var(--border)}
 body.light-mode .modal-overlay{background:rgba(0,0,0,0.5)}
 
-/* ── <button class="lec-mini-btn lec-mini-watch" onclick="markLectureAsComplete()"><i class="ti ti-player-play-filled"></i> Lecture</button> Popup ──────────────────────────────── */
+/* ── Lecture Popup ──────────────────────────────── */
 #lecturePopup {
   display:flex;
   position:fixed;inset:0;
@@ -3196,7 +3165,7 @@ body.light-mode .popup-lec-btn-notes{background:var(--surface2);color:var(--text
 .popup-lec-btn-sub{font-size:11px;opacity:0.7;margin-top:2px;display:block}
 .popup-lec-btn-arrow{font-size:16px;opacity:0.4}
 
-/* ── <button class="lec-mini-btn lec-mini-watch" onclick="markLectureAsComplete()"><i class="ti ti-player-play-filled"></i> Lecture</button> row redesign ─────────────────────── */
+/* ── Lecture row redesign ─────────────────────── */
 .lec-row {
   background:var(--surface);border:1px solid var(--border);
   border-radius:var(--radius);display:flex;align-items:center;
@@ -3375,12 +3344,12 @@ body.light-mode .lec-mini-notes{background:var(--surface2);color:var(--text)}
   </div>
 </div>
 
-<!-- Demo <button class="lec-mini-btn lec-mini-watch" onclick="markLectureAsComplete()"><i class="ti ti-player-play-filled"></i> Lecture</button>s Modal -->
+<!-- Demo Lectures Modal -->
 <div class="demo-overlay" id="demoModal" onclick="closeDemoOutside(event)">
   <div class="demo-modal">
     <span class="demo-modal-handle"></span>
     <div class="demo-modal-header">
-      <div class="demo-modal-title"><i class="ti ti-player-play" style="color:var(--accent)"></i><span id="demoModalTitle">Demo <button class="lec-mini-btn lec-mini-watch" onclick="markLectureAsComplete()"><i class="ti ti-player-play-filled"></i> Lecture</button>s</span></div>
+      <div class="demo-modal-title"><i class="ti ti-player-play" style="color:var(--accent)"></i><span id="demoModalTitle">Demo Lectures</span></div>
       <button class="demo-modal-close" onclick="closeDemoModal()"><i class="ti ti-x"></i></button>
     </div>
     <div id="demoLecList" style="padding:8px 12px"></div>
