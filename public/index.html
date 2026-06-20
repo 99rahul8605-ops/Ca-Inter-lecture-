@@ -9,8 +9,32 @@
 
 <script>
 function markLectureAsComplete() {
-  alert("Lecture marked as complete! 🎓");
-  // Here you can add future logic like updating UI or sending analytics
+  const currentUserId = window.Telegram?.WebApp?.initDataUnsafe?.user?.id || 'anonymous';
+  const key = 'completed_lectures_' + currentUserId;
+  let completed = JSON.parse(localStorage.getItem(key) || '[]');
+
+  // Get current lecture ID from the page
+  const lecId = document.querySelector('[data-lid]')?.dataset.lid;
+  if (lecId && !completed.includes(lecId)) {
+    completed.push(lecId);
+    localStorage.setItem(key, JSON.stringify(completed));
+    toast('Lecture marked as complete! 🎓', 'success');
+  }
+}
+
+function isLectureCompleted(lecId) {
+  const currentUserId = window.Telegram?.WebApp?.initDataUnsafe?.user?.id || 'anonymous';
+  const key = 'completed_lectures_' + currentUserId;
+  const completed = JSON.parse(localStorage.getItem(key) || '[]');
+  return completed.includes(lecId);
+}
+
+function updateLectureButton(lecId, btnElement) {
+  if (isLectureCompleted(lecId)) {
+    btnElement.innerHTML = '<i class="ti ti-check"></i> Completed';
+    btnElement.style.background = 'linear-gradient(135deg,var(--green),#16a34a)';
+    btnElement.disabled = true;
+  }
 }
 </script>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@2.44.0/tabler-icons.min.css">
