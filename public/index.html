@@ -1124,6 +1124,7 @@ function openChapter(bid, sid, cid) {
         _popupLectures[l._id] = l;
         return `
         <div class="lec-row">
+          ${_watchCheckHtml(l._id)}
           <div class="lec-num">${i+1}</div>
           <div class="lec-info">
             <div class="lec-name">${l.name}</div>
@@ -1147,6 +1148,7 @@ function openChapter(bid, sid, cid) {
         _popupLectures[l._id] = l;
         return `
         <div class="lec-row">
+          ${_watchCheckHtml(l._id)}
           <div class="lec-num">${i+1}</div>
           <div class="lec-info">
             <div class="lec-name">${l.name}</div>
@@ -1178,6 +1180,7 @@ function openUnit(bid, sid, cid, uid) {
       _popupLectures[l._id] = l;
       return `
       <div class="lec-row">
+        ${_watchCheckHtml(l._id)}
         <div class="lec-num">${i+1}</div>
         <div class="lec-info">
           <div class="lec-name">${l.name}</div>
@@ -2453,6 +2456,42 @@ function openLecLink(codeOrLink, type) {
   openLink(url, type || 'lecture');
 }
 
+// ── Watched Lecture Tracking (localStorage, per-user) ──────────────────────────
+function _watchedLecStorageKey() {
+  return 'watched_lectures_' + getUserId();
+}
+function _getWatchedLecSet() {
+  try {
+    var raw = localStorage.getItem(_watchedLecStorageKey());
+    return raw ? JSON.parse(raw) : {};
+  } catch (e) { return {}; }
+}
+function isLectureWatched(lecId) {
+  if (!lecId) return false;
+  return !!_getWatchedLecSet()[lecId];
+}
+function toggleLectureWatched(lecId, btnEl, ev) {
+  if (ev) { ev.stopPropagation(); ev.preventDefault(); }
+  if (!lecId) return;
+  var watched = _getWatchedLecSet();
+  var nowWatched = !watched[lecId];
+  if (nowWatched) watched[lecId] = true; else delete watched[lecId];
+  try { localStorage.setItem(_watchedLecStorageKey(), JSON.stringify(watched)); } catch (e) {}
+  _applyWatchedUI(btnEl, nowWatched);
+  toast(nowWatched ? 'Marked as watched ✓' : 'Unmarked', 'success');
+}
+function _applyWatchedUI(btnEl, watched) {
+  if (!btnEl) return;
+  btnEl.classList.toggle('is-watched', watched);
+  var row = btnEl.closest('.lec-row');
+  if (row) row.classList.toggle('is-watched-row', watched);
+}
+function _watchCheckHtml(lecId) {
+  if (!lecId) return '';
+  var watched = isLectureWatched(lecId);
+  return `<div class="lec-watch-check${watched ? ' is-watched' : ''}" data-lid="${lecId}" onclick="toggleLectureWatched('${lecId}', this, event)"><i class="ti ti-check"></i></div>`;
+}
+
 function getUserId() {
   var tgUser = tg && tg.initDataUnsafe && tg.initDataUnsafe.user;
   return tgUser ? String(tgUser.id) : 'guest_' + (localStorage.getItem('guest_id') || (function(){ var id=Math.random().toString(36).slice(2); localStorage.setItem('guest_id',id); return id; })());
@@ -3175,7 +3214,28 @@ body.light-mode .popup-lec-btn-notes{background:var(--surface2);color:var(--text
   backface-visibility:hidden;
   -webkit-backface-visibility:hidden;
   transform:translateZ(0);
+  position:relative;
 }
+.lec-watch-check{
+  position:absolute;top:8px;right:8px;
+  width:24px;height:24px;border-radius:50%;
+  border:1.5px solid var(--border);
+  background:var(--surface2);
+  display:flex;align-items:center;justify-content:center;
+  cursor:pointer;flex-shrink:0;
+  transition:background 0.18s,border-color 0.18s,transform 0.15s;
+  -webkit-tap-highlight-color:transparent;
+  z-index:2;
+}
+.lec-watch-check i{font-size:13px;color:transparent;transition:color 0.18s}
+.lec-watch-check:active{transform:scale(0.88)}
+.lec-watch-check.is-watched{
+  background:linear-gradient(135deg,#22c55e,#16a34a);
+  border-color:transparent;
+  box-shadow:0 2px 8px rgba(34,197,94,0.35);
+}
+.lec-watch-check.is-watched i{color:#fff}
+.lec-row.is-watched-row{border-color:rgba(34,197,94,0.35)}
 .lec-num {
   width:36px;height:36px;border-radius:10px;
   background:linear-gradient(135deg,var(--accent),var(--accent2));
