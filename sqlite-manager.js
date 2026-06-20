@@ -252,8 +252,8 @@ async function syncFromMongo(mongoose) {
     const Referral = mongoose.models.Referral;
     if (Referral) {
       const refs = await Referral.find({}).lean();
-      const upsertRef = db.prepare(`INSERT INTO referrals(id,referrerId,referredId,createdAt)
-        VALUES(?,?,?,?) ON CONFLICT(id) DO NOTHING`);
+      const upsertRef = db.prepare(`INSERT OR IGNORE INTO referrals(id,referrerId,referredId,createdAt)
+        VALUES(?,?,?,?)`);
       const refTx = db.transaction(() => {
         for (const r of refs) upsertRef.run(
           String(r._id), r.referrerId, r.referredId,
@@ -318,18 +318,30 @@ async function syncFromMongo(mongoose) {
       const upsertFile = db.prepare(`INSERT INTO file_records(id,code,file_id,file_type,file_name,uploaded_by,expires_at,delivered_to,created_at,channel_msg_id)
         VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET
         file_id=excluded.file_id,delivered_to=excluded.delivered_to,channel_msg_id=excluded.channel_msg_id`);
+      let skipped = 0;
       const fileTx = db.transaction(() => {
-        for (const f of files) upsertFile.run(
-          String(f._id), f.code, f.file_id, f.file_type, f.file_name||'file',
-          f.uploaded_by||null,
-          f.expires_at ? new Date(f.expires_at).getTime() : null,
-          JSON.stringify(f.delivered_to||[]),
-          new Date(f.created_at||0).getTime(),
-          f.channel_msg_id||null
-        );
+        for (const f of files) {
+          try {
+            upsertFile.run(
+              String(f._id), f.code, f.file_id, f.file_type, f.file_name||'file',
+              f.uploaded_by||null,
+              f.expires_at ? new Date(f.expires_at).getTime() : null,
+              JSON.stringify(f.delivered_to||[]),
+              new Date(f.created_at||0).getTime(),
+              f.channel_msg_id||null
+            );
+          } catch (rowErr) {
+            // Duplicate `code` from a different _id — skip this row, don't abort the sync
+            if (/UNIQUE constraint failed: file_records\.code/.test(rowErr.message)) {
+              skipped++;
+            } else {
+              throw rowErr;
+            }
+          }
+        }
       });
       fileTx();
-      console.log(`  ✅ FileRecords: ${files.length}`);
+      console.log(`  ✅ FileRecords: ${files.length}${skipped ? ` (skipped ${skipped} duplicate code)` : ''}`);
     }
   } catch (e) { console.error('  ❌ FileRecords sync error:', e.message); }
 
