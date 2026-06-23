@@ -671,7 +671,7 @@ router.post('/refer/record', async (req, res) => {
 // Pehla lecture watch hone pe pending referral confirm karo
 router.post('/refer/confirm-first-watch', async (req, res) => {
   try {
-    const { referredId } = req.body;
+    const { referredId, referredName } = req.body;
     if (!referredId) return res.status(400).json({ error: 'referredId required' });
 
     // Already confirmed?
@@ -694,6 +694,27 @@ router.post('/refer/confirm-first-watch', async (req, res) => {
     const id = db.generateId();
     db.referral.insert({ id, referrerId: pendingRef.referrerId, referredId });
     Referral.create({ referrerId: pendingRef.referrerId, referredId }).catch(() => {});
+
+    // Send Telegram notification to referrer
+    // Get updated points for display
+    const referralPoints = db.referral.countByReferrer(pendingRef.referrerId) * 5;
+    const spinPts = db.spinPoints ? db.spinPoints.getTotal(pendingRef.referrerId) : 0;
+    const usedPts = db.pointsUsage ? db.pointsUsage.getTotalUsed(pendingRef.referrerId) : 0;
+    const availablePts = Math.max(0, referralPoints + spinPts - usedPts);
+
+    // Fire bot message async — don't block the response
+    const displayName = referredName || 'Ek naye dost';
+    if (global._botInstance) {
+      global._botInstance.sendMessage(
+        parseInt(pendingRef.referrerId),
+        `🎉 <b>Referral Point Mila!</b>\n\n` +
+        `👤 <b>${displayName}</b> ne apna pehla lecture dekha!\n\n` +
+        `⭐ <b>+5 Points</b> aapke account mein add ho gaye!\n` +
+        `💰 <b>Total Points: ${availablePts}</b>\n\n` +
+        `🎯 <i>Aur dosto ko refer karo — aur points kamao!</i>`,
+        { parse_mode: 'HTML' }
+      ).catch(function(e) { console.error('Referral notify failed:', e.message); });
+    }
 
     res.json({ confirmed: true, referrerId: pendingRef.referrerId });
   } catch (e) { res.status(500).json({ error: e.message }); }
