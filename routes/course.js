@@ -8,6 +8,9 @@ const db = require("../sqlite-manager");
 // MongoDB connection check
 function isMongo() { return mongoose.connection.readyState === 1; }
 
+// Points awarded per successful referral
+const POINTS_PER_REFERRAL = 5;
+
 // Helper: find subdoc by _id (replaces mongoose .id() on plain objects)
 function _findById(arr, id) { return (arr||[]).find(x => String(x._id) === String(id)) || null; }
 
@@ -614,7 +617,7 @@ const Referral = mongoose.model('Referral', referralSchema);
 router.get('/refer/stats/:userId', (req, res) => {
   try {
     const userId = req.params.userId;
-    const referralPoints = db.referral.countByReferrer(userId);
+    const referralPoints = db.referral.countByReferrer(userId) * POINTS_PER_REFERRAL;
     // Spin points earned from daily spinner
     const earnedSpinPoints = db.spinPoints ? db.spinPoints.getTotal(userId) : 0;
     const totalPoints = referralPoints + earnedSpinPoints;
@@ -710,15 +713,15 @@ router.post('/refer/redeem', async (req, res) => {
     // Tier validate
     const TIERS = {
       access_24h:   { cost: 1,  label: '24h Free Access' },
-      premium_1d:   { cost: 5,  label: '1 Batch 1-Day Premium', needsBatch: true },
-      premium_7d:   { cost: 20, label: '1 Batch 7-Day Premium', needsBatch: true },
+      premium_1d:   { cost: 10, label: '1 Batch 1-Day Premium', needsBatch: true },
+      premium_7d:   { cost: 50, label: '1 Batch 7-Day Premium', needsBatch: true },
     };
     const tierInfo = TIERS[tier];
     if (!tierInfo) return res.status(400).json({ error: 'Invalid tier' });
     if (tierInfo.needsBatch && !batchId) return res.status(400).json({ error: 'Batch select karo' });
 
     // Current points check — referral points + spin earned points combined
-    const referralPoints = db.referral.countByReferrer(userId);
+    const referralPoints = db.referral.countByReferrer(userId) * POINTS_PER_REFERRAL;
     const earnedSpinPoints = db.spinPoints ? db.spinPoints.getTotal(userId) : 0;
     const totalPoints = referralPoints + earnedSpinPoints;
     const usedPoints = (db.pointsUsage && db.pointsUsage.getTotalUsed) ? db.pointsUsage.getTotalUsed(userId) : 0;
@@ -869,7 +872,7 @@ router.post('/refer/redeem', async (req, res) => {
 router.get('/refer/points/:userId', async (req, res) => {
   try {
     const userId = req.params.userId;
-    const referralPoints = db.referral.countByReferrer(userId);
+    const referralPoints = db.referral.countByReferrer(userId) * POINTS_PER_REFERRAL;
     const earnedSpinPoints = db.spinPoints ? db.spinPoints.getTotal(userId) : 0;
     const totalPoints = referralPoints + earnedSpinPoints;
     const usedPoints = db.pointsUsage.getTotalUsed(userId);
@@ -913,7 +916,7 @@ router.post('/spin-reward', async (req, res) => {
     db.spinPoints.add({ id: spinId, userId: String(userId), points });
 
     // Return updated totals
-    const referralPoints = db.referral.countByReferrer(String(userId));
+    const referralPoints = db.referral.countByReferrer(String(userId)) * POINTS_PER_REFERRAL;
     const totalSpinPoints = db.spinPoints.getTotal(String(userId));
     const usedPoints = db.pointsUsage.getTotalUsed(String(userId));
     const availablePoints = Math.max(0, referralPoints + totalSpinPoints - usedPoints);
