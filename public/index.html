@@ -344,8 +344,8 @@ body.ready{transition:none}
 .spinner-wrap{display:flex;flex-direction:column;align-items:center;gap:14px;margin-bottom:18px}
 .spinner-canvas-wrap{position:relative;width:260px;height:260px}
 #spinnerCanvas{border-radius:50%;box-shadow:0 0 0 4px var(--border),0 4px 24px rgba(0,0,0,0.35)}
-/* Pointer triangle at top center */
-.spinner-pointer{position:absolute;top:-14px;left:50%;transform:translateX(-50%);width:0;height:0;border-left:12px solid transparent;border-right:12px solid transparent;border-bottom:22px solid #f59e0b;filter:drop-shadow(0 2px 4px rgba(0,0,0,0.4))}
+/* Pointer triangle at BOTTOM center pointing UP into the wheel */
+.spinner-pointer{position:absolute;bottom:-14px;left:50%;transform:translateX(-50%);width:0;height:0;border-left:12px solid transparent;border-right:12px solid transparent;border-top:22px solid #f59e0b;filter:drop-shadow(0 -2px 4px rgba(0,0,0,0.4))}
 .spinner-center-btn{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:52px;height:52px;border-radius:50%;background:linear-gradient(135deg,var(--accent),var(--accent2));border:3px solid var(--bg);box-shadow:0 2px 12px rgba(0,0,0,0.4);display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:18px;transition:transform 0.15s,box-shadow 0.15s;color:#fff;font-weight:700}
 .spinner-center-btn:active{transform:translate(-50%,-50%) scale(0.92)}
 .spinner-center-btn:disabled{opacity:0.5;cursor:not-allowed}
@@ -4087,13 +4087,14 @@ async function adminDeleteCoupon(id) {
 
 // ── Earn / Daily Spinner ──────────────────────────────────────────────────────
 
-// Spinner wheel segments: value 1 appears most often, 5 is rarest
-// Weighted distribution: [1,1,1,1,2,2,2,3,3,4] — 5 is possible but very rare
-var SPIN_SEGMENTS = [1, 1, 1, 1, 2, 2, 2, 3, 3, 4];
+// Spinner wheel segments: weighted — 1 most common, 5 very rare
+// 12 total segments: 1×4, 2×3, 3×2, 4×2, 5×1
+var SPIN_SEGMENTS = [1, 2, 3, 1, 4, 2, 1, 3, 2, 1, 4, 5];
 
-// Segment colors — alternating palette
-var SPIN_COLORS = ['#4f8ef7','#7c5cbf','#22c55e','#f59e0b','#ef4444',
-                   '#06b6d4','#ec4899','#a855f7','#f97316','#10b981'];
+// Segment colors — one per segment
+var SPIN_COLORS = ['#4f8ef7','#f59e0b','#22c55e','#ef4444','#7c5cbf',
+                   '#06b6d4','#f97316','#ec4899','#10b981','#a855f7',
+                   '#e11d48','#0ea5e9'];
 
 var SPIN_MAX_PER_DAY = 5; // Daily spin limit
 
@@ -4132,7 +4133,9 @@ function _saveSpinState(state) {
   localStorage.setItem('edubot_spin_state', JSON.stringify(state));
 }
 
-/** Draw the spinner wheel on canvas using current _spinAngle. */
+/** Draw the spinner wheel on canvas using current _spinAngle.
+ *  Pointer is at BOTTOM. Winning segment = the one whose center lands at Math.PI/2 (bottom).
+ */
 function _drawWheel() {
   var canvas = document.getElementById('spinnerCanvas');
   if (!canvas) return;
@@ -4148,6 +4151,7 @@ function _drawWheel() {
   for (var i = 0; i < n; i++) {
     var startA = _spinAngle + i * arc;
     var endA = startA + arc;
+    var midA = startA + arc / 2;
 
     // Slice fill
     ctx.beginPath();
@@ -4157,29 +4161,39 @@ function _drawWheel() {
     ctx.fillStyle = SPIN_COLORS[i % SPIN_COLORS.length];
     ctx.fill();
 
-    // Thin border
-    ctx.strokeStyle = 'rgba(0,0,0,0.18)';
-    ctx.lineWidth = 1.5;
+    // Divider lines
+    ctx.strokeStyle = 'rgba(0,0,0,0.25)';
+    ctx.lineWidth = 2;
     ctx.stroke();
 
-    // Label text
+    // Label: rotate to segment center, draw text outward
     ctx.save();
     ctx.translate(cx, cy);
-    ctx.rotate(startA + arc / 2);
-    ctx.textAlign = 'right';
+    ctx.rotate(midA);
+    ctx.textAlign = 'center';
     ctx.fillStyle = '#ffffff';
-    ctx.font = 'bold 18px system-ui, sans-serif';
-    ctx.shadowColor = 'rgba(0,0,0,0.4)';
-    ctx.shadowBlur = 3;
-    ctx.fillText(SPIN_SEGMENTS[i], r - 16, 6);
+    ctx.font = 'bold 20px system-ui, sans-serif';
+    ctx.shadowColor = 'rgba(0,0,0,0.5)';
+    ctx.shadowBlur = 4;
+    ctx.fillText(String(SPIN_SEGMENTS[i]), r * 0.62, 7);
     ctx.restore();
   }
 
-  // Center circle cover (so center btn looks clean)
+  // Outer ring highlight
   ctx.beginPath();
-  ctx.arc(cx, cy, 26, 0, 2 * Math.PI);
-  ctx.fillStyle = 'var(--bg)';
+  ctx.arc(cx, cy, r, 0, 2 * Math.PI);
+  ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+  ctx.lineWidth = 3;
+  ctx.stroke();
+
+  // Center circle cover
+  ctx.beginPath();
+  ctx.arc(cx, cy, 28, 0, 2 * Math.PI);
+  ctx.fillStyle = '#1a1a2e';
   ctx.fill();
+  ctx.strokeStyle = 'rgba(255,255,255,0.2)';
+  ctx.lineWidth = 2;
+  ctx.stroke();
 }
 
 /** Update the spins-left UI and spin button state. */
@@ -4270,16 +4284,26 @@ function startSpin() {
   _spinPending = false;
   _updateSpinUI();
 
-  // Calculate target angle: land result segment at top (pointer position)
-  // Pointer is at top = -Math.PI/2 relative to 0
+  // Pointer is at BOTTOM of wheel = Math.PI/2 in canvas coords.
+  // We want: _spinAngle + resultIdx * arc + arc/2 = Math.PI/2 (mod 2PI)
+  // So: _spinAngle_target = Math.PI/2 - resultIdx * arc - arc/2
   var n = SPIN_SEGMENTS.length;
   var arc = (2 * Math.PI) / n;
-  // Angle where resultIdx segment center would point up:
-  var targetSegmentCenter = -(resultIdx * arc + arc / 2);
-  // Extra full rotations for effect (8–12 full spins)
-  var extraSpins = (8 + Math.floor(Math.random() * 5)) * 2 * Math.PI;
-  var currentNorm = _spinAngle % (2 * Math.PI);
-  var delta = ((targetSegmentCenter - currentNorm) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI);
+
+  // Target base angle (where wheel must rest so winning segment faces bottom pointer)
+  var targetBase = Math.PI / 2 - (resultIdx * arc + arc / 2);
+
+  // Normalize current angle to [0, 2PI)
+  var currentNorm = ((_spinAngle % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+  var targetNorm = ((targetBase % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+
+  // How much more to rotate clockwise to reach target
+  var delta = (targetNorm - currentNorm + 2 * Math.PI) % (2 * Math.PI);
+  // Ensure we always spin at least a bit (avoid 0-delta snap)
+  if (delta < 0.5) delta += 2 * Math.PI;
+
+  // Add extra full spins for visual effect (10–14 full rotations)
+  var extraSpins = (10 + Math.floor(Math.random() * 5)) * 2 * Math.PI;
   var totalAngle = _spinAngle + extraSpins + delta;
 
   var start = null;
@@ -4353,14 +4377,38 @@ function _awardSpinPoints(pts) {
   _saveSpinState(state);
   _spinPending = false;
 
-  // Also sync with referral points so redeem works
-  // We piggyback onto the existing referPoints display
+  // Sync points to backend — send TG initData for server-side verification
+  var uid = getUserId ? getUserId() : null;
+  var initData = tg ? tg.initData : '';
+  if (uid && initData) {
+    fetch('/api/spin-reward', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-tg-init-data': initData   // Required for server-side user verification
+      },
+      body: JSON.stringify({ userId: uid, points: pts })
+    }).then(function(r) { return r.json(); }).then(function(data) {
+      // Sync server's authoritative point count back to UI
+      if (data.availablePoints !== undefined) {
+        var rpEl = document.getElementById('referPoints');
+        if (rpEl) rpEl.textContent = data.availablePoints;
+        var rdEl = document.getElementById('rewardPointsDisplay');
+        if (rdEl) rdEl.textContent = data.availablePoints;
+      }
+    }).catch(function() { /* silent fail — localStorage still tracks locally */ });
+  }
+
+  // Update refer tab points display if visible (always update regardless of current value)
   var rpEl = document.getElementById('referPoints');
-  if (rpEl && rpEl.textContent !== '–') {
+  if (rpEl) {
     var existing = parseInt(rpEl.textContent) || 0;
     rpEl.textContent = existing + pts;
-    var rdEl = document.getElementById('rewardPointsDisplay');
-    if (rdEl) rdEl.textContent = existing + pts;
+  }
+  var rdEl = document.getElementById('rewardPointsDisplay');
+  if (rdEl) {
+    var existingR = parseInt(rdEl.textContent) || 0;
+    rdEl.textContent = existingR + pts;
   }
 
   _updateSpinUI();
