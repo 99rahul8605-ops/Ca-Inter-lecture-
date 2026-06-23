@@ -1054,11 +1054,31 @@ router.get('/stats', (req, res) => {
         });
       });
     });
+
+    // Total spin points awarded across all users
+    const totalSpinPointsRow = db.getDb().prepare(`SELECT SUM(points) as t FROM spin_points`).get();
+    const totalSpinPoints = totalSpinPointsRow ? (totalSpinPointsRow.t || 0) : 0;
+    const totalSpinners = db.getDb().prepare(`SELECT COUNT(DISTINCT userId) as c FROM spin_points`).get().c || 0;
+
+    // Today's spins
+    const now = new Date();
+    const dayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    const todaySpins = db.getDb().prepare(`SELECT COUNT(*) as c FROM spin_points WHERE createdAt >= ?`).get(dayStart).c || 0;
+
+    // Points redeemed total
+    const totalRedeemedRow = db.getDb().prepare(`SELECT SUM(pointsUsed) as t FROM points_usage`).get();
+    const totalRedeemed = totalRedeemedRow ? (totalRedeemedRow.t || 0) : 0;
+
+    // New users today
+    const newToday = db.getDb().prepare(`SELECT COUNT(*) as c FROM users WHERE firstSeen >= ?`).get(dayStart).c || 0;
+
     res.json({
       content: { totalBatches, publicBatches, privateBatches: totalBatches - publicBatches, totalSubjects, totalChapters, totalLectures },
-      users: { totalUsers: db.user.count(), recentUsers: db.user.countSince(Date.now() - 7*24*60*60*1000) },
-      access: { totalAccess: db.access.count(), activeAccess: db.access.countActive() },
+      users: { totalUsers: db.user.count(), recentUsers: db.user.countSince(Date.now() - 7*24*60*60*1000), newToday },
+      access: { totalAccess: db.access.count(), activeAccess: db.access.countActive(), grantedToday: db.access.countToday() },
       referrals: { totalReferrals: db.referral.count(), uniqueReferrers: db.referral.distinctReferrers() },
+      points: { totalSpinPoints, totalSpinners, todaySpins, totalRedeemed },
+      files: { total: db.fileRecord.count(), bulk: db.bulkBatch.count() },
     });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
