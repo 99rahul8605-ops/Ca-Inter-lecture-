@@ -614,10 +614,13 @@ const Referral = mongoose.model('Referral', referralSchema);
 router.get('/refer/stats/:userId', (req, res) => {
   try {
     const userId = req.params.userId;
-    const totalPoints = db.referral.countByReferrer(userId);
+    const referralPoints = db.referral.countByReferrer(userId);
+    // Spin points earned from daily spinner
+    const earnedSpinPoints = db.spinPoints ? db.spinPoints.getTotal(userId) : 0;
+    const totalPoints = referralPoints + earnedSpinPoints;
     const usedPoints = (db.pointsUsage && db.pointsUsage.getTotalUsed) ? db.pointsUsage.getTotalUsed(userId) : 0;
     const availablePoints = Math.max(0, totalPoints - usedPoints);
-    res.json({ referrals: totalPoints, points: availablePoints });
+    res.json({ referrals: referralPoints, spinPoints: earnedSpinPoints, points: availablePoints });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -714,8 +717,10 @@ router.post('/refer/redeem', async (req, res) => {
     if (!tierInfo) return res.status(400).json({ error: 'Invalid tier' });
     if (tierInfo.needsBatch && !batchId) return res.status(400).json({ error: 'Batch select karo' });
 
-    // Current points check
-    const totalPoints = db.referral.countByReferrer(userId);
+    // Current points check — referral points + spin earned points combined
+    const referralPoints = db.referral.countByReferrer(userId);
+    const earnedSpinPoints = db.spinPoints ? db.spinPoints.getTotal(userId) : 0;
+    const totalPoints = referralPoints + earnedSpinPoints;
     const usedPoints = (db.pointsUsage && db.pointsUsage.getTotalUsed) ? db.pointsUsage.getTotalUsed(userId) : 0;
     const availablePoints = Math.max(0, totalPoints - usedPoints);
     if (availablePoints < tierInfo.cost) {
@@ -860,17 +865,64 @@ router.post('/refer/redeem', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// Get available (unused) points for a user
+// Get available (unused) points for a user — includes referral + spin earned points
 router.get('/refer/points/:userId', async (req, res) => {
   try {
     const userId = req.params.userId;
-    const totalPoints = db.referral.countByReferrer(userId);
-
+    const referralPoints = db.referral.countByReferrer(userId);
+    const earnedSpinPoints = db.spinPoints ? db.spinPoints.getTotal(userId) : 0;
+    const totalPoints = referralPoints + earnedSpinPoints;
     const usedPoints = db.pointsUsage.getTotalUsed(userId);
     const availablePoints = Math.max(0, totalPoints - usedPoints);
 
-    res.json({ totalPoints, usedPoints, availablePoints });
+    res.json({ totalPoints, referralPoints, spinPoints: earnedSpinPoints, usedPoints, availablePoints });
   } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Spin Reward ───────────────────────────────────────────────────────────────
+// Called from frontend after ad is watched successfully post-spin.
+// Validates user via TG initData, then credits spin points to DB.
+
+router.post('/api/spin-reward', async (req, res) => {
+  try {
+    // Verify user identity from TG initData header (same as getRequestUserId)
+    const verifiedUserId = getRequestUserId(req);
+    const { userId, points } = req.body;
+
+    // Accept only if initData userId matches body userId (prevents spoofing)
+    if (!verifiedUserId) return res.status(401).json({ error: 'Unauthorized — invalid initData' });
+    if (String(verifiedUserId) !== String(userId)) return res.status(403).json({ error: 'userId mismatch' });
+    if (!points || typeof points !== 'number' || points < 1 || points > 5) {
+      return res.status(400).json({ error: 'Invalid points value (1–5 allowed)' });
+    }
+
+    // Rate limit: max 5 spins per day per user using spin_points table
+    const today = new Date();
+    const dayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
+    const dayEnd = dayStart + 86400000;
+    const spinsToday = db.getDb().prepare(
+      `SELECT COUNT(*) as c FROM spin_points WHERE userId=? AND createdAt >= ? AND createdAt < ?`
+    ).get(String(userId), dayStart, dayEnd).c;
+
+    if (spinsToday >= 5) {
+      return res.status(429).json({ error: 'Daily spin limit (5) reached. Kal wapas aao!' });
+    }
+
+    // Save spin points to DB
+    const spinId = require('crypto').randomBytes(12).toString('hex');
+    db.spinPoints.add({ id: spinId, userId: String(userId), points });
+
+    // Return updated totals
+    const referralPoints = db.referral.countByReferrer(String(userId));
+    const totalSpinPoints = db.spinPoints.getTotal(String(userId));
+    const usedPoints = db.pointsUsage.getTotalUsed(String(userId));
+    const availablePoints = Math.max(0, referralPoints + totalSpinPoints - usedPoints);
+
+    res.json({ success: true, pointsAwarded: points, availablePoints, spinsToday: spinsToday + 1 });
+  } catch (e) {
+    console.error('spin-reward error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // ── Force Join ────────────────────────────────────────────────────────────────
