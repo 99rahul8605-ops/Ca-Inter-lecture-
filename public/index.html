@@ -3667,6 +3667,11 @@ function getReferLink() {
   return 'https://t.me/' + (window._botUsername || '') + '?start=ref_' + uid;
 }
 
+// Flag set to true after spin award — prevents loadReferStats from overwriting
+// fresh points until server confirms the new total
+var _spinJustAwarded = false;
+var _spinAwardedTotal = 0; // The server-confirmed total after spin
+
 async function loadReferStats() {
   var uid = getUserId();
   if (!uid) return;
@@ -3683,7 +3688,15 @@ async function loadReferStats() {
     var countEl = document.getElementById('referCount');
     var pointsEl = document.getElementById('referPoints');
     if (countEl) countEl.textContent = data.referrals || 0;
-    if (pointsEl) pointsEl.textContent = data.points || 0;
+    // If spin was just awarded and server hasn't processed yet, use our local value
+    if (_spinJustAwarded) {
+      // Keep the higher of: server value vs our locally tracked total
+      var serverPts = parseInt(data.points) || 0;
+      var displayPts = Math.max(serverPts, _spinAwardedTotal);
+      if (pointsEl) pointsEl.textContent = displayPts;
+    } else {
+      if (pointsEl) pointsEl.textContent = data.points || 0;
+    }
   } catch(e) {
     console.error('Refer stats error:', e);
   }
@@ -4387,6 +4400,19 @@ function _awardSpinPoints(pts) {
   _updateSpinUI();
 
   // 3. POST to backend — update DB + get fresh authoritative total
+  // Set flag so loadReferStats doesn't overwrite our fresh points
+  _spinJustAwarded = true;
+  var currentShown = parseInt((document.getElementById('referPoints') || {}).textContent) || 0;
+  _spinAwardedTotal = currentShown + pts; // Optimistic total until server confirms
+
+  // Update UI optimistically right now
+  var rpEl = document.getElementById('referPoints');
+  if (rpEl) rpEl.textContent = _spinAwardedTotal;
+  var rdEl = document.getElementById('rewardPointsDisplay');
+  if (rdEl) rdEl.textContent = _spinAwardedTotal;
+  var epEl = document.getElementById('earnTotalPoints');
+  if (epEl) epEl.textContent = _spinAwardedTotal;
+
   if (uid && initData) {
     fetch('/api/spin-reward', {
       method: 'POST',
@@ -4399,30 +4425,26 @@ function _awardSpinPoints(pts) {
     .then(function(r) { return r.json(); })
     .then(function(data) {
       if (data && data.availablePoints !== undefined) {
-        // Server confirmed — update refer tab with authoritative value
-        var rpEl = document.getElementById('referPoints');
-        if (rpEl) rpEl.textContent = data.availablePoints;
-        var rdEl = document.getElementById('rewardPointsDisplay');
-        if (rdEl) rdEl.textContent = data.availablePoints;
-        // Also update earn page badge
-        var epEl = document.getElementById('earnTotalPoints');
-        if (epEl) epEl.textContent = data.availablePoints;
+        // Server confirmed — set authoritative total and clear flag
+        _spinAwardedTotal = data.availablePoints;
+        var rpEl2 = document.getElementById('referPoints');
+        if (rpEl2) rpEl2.textContent = data.availablePoints;
+        var rdEl2 = document.getElementById('rewardPointsDisplay');
+        if (rdEl2) rdEl2.textContent = data.availablePoints;
+        var epEl2 = document.getElementById('earnTotalPoints');
+        if (epEl2) epEl2.textContent = data.availablePoints;
       }
+      // Clear flag after 10 seconds (enough time for any in-flight loadReferStats to settle)
+      setTimeout(function() { _spinJustAwarded = false; }, 10000);
     })
     .catch(function(err) {
-      // API failed — fallback: add pts to whatever is currently shown
-      console.warn('spin-reward API failed, using local fallback:', err);
-      var rpEl = document.getElementById('referPoints');
-      if (rpEl) rpEl.textContent = (parseInt(rpEl.textContent) || 0) + pts;
-      var rdEl = document.getElementById('rewardPointsDisplay');
-      if (rdEl) rdEl.textContent = (parseInt(rdEl.textContent) || 0) + pts;
+      console.warn('spin-reward API failed, keeping optimistic value:', err);
+      // Keep optimistic value — clear flag after delay
+      setTimeout(function() { _spinJustAwarded = false; }, 10000);
     });
   } else {
-    // No TG initData (testing in browser) — just update UI locally
-    var rpEl = document.getElementById('referPoints');
-    if (rpEl) rpEl.textContent = (parseInt(rpEl.textContent) || 0) + pts;
-    var rdEl = document.getElementById('rewardPointsDisplay');
-    if (rdEl) rdEl.textContent = (parseInt(rdEl.textContent) || 0) + pts;
+    // No TG initData (browser testing) — optimistic value already set above
+    setTimeout(function() { _spinJustAwarded = false; }, 10000);
   }
 }
 
