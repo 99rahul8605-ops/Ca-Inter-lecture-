@@ -639,13 +639,66 @@ async function startBot() {
   bot.onText(/\/stats/, async (msg) => {
     if(isGroupChat(msg)||!isOwner(msg.from?.id)) return;
     const chatId=msg.chat.id;
-    const processing=await bot.sendMessage(chatId,"⏳ Fetching stats...");
+    const processing=await bot.sendMessage(chatId,"⏳ Gathering stats...");
     try {
       const s=await (await fetch(`http://localhost:${PORT}/api/stats`)).json();
-      const uptime=process.uptime(); const h=Math.floor(uptime/3600); const m=Math.floor((uptime%3600)/60);
-      const text=`📊 <b>Bot Stats</b>\n\n👤 <b>Users</b>\n• Total: ${s.users.totalUsers}\n• New This Week: ${s.users.recentUsers}\n\n📚 <b>Content</b>\n• Batches: ${s.content.totalBatches} (🟢 ${s.content.publicBatches} · 🔒 ${s.content.privateBatches})\n• Subjects: ${s.content.totalSubjects} | Chapters: ${s.content.totalChapters} | Lectures: ${s.content.totalLectures}\n\n📁 <b>File Store</b>\n• Files: ${db.fileRecord.count()} | Bulk: ${db.bulkBatch.count()}\n\n🔑 <b>Access</b>\n• Total: ${s.access.totalAccess} | Active: ${s.access.activeAccess}\n\n👥 <b>Referrals</b>\n• Total: ${s.referrals.totalReferrals} | Referrers: ${s.referrals.uniqueReferrers}\n\n⚙️ <b>Server</b>\n• Uptime: ${h}h ${m}m\n• MongoDB: ${mongoose.connection.readyState===1?"🟢 Connected":"🔴 Disconnected"}\n• SQLite: ✅ Active (all reads)`;
+
+      // Uptime formatting
+      const uptime=process.uptime();
+      const ud=Math.floor(uptime/86400), uh=Math.floor((uptime%86400)/3600), um=Math.floor((uptime%3600)/60);
+      const uptimeStr = ud>0 ? `${ud}d ${uh}h ${um}m` : uh>0 ? `${uh}h ${um}m` : `${um}m`;
+
+      // DB status
+      const mongoStatus = mongoose.connection.readyState===1 ? "🟢 Online" : "🔴 Offline";
+
+      // Build message
+      const text = [
+        `╔═══════════════════════╗`,
+        `      📊 <b>BOT DASHBOARD</b>`,
+        `╚═══════════════════════╝`,
+        ``,
+        `👥 <b>USERS</b>`,
+        `┣ Total Users: <b>${s.users.totalUsers.toLocaleString()}</b>`,
+        `┣ New Today: <b>+${s.users.newToday}</b>`,
+        `┗ This Week: <b>+${s.users.recentUsers}</b>`,
+        ``,
+        `📚 <b>CONTENT</b>`,
+        `┣ Batches: <b>${s.content.totalBatches}</b> (🟢 ${s.content.publicBatches} Public · 🔒 ${s.content.privateBatches} Private)`,
+        `┣ Subjects: <b>${s.content.totalSubjects}</b>  |  Chapters: <b>${s.content.totalChapters}</b>`,
+        `┗ Lectures: <b>${s.content.totalLectures}</b>`,
+        ``,
+        `🔑 <b>ACCESS</b>`,
+        `┣ Total Granted: <b>${s.access.totalAccess}</b>`,
+        `┣ Granted Today: <b>+${s.access.grantedToday}</b>`,
+        `┗ Currently Active: <b>${s.access.activeAccess}</b>`,
+        ``,
+        `👫 <b>REFERRALS</b>`,
+        `┣ Total Referrals: <b>${s.referrals.totalReferrals}</b>`,
+        `┗ Unique Referrers: <b>${s.referrals.uniqueReferrers}</b>`,
+        ``,
+        `🎰 <b>SPIN WHEEL</b>`,
+        `┣ Spins Today: <b>${s.points.todaySpins}</b>`,
+        `┣ Total Spinners: <b>${s.points.totalSpinners}</b>`,
+        `┣ Total Pts Earned: <b>${s.points.totalSpinPoints}</b>`,
+        `┗ Total Pts Redeemed: <b>${s.points.totalRedeemed}</b>`,
+        ``,
+        `📁 <b>FILE STORE</b>`,
+        `┣ Files: <b>${s.files.total}</b>`,
+        `┗ Bulk Batches: <b>${s.files.bulk}</b>`,
+        ``,
+        `⚙️ <b>SERVER</b>`,
+        `┣ Uptime: <b>${uptimeStr}</b>`,
+        `┣ MongoDB: ${mongoStatus}`,
+        `┗ SQLite: ✅ Active`,
+        ``,
+        `<i>🕐 ${new Date().toLocaleString('en-IN', {timeZone:'Asia/Kolkata'})}</i>`,
+      ].join('\n');
+
       await bot.editMessageText(text,{chat_id:chatId,message_id:processing.message_id,parse_mode:"HTML"});
-    } catch(err){bot.editMessageText("❌ Could not fetch stats.",{chat_id:chatId,message_id:processing.message_id});}
+    } catch(err){
+      console.error('Stats error:', err.message);
+      bot.editMessageText("❌ Could not fetch stats. Check logs.",{chat_id:chatId,message_id:processing.message_id});
+    }
   });
 
   bot.on("polling_error",(err)=>console.error("Polling error:",err.message));
