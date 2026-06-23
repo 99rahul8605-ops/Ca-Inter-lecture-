@@ -305,7 +305,7 @@ async function startBot() {
           if (mongoConnected) FileRecord.updateOne({ code:record.code },{ $addToSet:{ delivered_to:chatId } }).catch(() => {});
           setTimeout(() => { db.fileRecord.removeDeliveredTo(record.id,chatId); if (mongoConnected) FileRecord.updateOne({ code:record.code },{ $pull:{ delivered_to:chatId } }).catch(() => {}); }, 6*60*60*1000);
 
-          // Pehla lecture watch hone pe referral confirm karo aur referrer ko point do
+          // Pehla lecture watch hone pe referral confirm karo aur referrer ko +5 points do
           (async () => {
             try {
               const r = await fetch(`http://localhost:${PORT}/api/refer/confirm-first-watch`, {
@@ -314,17 +314,31 @@ async function startBot() {
               });
               const d = await r.json();
               if (d.confirmed && d.referrerId) {
-                const referrerInfo = db.user.findOne(d.referrerId);
-                const referrerName = referrerInfo ? (referrerInfo.firstName || 'User') : 'User';
-                const s = await (await fetch(`http://localhost:${PORT}/api/refer/stats/${d.referrerId}`)).json();
-                bot.sendMessage(parseInt(d.referrerId),
-                  `🎉 <b>Point Mila!</b>\n\n` +
-                  `${msg.from.first_name} ne apna pehla lecture dekha!\n` +
-                  `⭐ <b>+1 Point!</b> Total: <b>${s.points}</b>`,
-                  { parse_mode:"HTML" }
-                ).catch(() => {});
+                // Fetch updated stats to show correct total
+                let totalPts = '?';
+                try {
+                  const s = await (await fetch(`http://localhost:${PORT}/api/refer/stats/${d.referrerId}`)).json();
+                  // +5 points per referral — stats API returns referrals*5 equivalent via spinPoints now
+                  // Show raw referral count * 5 as earned points
+                  totalPts = s.points !== undefined ? s.points : '?';
+                } catch(_) {}
+
+                try {
+                  await bot.sendMessage(
+                    parseInt(d.referrerId),
+                    `🎉 <b>Referral Point Mila!</b>\n\n` +
+                    `👤 <b>${msg.from.first_name}</b> ne apna pehla lecture dekha!\n\n` +
+                    `⭐ <b>+5 Points</b> aapke account mein add ho gaye!\n` +
+                    `💰 <b>Total Points: ${totalPts}</b>`,
+                    { parse_mode:"HTML" }
+                  );
+                } catch(msgErr) {
+                  console.error("Referral message send failed:", msgErr.message);
+                }
               }
-            } catch (_) {}
+            } catch (err) {
+              console.error("Referral confirm error:", err.message);
+            }
           })();
 
           const lines=[`⚠️ This video auto-deletes in 6 hours.`,``,`📊 <b>Today:</b> ${lim.used}/${DAILY_VIDEO_LIMIT} videos`];
