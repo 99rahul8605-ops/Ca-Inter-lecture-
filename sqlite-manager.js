@@ -167,6 +167,15 @@ function _setupTables(db) {
       createdAt   INTEGER DEFAULT 0
     );
     CREATE INDEX IF NOT EXISTS idx_points_usage_user ON points_usage(userId);
+
+    -- Spin points earned from daily spinner (separate from referral points)
+    CREATE TABLE IF NOT EXISTS spin_points (
+      id        TEXT PRIMARY KEY,
+      userId    TEXT NOT NULL,
+      points    INTEGER NOT NULL,
+      createdAt INTEGER DEFAULT 0
+    );
+    CREATE INDEX IF NOT EXISTS idx_spin_points_user ON spin_points(userId);
   `);
 }
 
@@ -736,6 +745,20 @@ const pointsUsage = {
   },
 };
 
+// ── SPIN POINTS Operations ────────────────────────────────────────────────────
+
+const spinPoints = {
+  // Add earned spin points for a user
+  add({ id, userId, points }) {
+    getDb().prepare(`INSERT INTO spin_points(id,userId,points,createdAt) VALUES(?,?,?,?)`)
+      .run(id, userId, points, Date.now());
+  },
+  // Get total spin points earned by a user (all time)
+  getTotal(userId) {
+    return getDb().prepare(`SELECT SUM(points) as total FROM spin_points WHERE userId=?`).get(userId).total || 0;
+  },
+};
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 /**
@@ -762,6 +785,7 @@ module.exports = {
   referral,
   pendingReferral,
   pointsUsage,
+  spinPoints,
   coupon,
   autoLec,
   fileRecord,
