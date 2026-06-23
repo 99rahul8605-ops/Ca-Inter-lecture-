@@ -332,6 +332,47 @@ body.ready{transition:none}
 .vs-status-text{font-size:11px;color:var(--accent);letter-spacing:2px;text-transform:uppercase;font-weight:700}
 .vs-bar{width:148px;height:2px;background:var(--surface2);border-radius:2px;overflow:hidden}
 .vs-fill{height:100%;width:0%;background:linear-gradient(90deg,var(--accent),var(--accent2));border-radius:2px;transition:width 0.4s ease}
+
+/* ── Earn / Spinner Page ─────────────────────────────────────────────────── */
+.earn-page-wrap{padding:16px;padding-bottom:80px}
+.earn-header-card{background:linear-gradient(135deg,rgba(79,142,247,0.12),rgba(124,92,191,0.08));border:1px solid rgba(79,142,247,0.25);border-radius:var(--radius);padding:20px 16px;text-align:center;margin-bottom:14px}
+.earn-header-title{font-size:18px;font-weight:700;margin-bottom:4px;color:var(--text)}
+.earn-header-sub{font-size:12px;color:var(--text2);line-height:1.5}
+.earn-points-badge{display:inline-flex;align-items:center;gap:6px;background:rgba(245,158,11,0.15);border:1px solid rgba(245,158,11,0.35);border-radius:20px;padding:6px 16px;font-size:14px;font-weight:700;color:#f59e0b;margin-top:10px}
+
+/* Spinner wheel container */
+.spinner-wrap{display:flex;flex-direction:column;align-items:center;gap:14px;margin-bottom:18px}
+.spinner-canvas-wrap{position:relative;width:260px;height:260px}
+#spinnerCanvas{border-radius:50%;box-shadow:0 0 0 4px var(--border),0 4px 24px rgba(0,0,0,0.35)}
+/* Pointer triangle at top center */
+.spinner-pointer{position:absolute;top:-14px;left:50%;transform:translateX(-50%);width:0;height:0;border-left:12px solid transparent;border-right:12px solid transparent;border-bottom:22px solid #f59e0b;filter:drop-shadow(0 2px 4px rgba(0,0,0,0.4))}
+.spinner-center-btn{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:52px;height:52px;border-radius:50%;background:linear-gradient(135deg,var(--accent),var(--accent2));border:3px solid var(--bg);box-shadow:0 2px 12px rgba(0,0,0,0.4);display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:18px;transition:transform 0.15s,box-shadow 0.15s;color:#fff;font-weight:700}
+.spinner-center-btn:active{transform:translate(-50%,-50%) scale(0.92)}
+.spinner-center-btn:disabled{opacity:0.5;cursor:not-allowed}
+.spin-info-row{display:flex;align-items:center;gap:10px;width:100%;max-width:280px}
+.spin-count-pill{flex:1;background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:10px 14px;text-align:center}
+.spin-count-num{font-size:22px;font-weight:700;color:var(--accent)}
+.spin-count-label{font-size:10px;color:var(--text2);margin-top:2px}
+.spin-reset-pill{background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:10px 14px;text-align:center;flex:1}
+.spin-reset-time{font-size:14px;font-weight:700;color:var(--text);font-variant-numeric:tabular-nums}
+.spin-reset-label{font-size:10px;color:var(--text2);margin-top:2px}
+
+/* Result popup */
+.spin-result-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:700;align-items:center;justify-content:center}
+.spin-result-overlay.show{display:flex}
+.spin-result-modal{background:var(--surface);border-radius:20px;padding:28px 24px;text-align:center;max-width:300px;width:90%;animation:spinResultPop 0.35s cubic-bezier(.4,0,.2,1)}
+@keyframes spinResultPop{from{transform:scale(0.7);opacity:0}to{transform:scale(1);opacity:1}}
+.spin-result-emoji{font-size:52px;margin-bottom:10px;display:block;animation:spinResultBounce 0.5s cubic-bezier(.4,0,.2,1) 0.1s both}
+@keyframes spinResultBounce{from{transform:scale(0.5)}50%{transform:scale(1.15)}to{transform:scale(1)}}
+.spin-result-title{font-size:20px;font-weight:700;margin-bottom:6px;color:var(--green)}
+.spin-result-sub{font-size:13px;color:var(--text2);margin-bottom:18px}
+.spin-result-close{background:linear-gradient(135deg,var(--accent),var(--accent2));border:none;color:#fff;border-radius:var(--radius-sm);padding:11px 28px;font-size:14px;font-weight:700;cursor:pointer;width:100%}
+
+/* Ad gate message */
+.spin-ad-notice{background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.3);border-radius:var(--radius-sm);padding:12px 14px;font-size:12px;color:#f59e0b;text-align:center;margin-bottom:10px;line-height:1.5}
+.earn-spin-btn{width:100%;max-width:280px;padding:14px;border-radius:var(--radius-sm);border:none;background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff;font-size:15px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;transition:opacity 0.2s}
+.earn-spin-btn:disabled{opacity:0.5;cursor:not-allowed}
+.earn-spin-btn:active{opacity:0.85}
 </style>
 </head>
 <body>
@@ -778,10 +819,112 @@ body.ready{transition:none}
     <span id="accessDot" class="access-dot locked" style="position:relative;display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--red);margin-left:4px;vertical-align:middle"></span>
     Access
   </button>
+  <button class="nav-tab" id="navEarn" onclick="switchNavTab('earn')">
+    <i class="ti ti-coin"></i>
+    Earn
+  </button>
   <button class="nav-tab" id="navRefer" onclick="switchNavTab('refer')">
     <i class="ti ti-share"></i>
     Refer
   </button>
+</div>
+
+<!-- Earn Page (Spinner) -->
+<div class="page" id="page-earn">
+  <div class="topbar">
+    <div style="display:flex;align-items:center;gap:10px;flex:1">
+      <div style="width:34px;height:34px;background:linear-gradient(135deg,#f59e0b,#d97706);border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:17px">🎰</div>
+      <div><div style="font-size:15px;font-weight:700">Earn Points</div><div style="font-size:10px;color:var(--text2)">Spin the wheel daily</div></div>
+    </div>
+  </div>
+  <div class="page-body">
+    <div class="earn-page-wrap">
+
+      <!-- Points display card -->
+      <div class="earn-header-card">
+        <div class="earn-header-title">🎯 Daily Spin</div>
+        <div class="earn-header-sub">Spin karo aur 1–5 points jeeto!<br>Ad dekhna zaroori hai reward ke liye.</div>
+        <div class="earn-points-badge"><i class="ti ti-coin" style="font-size:15px"></i> <span id="earnTotalPoints">–</span> Points</div>
+      </div>
+
+      <!-- Spinner wheel -->
+      <div class="spinner-wrap">
+        <div class="spinner-canvas-wrap">
+          <canvas id="spinnerCanvas" width="260" height="260"></canvas>
+          <div class="spinner-pointer"></div>
+          <button class="spinner-center-btn" id="spinCenterBtn" onclick="startSpin()">SPIN</button>
+        </div>
+
+        <!-- Spins remaining + reset timer -->
+        <div class="spin-info-row">
+          <div class="spin-count-pill">
+            <div class="spin-count-num" id="spinsLeft">5</div>
+            <div class="spin-count-label">Spins Left</div>
+          </div>
+          <div class="spin-reset-pill">
+            <div class="spin-reset-time" id="spinResetTimer">00:00:00</div>
+            <div class="spin-reset-label">Next reset (12:00 AM)</div>
+          </div>
+        </div>
+
+        <!-- Ad notice -->
+        <div class="spin-ad-notice" id="spinAdNotice" style="display:none">
+          ⚠️ Har spin ke baad ad dekhna zaroori hai.<br>Ad na dekha to reward nahi milega.
+        </div>
+
+        <!-- Spin button (alternate to center) -->
+        <button class="earn-spin-btn" id="earnSpinBtn" onclick="startSpin()">
+          <i class="ti ti-rotate-clockwise"></i> Spin Now
+        </button>
+      </div>
+
+      <!-- How it works -->
+      <div class="card" style="margin-top:4px">
+        <div style="font-size:13px;font-weight:600;margin-bottom:12px;color:var(--text)">ℹ️ Kaise Kaam Karta Hai?</div>
+        <div style="display:flex;flex-direction:column;gap:10px">
+          <div style="display:flex;align-items:flex-start;gap:10px">
+            <div style="width:26px;height:26px;border-radius:50%;background:var(--accent);color:#fff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0">1</div>
+            <div>
+              <div style="font-size:12px;font-weight:600;color:var(--text)">Spin karo</div>
+              <div style="font-size:11px;color:var(--text2);margin-top:2px">Wheel spin hogi aur ek number pe rukegi (1 se 5)</div>
+            </div>
+          </div>
+          <div style="display:flex;align-items:flex-start;gap:10px">
+            <div style="width:26px;height:26px;border-radius:50%;background:var(--accent);color:#fff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0">2</div>
+            <div>
+              <div style="font-size:12px;font-weight:600;color:var(--text)">Ad dekho</div>
+              <div style="font-size:11px;color:var(--text2);margin-top:2px">Reward milne ke liye poora ad dekhna zaroori hai</div>
+            </div>
+          </div>
+          <div style="display:flex;align-items:flex-start;gap:10px">
+            <div style="width:26px;height:26px;border-radius:50%;background:var(--accent);color:#fff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0">3</div>
+            <div>
+              <div style="font-size:12px;font-weight:600;color:var(--text)">Points milenge!</div>
+              <div style="font-size:11px;color:var(--text2);margin-top:2px">Points refer tab pe use karo rewards ke liye</div>
+            </div>
+          </div>
+          <div style="display:flex;align-items:flex-start;gap:10px">
+            <div style="width:26px;height:26px;border-radius:50%;background:linear-gradient(135deg,#f59e0b,#d97706);color:#fff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0">4</div>
+            <div>
+              <div style="font-size:12px;font-weight:600;color:#f59e0b">Daily 5 spins — 12 baje raat reset!</div>
+              <div style="font-size:11px;color:var(--text2);margin-top:2px">Har roz midnight 12:00 AM pe spins reset ho jaate hain</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<!-- Spin Result Popup -->
+<div class="spin-result-overlay" id="spinResultOverlay">
+  <div class="spin-result-modal">
+    <span class="spin-result-emoji" id="spinResultEmoji">🎉</span>
+    <div class="spin-result-title" id="spinResultTitle">+3 Points!</div>
+    <div class="spin-result-sub" id="spinResultSub">Points aapke account mein add ho gaye.</div>
+    <button class="spin-result-close" onclick="closeSpinResult()">Done ✓</button>
+  </div>
 </div>
 
 <!-- Refer Page -->
@@ -2560,7 +2703,22 @@ function switchNavTab(tab) {
   currentTab = tab;
   document.getElementById('navHome').classList.toggle('active', tab === 'home');
   document.getElementById('navAccess').classList.toggle('active', tab === 'access');
+  document.getElementById('navEarn').classList.toggle('active', tab === 'earn');
   document.getElementById('navRefer').classList.toggle('active', tab === 'refer');
+
+  if (tab === 'earn') {
+    document.querySelectorAll('.page').forEach(function(p) {
+      p.style.transition = 'none';
+      p.style.transform = 'translateX(100%)';
+      p.classList.remove('active');
+    });
+    var earnEl = document.getElementById('page-earn');
+    earnEl.style.transform = '';
+    earnEl.classList.add('active');
+    if (tg) tg.BackButton.hide();
+    initEarnPage();
+    return;
+  }
 
   if (tab === 'refer') {
     document.querySelectorAll('.page').forEach(function(p) {
@@ -3926,6 +4084,304 @@ async function adminDeleteCoupon(id) {
     adminLoadCoupons();
   } catch(e) { toast('Error', 'error'); }
 }
+
+// ── Earn / Daily Spinner ──────────────────────────────────────────────────────
+
+// Spinner wheel segments: value 1 appears most often, 5 is rarest
+// Weighted distribution: [1,1,1,1,2,2,2,3,3,4] — 5 is possible but very rare
+var SPIN_SEGMENTS = [1, 1, 1, 1, 2, 2, 2, 3, 3, 4];
+
+// Segment colors — alternating palette
+var SPIN_COLORS = ['#4f8ef7','#7c5cbf','#22c55e','#f59e0b','#ef4444',
+                   '#06b6d4','#ec4899','#a855f7','#f97316','#10b981'];
+
+var SPIN_MAX_PER_DAY = 5; // Daily spin limit
+
+// State
+var _spinAngle = 0;          // Current rotation angle of the wheel
+var _spinning = false;        // Whether animation is running
+var _spinPending = false;     // Spin happened, waiting for ad
+var _pendingPoints = 0;       // Points waiting to be awarded after ad
+var _spinResetTimer = null;   // Interval for countdown display
+
+/**
+ * Get today's date string (YYYY-MM-DD) based on user local time.
+ * Resets happen at midnight 12:00 AM (local time).
+ */
+function _spinTodayKey() {
+  var d = new Date();
+  return d.getFullYear() + '-' + (d.getMonth()+1) + '-' + d.getDate();
+}
+
+/** Load spin state from localStorage, auto-reset if it's a new day. */
+function _loadSpinState() {
+  var raw = localStorage.getItem('edubot_spin_state');
+  var state = { date: '', spinsUsed: 0, totalPoints: 0 };
+  try { if (raw) state = JSON.parse(raw); } catch(e) {}
+  // New day = reset spins used (but keep total points)
+  if (state.date !== _spinTodayKey()) {
+    state.date = _spinTodayKey();
+    state.spinsUsed = 0;
+    _saveSpinState(state);
+  }
+  return state;
+}
+
+/** Persist spin state to localStorage. */
+function _saveSpinState(state) {
+  localStorage.setItem('edubot_spin_state', JSON.stringify(state));
+}
+
+/** Draw the spinner wheel on canvas using current _spinAngle. */
+function _drawWheel() {
+  var canvas = document.getElementById('spinnerCanvas');
+  if (!canvas) return;
+  var ctx = canvas.getContext('2d');
+  var cx = canvas.width / 2;
+  var cy = canvas.height / 2;
+  var r = cx - 4;
+  var n = SPIN_SEGMENTS.length;
+  var arc = (2 * Math.PI) / n;
+
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  for (var i = 0; i < n; i++) {
+    var startA = _spinAngle + i * arc;
+    var endA = startA + arc;
+
+    // Slice fill
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.arc(cx, cy, r, startA, endA);
+    ctx.closePath();
+    ctx.fillStyle = SPIN_COLORS[i % SPIN_COLORS.length];
+    ctx.fill();
+
+    // Thin border
+    ctx.strokeStyle = 'rgba(0,0,0,0.18)';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    // Label text
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(startA + arc / 2);
+    ctx.textAlign = 'right';
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 18px system-ui, sans-serif';
+    ctx.shadowColor = 'rgba(0,0,0,0.4)';
+    ctx.shadowBlur = 3;
+    ctx.fillText(SPIN_SEGMENTS[i], r - 16, 6);
+    ctx.restore();
+  }
+
+  // Center circle cover (so center btn looks clean)
+  ctx.beginPath();
+  ctx.arc(cx, cy, 26, 0, 2 * Math.PI);
+  ctx.fillStyle = 'var(--bg)';
+  ctx.fill();
+}
+
+/** Update the spins-left UI and spin button state. */
+function _updateSpinUI() {
+  var state = _loadSpinState();
+  var left = Math.max(0, SPIN_MAX_PER_DAY - state.spinsUsed);
+
+  var leftEl = document.getElementById('spinsLeft');
+  if (leftEl) leftEl.textContent = left;
+
+  var totalEl = document.getElementById('earnTotalPoints');
+  if (totalEl) totalEl.textContent = state.totalPoints;
+
+  var btn = document.getElementById('earnSpinBtn');
+  var cBtn = document.getElementById('spinCenterBtn');
+  var notice = document.getElementById('spinAdNotice');
+
+  if (left === 0) {
+    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="ti ti-ban"></i> No Spins Left Today'; }
+    if (cBtn) { cBtn.disabled = true; cBtn.textContent = '0'; }
+  } else {
+    if (btn) { btn.disabled = _spinning; btn.innerHTML = _spinning ? '<i class="ti ti-loader-2" style="animation:spin 0.8s linear infinite;display:inline-block"></i> Spinning...' : '<i class="ti ti-rotate-clockwise"></i> Spin Now'; }
+    if (cBtn) { cBtn.disabled = _spinning; cBtn.textContent = _spinning ? '⏳' : 'SPIN'; }
+  }
+
+  // Show ad notice after first load so user knows
+  if (notice) notice.style.display = 'block';
+}
+
+/** Countdown timer showing time until next midnight reset. */
+function _startSpinResetCountdown() {
+  if (_spinResetTimer) clearInterval(_spinResetTimer);
+  function _tick() {
+    var now = new Date();
+    var midnight = new Date(now);
+    midnight.setHours(24, 0, 0, 0); // Next midnight
+    var diff = midnight - now;
+    var h = Math.floor(diff / 3600000);
+    var m = Math.floor((diff % 3600000) / 60000);
+    var s = Math.floor((diff % 60000) / 1000);
+    var el = document.getElementById('spinResetTimer');
+    if (el) el.textContent = (h<10?'0'+h:h)+':'+(m<10?'0'+m:m)+':'+(s<10?'0'+s:s);
+  }
+  _tick();
+  _spinResetTimer = setInterval(_tick, 1000);
+}
+
+/** Initialize earn page — draw wheel, update UI. */
+function initEarnPage() {
+  _drawWheel();
+  _updateSpinUI();
+  _startSpinResetCountdown();
+}
+
+/**
+ * Called when user taps SPIN.
+ * 1. Check spins remaining.
+ * 2. Pick weighted random result.
+ * 3. Animate wheel.
+ * 4. After animation, show ad.
+ * 5. Only award points if ad completes successfully.
+ */
+function startSpin() {
+  if (_spinning) return;
+  var state = _loadSpinState();
+  var left = SPIN_MAX_PER_DAY - state.spinsUsed;
+
+  if (left <= 0) {
+    toast('Aaj ke 5 spins ho gaye! Kal wapas aao 🌙', 'error');
+    return;
+  }
+
+  // Check Monetag SDK is available (same check as watchAd)
+  if (typeof show_11011844 === 'undefined') {
+    toast('Ad load nahi hua. Ad blocker band karo!', 'error');
+    return;
+  }
+
+  // Pick result BEFORE animation (so we can calculate final angle)
+  var resultIdx = Math.floor(Math.random() * SPIN_SEGMENTS.length);
+  _pendingPoints = SPIN_SEGMENTS[resultIdx];
+
+  // Consume one spin immediately (prevents double-tap abuse)
+  state.spinsUsed += 1;
+  _saveSpinState(state);
+
+  _spinning = true;
+  _spinPending = false;
+  _updateSpinUI();
+
+  // Calculate target angle: land result segment at top (pointer position)
+  // Pointer is at top = -Math.PI/2 relative to 0
+  var n = SPIN_SEGMENTS.length;
+  var arc = (2 * Math.PI) / n;
+  // Angle where resultIdx segment center would point up:
+  var targetSegmentCenter = -(resultIdx * arc + arc / 2);
+  // Extra full rotations for effect (8–12 full spins)
+  var extraSpins = (8 + Math.floor(Math.random() * 5)) * 2 * Math.PI;
+  var currentNorm = _spinAngle % (2 * Math.PI);
+  var delta = ((targetSegmentCenter - currentNorm) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI);
+  var totalAngle = _spinAngle + extraSpins + delta;
+
+  var start = null;
+  var duration = 4200; // ms
+  var startAngle = _spinAngle;
+
+  // Easing: starts fast, slows down at end (ease-out cubic)
+  function easeOut(t) { return 1 - Math.pow(1 - t, 3); }
+
+  function animate(ts) {
+    if (!start) start = ts;
+    var elapsed = ts - start;
+    var progress = Math.min(elapsed / duration, 1);
+    _spinAngle = startAngle + (totalAngle - startAngle) * easeOut(progress);
+    _drawWheel();
+    if (progress < 1) {
+      requestAnimationFrame(animate);
+    } else {
+      _spinAngle = totalAngle;
+      _spinning = false;
+      _spinPending = true;
+      _updateSpinUI();
+      // Trigger ad after short delay for UX
+      setTimeout(_showSpinAd, 400);
+    }
+  }
+  requestAnimationFrame(animate);
+}
+
+/** Show Monetag ad after spin. Award points only if ad completes. */
+function _showSpinAd() {
+  // Show loading toast while ad loads
+  toast('Ad load ho rahi hai... 📺', '');
+
+  // Use random Monetag format (same as watchAd)
+  var formats = ['rewarded', 'pop', 'interstitial'];
+  var format = formats[Math.floor(Math.random() * formats.length)];
+  var uid = tg && tg.initDataUnsafe && tg.initDataUnsafe.user ? String(tg.initDataUnsafe.user.id) : 'unknown';
+
+  var adPromise;
+  if (format === 'pop') {
+    adPromise = show_11011844('pop');
+  } else if (format === 'interstitial') {
+    adPromise = show_11011844();
+  } else {
+    adPromise = show_11011844({ ymid: uid });
+  }
+
+  adPromise
+    .then(function() {
+      // Ad successfully shown — award points
+      _awardSpinPoints(_pendingPoints);
+    })
+    .catch(function(err) {
+      // Ad failed — no reward, but spin is already consumed
+      _spinPending = false;
+      var msg = (err && err.message) || '';
+      if (msg.toLowerCase().indexOf('block') !== -1 || msg.toLowerCase().indexOf('load') !== -1) {
+        toast('❌ Ad blocker detected! Points nahi mile. Blocker band karo.', 'error');
+      } else {
+        toast('❌ Ad complete nahi hua — points nahi mile.', 'error');
+      }
+      _updateSpinUI();
+    });
+}
+
+/** Award points to user and show result popup. */
+function _awardSpinPoints(pts) {
+  var state = _loadSpinState();
+  state.totalPoints = (state.totalPoints || 0) + pts;
+  _saveSpinState(state);
+  _spinPending = false;
+
+  // Also sync with referral points so redeem works
+  // We piggyback onto the existing referPoints display
+  var rpEl = document.getElementById('referPoints');
+  if (rpEl && rpEl.textContent !== '–') {
+    var existing = parseInt(rpEl.textContent) || 0;
+    rpEl.textContent = existing + pts;
+    var rdEl = document.getElementById('rewardPointsDisplay');
+    if (rdEl) rdEl.textContent = existing + pts;
+  }
+
+  _updateSpinUI();
+
+  // Show result popup
+  var emojis = { 1:'😊', 2:'🎉', 3:'🔥', 4:'💎', 5:'🏆' };
+  var emoji = emojis[pts] || '🎉';
+  var el = document.getElementById('spinResultEmoji');
+  var title = document.getElementById('spinResultTitle');
+  var sub = document.getElementById('spinResultSub');
+  if (el) el.textContent = emoji;
+  if (title) { title.textContent = '+' + pts + ' Point' + (pts > 1 ? 's' : '') + '!'; title.style.color = pts >= 4 ? '#f59e0b' : 'var(--green)'; }
+  if (sub) sub.textContent = 'Points aapke account mein add ho gaye. Refer tab se redeem karo!';
+  document.getElementById('spinResultOverlay').classList.add('show');
+}
+
+/** Close result popup. */
+function closeSpinResult() {
+  document.getElementById('spinResultOverlay').classList.remove('show');
+}
+
 </script>
 
 </body>
