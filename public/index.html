@@ -1455,13 +1455,18 @@ function switchBatchTab(tab) {
   }
 }
 
-function _batchCard(b, isPremiumLocked) {
+function _batchCard(b, isPremiumLocked, pointUnlocked) {
   // isPremiumLocked = user does not have access to this premium batch
+  // pointUnlocked   = user redeemed this batch with points (show badge)
   var adminDraftBadge = (isAdmin && b.isPublic !== true)
     ? '<div style="position:absolute;top:6px;left:6px;background:rgba(0,0,0,0.7);border-radius:6px;padding:3px 7px;font-size:10px;font-weight:700;color:#aaa;display:flex;align-items:center;gap:4px"><i class="ti ti-lock" style="font-size:10px"></i>Private</div>'
     : '';
   var premiumBadge = b.isPremium
     ? '<div class="premium-badge"><i class="ti ti-crown" style="font-size:9px"></i>PREMIUM</div>'
+    : '';
+  // Point-unlock badge — shown on free batches user redeemed with points
+  var pointBadge = pointUnlocked
+    ? '<div style="position:absolute;top:6px;right:6px;background:rgba(34,197,94,0.9);border-radius:6px;padding:3px 7px;font-size:10px;font-weight:700;color:#fff;display:flex;align-items:center;gap:3px"><i class="ti ti-coin" style="font-size:10px"></i>Unlocked</div>'
     : '';
   var lockOverlay = isPremiumLocked
     ? '<div class="premium-lock-overlay"><i class="ti ti-lock" style="font-size:26px;color:#f59e0b"></i></div>' +
@@ -1469,6 +1474,7 @@ function _batchCard(b, isPremiumLocked) {
     : '';
   var cardStyle = (isAdmin && b.isPublic !== true) ? 'opacity:0.6;border-style:dashed;' : '';
   if (b.isPremium) cardStyle += 'border-color:rgba(245,158,11,0.35);';
+  if (pointUnlocked) cardStyle += 'border-color:rgba(34,197,94,0.4);';
   var buyBtn = isPremiumLocked
     ? '<button class="batch-buy-btn" data-bid="' + b._id + '" onclick="event.stopPropagation();buyBatch(this.dataset.bid)"><i class="ti ti-shopping-cart" style="font-size:12px"></i> Buy' + (b.price ? ' ₹' + b.price : '') + '</button>'
     : '';
@@ -1481,15 +1487,18 @@ function _batchCard(b, isPremiumLocked) {
   var actionBtns = (buyBtn || viewBtn)
     ? '<div style="display:flex;gap:6px;flex-wrap:wrap">' + viewBtn + buyBtn + '</div>'
     : '';
+  var metaExtra = isPremiumLocked ? ' · <span style="color:#f59e0b">🔒 Locked</span>'
+                : pointUnlocked   ? ' · <span style="color:#22c55e">✅ Points Unlocked</span>'
+                : '';
   return `<div class="batch-card${b.isPremium ? ' batch-card-premium' : ''}" onclick="openBatch('${b._id}')" style="${cardStyle}">
     <div class="batch-img" style="position:relative;overflow:hidden">
       ${b.pic ? `<img src="${b.pic}">` : '🎓'}
-      ${adminDraftBadge}${premiumBadge}${lockOverlay}
+      ${adminDraftBadge}${premiumBadge}${pointBadge}${lockOverlay}
     </div>
     <div class="batch-body">
       <div class="batch-name">${b.name}</div>
       ${b.description ? `<div class="batch-desc">${b.description}</div>` : ''}
-      <div class="batch-meta">${b.subjects.length} subjects${isPremiumLocked ? ' · <span style="color:#f59e0b">🔒 Locked</span>' : ''}${b.price ? ' · <span style="color:#22c55e;font-weight:700">₹' + b.price + '</span>' : ''}</div>
+      <div class="batch-meta">${b.subjects.length} subjects${metaExtra}${b.price ? ' · <span style="color:#22c55e;font-weight:700">₹' + b.price + '</span>' : ''}</div>
       ${actionBtns}
     </div>
   </div>`;
@@ -1519,7 +1528,12 @@ function renderBatches(list) {
   var freeEl = document.getElementById('freeBatchGrid');
   if (freeEl) {
     freeEl.innerHTML = free.length
-      ? free.map(b => _batchCard(b, false)).join('')
+      ? free.map(function(b) {
+          // Show "Unlocked" badge if user redeemed this batch via points
+          var curUid = String(getUserId());
+          var pointUnlocked = !isAdmin && b.premiumUsers && b.premiumUsers.includes(curUid);
+          return _batchCard(b, false, pointUnlocked);
+        }).join('')
       : '<div class="empty" style="grid-column:1/-1"><i class="ti ti-school"></i>No free batches yet</div>';
   }
 
@@ -3040,18 +3054,26 @@ async function claimAccess() {
 var _origOpenBatch = openBatch;
 openBatch = function(bid) {
   var b = batches.find(x => x._id === bid);
-  // Premium batch — check if user is in premiumUsers
-  if (b && b.isPremium && !isAdmin) {
-    var curUid = String(getUserId());
-    var hasP = b.premiumUsers && b.premiumUsers.includes(curUid);
-    if (!hasP) {
-      toast('🔒 Yeh premium batch hai! Admin se access maango.', 'error');
+  var curUid = String(getUserId());
+
+  // Check if user has point-redeemed premium access for this specific batch
+  // This works for ALL batches (public or private) — points redeem adds user to premiumUsers
+  if (b && !isAdmin) {
+    var hasPremiumAccess = b.premiumUsers && b.premiumUsers.includes(curUid);
+    if (hasPremiumAccess) {
+      // User unlocked this batch via points — open directly, no ad needed
+      _origOpenBatch(bid);
       return;
     }
-    // Premium user — ads not required, open directly
-    _origOpenBatch(bid);
+  }
+
+  // Private/premium batch — only admin-added premiumUsers can open (no points path here)
+  if (b && b.isPremium && !isAdmin) {
+    toast('🔒 Yeh premium batch hai! Admin se access maango.', 'error');
     return;
   }
+
+  // Public batch — needs normal 24h ad-based access
   if (!hasAccess()) {
     toast('Watch an ad to unlock access!', 'error');
     switchNavTab('access');
