@@ -4301,60 +4301,78 @@ function startSpin() {
     return;
   }
 
-  // Double-check with server to prevent localStorage reset exploit
-  // (server-side also enforces limit — this is just UX pre-check)
-
-  // Check Monetag SDK is available (same check as watchAd)
+  // Check Monetag SDK is available BEFORE doing anything
   if (typeof show_11011844 === 'undefined') {
     toast('Ad load nahi hua. Ad blocker band karo!', 'error');
     return;
   }
 
-  // Pick result BEFORE animation (so we can calculate final angle)
+  // NEW FLOW: Show ad FIRST — only spin + award if ad completes
+  // This way a failed ad does NOT consume a spin
+  _spinning = true;
+  _updateSpinUI();
+  toast('Ad dekho aur spin unlock karo... 📺', '');
+
+  // Pick result now (hidden from user until wheel stops)
   var resultIdx = Math.floor(Math.random() * SPIN_SEGMENTS.length);
   _pendingPoints = SPIN_SEGMENTS[resultIdx];
 
-  // Consume one spin immediately (prevents double-tap abuse)
-  state.spinsUsed += 1;
-  _saveSpinState(state);
+  var uid = tg && tg.initDataUnsafe && tg.initDataUnsafe.user ? String(tg.initDataUnsafe.user.id) : 'unknown';
 
-  _spinning = true;
-  _spinPending = false;
-  _updateSpinUI();
+  // Show ad — only proceed if successful
+  show_11011844({ ymid: uid })
+    .then(function() {
+      // Ad watched successfully — NOW consume spin and animate wheel
+      var st = _loadSpinState();
+      st.spinsUsed += 1;
+      _saveSpinState(st);
 
-  // Pointer is at TOP of wheel = -Math.PI/2 in canvas coords.
-  // We want the winning segment center to land at top pointer:
-  // _spinAngle + resultIdx*arc + arc/2 ≡ -Math.PI/2  (mod 2PI)
-  // So targetBase = -Math.PI/2 - resultIdx*arc - arc/2
+      _spinPending = false;
+      _playWheelAnimation(resultIdx);
+    })
+    .catch(function(err) {
+      // Ad failed — spin NOT consumed, user can try again
+      _spinning = false;
+      _updateSpinUI();
+      var msg = (err && err.message) || '';
+      if (msg.toLowerCase().indexOf('block') !== -1 || msg.toLowerCase().indexOf('load') !== -1) {
+        toast('❌ Ad blocker detected! Blocker band karo aur try karo.', 'error');
+      } else {
+        toast('❌ Ad complete nahi hua. Spin waste nahi hua — try again!', 'error');
+      }
+    });
+}
+
+/** Animate the wheel to land on resultIdx segment, then award points. */
+function _playWheelAnimation(resultIdx) {
+  // Pointer is at TOP = -Math.PI/2 in canvas coords
+  // Target: winning segment center at top pointer
   var n = SPIN_SEGMENTS.length;
   var arc = (2 * Math.PI) / n;
-
-  // Target base angle so winning segment faces top pointer
   var targetBase = -(Math.PI / 2) - (resultIdx * arc + arc / 2);
 
-  // Normalize current angle to [0, 2PI)
+  // Normalize angles
   var currentNorm = ((_spinAngle % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
-  var targetNorm = ((targetBase % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+  var targetNorm  = ((targetBase  % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
 
-  // How much more to rotate clockwise to reach target
+  // Clockwise delta to reach target
   var delta = (targetNorm - currentNorm + 2 * Math.PI) % (2 * Math.PI);
-  // Ensure we always spin at least a bit (avoid 0-delta snap)
   if (delta < 0.5) delta += 2 * Math.PI;
 
-  // Add extra full spins for visual effect (10–14 full rotations)
+  // 10–14 full rotations for visual effect
   var extraSpins = (10 + Math.floor(Math.random() * 5)) * 2 * Math.PI;
-  var totalAngle = _spinAngle + extraSpins + delta;
+  var totalAngle  = _spinAngle + extraSpins + delta;
 
   var start = null;
-  var duration = 4200; // ms
+  var duration = 4200;
   var startAngle = _spinAngle;
 
-  // Easing: starts fast, slows down at end (ease-out cubic)
+  // Ease-out cubic — fast start, smooth stop
   function easeOut(t) { return 1 - Math.pow(1 - t, 3); }
 
   function animate(ts) {
     if (!start) start = ts;
-    var elapsed = ts - start;
+    var elapsed  = ts - start;
     var progress = Math.min(elapsed / duration, 1);
     _spinAngle = startAngle + (totalAngle - startAngle) * easeOut(progress);
     _drawWheel();
@@ -4362,51 +4380,13 @@ function startSpin() {
       requestAnimationFrame(animate);
     } else {
       _spinAngle = totalAngle;
-      _spinning = false;
-      _spinPending = true;
+      _spinning  = false;
       _updateSpinUI();
-      // Trigger ad after short delay for UX
-      setTimeout(_showSpinAd, 400);
+      // Award points after wheel stops
+      _awardSpinPoints(_pendingPoints);
     }
   }
   requestAnimationFrame(animate);
-}
-
-/** Show Monetag ad after spin. Award points only if ad completes. */
-function _showSpinAd() {
-  // Show loading toast while ad loads
-  toast('Ad load ho rahi hai... 📺', '');
-
-  // Use random Monetag format (same as watchAd)
-  var formats = ['rewarded', 'pop', 'interstitial'];
-  var format = formats[Math.floor(Math.random() * formats.length)];
-  var uid = tg && tg.initDataUnsafe && tg.initDataUnsafe.user ? String(tg.initDataUnsafe.user.id) : 'unknown';
-
-  var adPromise;
-  if (format === 'pop') {
-    adPromise = show_11011844('pop');
-  } else if (format === 'interstitial') {
-    adPromise = show_11011844();
-  } else {
-    adPromise = show_11011844({ ymid: uid });
-  }
-
-  adPromise
-    .then(function() {
-      // Ad successfully shown — award points
-      _awardSpinPoints(_pendingPoints);
-    })
-    .catch(function(err) {
-      // Ad failed — no reward, but spin is already consumed
-      _spinPending = false;
-      var msg = (err && err.message) || '';
-      if (msg.toLowerCase().indexOf('block') !== -1 || msg.toLowerCase().indexOf('load') !== -1) {
-        toast('❌ Ad blocker detected! Points nahi mile. Blocker band karo.', 'error');
-      } else {
-        toast('❌ Ad complete nahi hua — points nahi mile.', 'error');
-      }
-      _updateSpinUI();
-    });
 }
 
 /** Award points to user — saves to localStorage + backend, then shows result popup. */
