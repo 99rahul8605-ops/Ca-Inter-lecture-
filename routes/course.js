@@ -883,7 +883,7 @@ router.get('/refer/points/:userId', async (req, res) => {
 // Called from frontend after ad is watched successfully post-spin.
 // Validates user via TG initData, then credits spin points to DB.
 
-router.post('/api/spin-reward', async (req, res) => {
+router.post('/spin-reward', async (req, res) => {
   try {
     // Verify user identity from TG initData header (same as getRequestUserId)
     const verifiedUserId = getRequestUserId(req);
