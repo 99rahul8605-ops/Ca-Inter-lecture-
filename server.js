@@ -235,6 +235,9 @@ async function startBot() {
   BOT_USERNAME = me.username;
   console.log(`Bot started: @${BOT_USERNAME}`);
 
+  // Expose bot globally so course.js routes can send notifications
+  global._botInstance = bot;
+
   try {
     await fetch(`https://api.telegram.org/bot${TOKEN}/setChatMenuButton`, { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ menu_button:{ type:"web_app", text:"Open EduBot", web_app:{ url:WEB_URL } } }) });
     console.log("Menu button set:", WEB_URL);
