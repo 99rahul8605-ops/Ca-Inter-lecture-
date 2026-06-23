@@ -495,6 +495,11 @@ const access = {
   countActive() {
     return getDb().prepare(`SELECT COUNT(*) as c FROM access WHERE expiresAt > ?`).get(Date.now()).c;
   },
+  // Count access granted today using claimDay (YYYY-MM-DD)
+  countToday() {
+    const today = new Date().toISOString().slice(0, 10);
+    return getDb().prepare(`SELECT COUNT(*) as c FROM access WHERE claimDay = ?`).get(today).c;
+  },
 };
 
 // ── AD TOKEN Operations ───────────────────────────────────────────────────────
