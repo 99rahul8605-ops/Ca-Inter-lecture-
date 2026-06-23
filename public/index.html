@@ -975,30 +975,30 @@ body.ready{transition:none}
         <button onclick="redeemReward('access_24h', 1)" style="background:linear-gradient(135deg,#f59e0b,#d97706);border:none;color:#fff;border-radius:8px;padding:6px 12px;font-size:11px;font-weight:700;cursor:pointer;flex-shrink:0">Redeem</button>
       </div>
 
-      <!-- Reward 2: 5 Points → Any 1 batch 24h access -->
+      <!-- Reward 2: 10 Points → Any 1 batch 24h access -->
       <div style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--surface2);border-radius:var(--radius-sm);margin-bottom:8px">
         <span style="font-size:22px">📚</span>
         <div style="flex:1">
           <div style="font-size:12px;font-weight:600;color:var(--text)">Koi bhi 1 Batch — 24h Access</div>
           <div style="font-size:11px;color:var(--text2)">Apni choice ka koi bhi batch 24 ghante ke liye unlock</div>
-          <div style="font-size:11px;color:#f59e0b;font-weight:700;margin-top:2px">5 Points</div>
+          <div style="font-size:11px;color:#f59e0b;font-weight:700;margin-top:2px">10 Points</div>
         </div>
-        <button onclick="redeemReward('batch_24h', 5)" style="background:linear-gradient(135deg,var(--accent),var(--accent2));border:none;color:#fff;border-radius:8px;padding:6px 12px;font-size:11px;font-weight:700;cursor:pointer;flex-shrink:0">Redeem</button>
+        <button onclick="redeemReward('batch_24h', 10)" style="background:linear-gradient(135deg,var(--accent),var(--accent2));border:none;color:#fff;border-radius:8px;padding:6px 12px;font-size:11px;font-weight:700;cursor:pointer;flex-shrink:0">Redeem</button>
       </div>
 
-      <!-- Reward 3: 20 Points → Any 1 batch 7 days access -->
+      <!-- Reward 3: 50 Points → Any 1 batch 7 days access -->
       <div style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--surface2);border-radius:var(--radius-sm)">
         <span style="font-size:22px">🏆</span>
         <div style="flex:1">
           <div style="font-size:12px;font-weight:600;color:var(--text)">Koi bhi 1 Batch — 7 Din Access</div>
           <div style="font-size:11px;color:var(--text2)">Apni choice ka koi bhi batch 7 din ke liye unlock</div>
-          <div style="font-size:11px;color:#f59e0b;font-weight:700;margin-top:2px">20 Points</div>
+          <div style="font-size:11px;color:#f59e0b;font-weight:700;margin-top:2px">50 Points</div>
         </div>
-        <button onclick="redeemReward('batch_7d', 20)" style="background:linear-gradient(135deg,#22c55e,#16a34a);border:none;color:#fff;border-radius:8px;padding:6px 12px;font-size:11px;font-weight:700;cursor:pointer;flex-shrink:0">Redeem</button>
+        <button onclick="redeemReward('batch_7d', 50)" style="background:linear-gradient(135deg,#22c55e,#16a34a);border:none;color:#fff;border-radius:8px;padding:6px 12px;font-size:11px;font-weight:700;cursor:pointer;flex-shrink:0">Redeem</button>
       </div>
 
       <div style="margin-top:12px;font-size:11px;color:var(--text3);text-align:center">
-        Each referral = <strong style="color:#f59e0b">1 point</strong>
+        Each referral = <strong style="color:#f59e0b">5 points</strong>
       </div>
     </div>
 
@@ -3786,11 +3786,11 @@ function _openRewardBatchPicker(type, cost) {
 
   if (type === 'batch_24h') {
     titleEl.textContent = '24h Batch Access';
-    descEl.textContent = '5 points use hoenge. Kaun sa batch unlock karna chahte ho?';
+    descEl.textContent = '10 points use hoenge. Kaun sa batch unlock karna chahte ho?';
     iconEl.textContent = '📚';
   } else {
     titleEl.textContent = '7 Din Batch Access';
-    descEl.textContent = '20 points use hoenge. Kaun sa batch unlock karna chahte ho?';
+    descEl.textContent = '50 points use hoenge. Kaun sa batch unlock karna chahte ho?';
     iconEl.textContent = '🏆';
   }
 
