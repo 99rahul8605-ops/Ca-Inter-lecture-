@@ -4257,11 +4257,30 @@ function _startSpinResetCountdown() {
   _spinResetTimer = setInterval(_tick, 1000);
 }
 
-/** Initialize earn page — draw wheel, update UI. */
+/** Initialize earn page — fetch spin count from server (survives redeploy/refresh). */
 function initEarnPage() {
   _drawWheel();
   _updateSpinUI();
   _startSpinResetCountdown();
+
+  // Fetch today's spin count from DB — overrides localStorage to survive redeployes
+  var uid = getUserId ? getUserId() : null;
+  if (!uid) return;
+  fetch('/api/spin-status/' + uid)
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data && typeof data.spinsToday === 'number') {
+        // Sync localStorage with server's authoritative count
+        var state = _loadSpinState();
+        // Only update if server count is higher (prevents going backward)
+        if (data.spinsToday > (state.spinsUsed || 0)) {
+          state.spinsUsed = data.spinsToday;
+          _saveSpinState(state);
+        }
+        _updateSpinUI();
+      }
+    })
+    .catch(function() { /* keep localStorage value on API fail */ });
 }
 
 /**
@@ -4281,6 +4300,9 @@ function startSpin() {
     toast('Aaj ke 5 spins ho gaye! Kal wapas aao 🌙', 'error');
     return;
   }
+
+  // Double-check with server to prevent localStorage reset exploit
+  // (server-side also enforces limit — this is just UX pre-check)
 
   // Check Monetag SDK is available (same check as watchAd)
   if (typeof show_11011844 === 'undefined') {
@@ -4430,6 +4452,13 @@ function _awardSpinPoints(pts) {
       if (data && data.availablePoints !== undefined) {
         // Server confirmed — set authoritative total and clear flag
         _spinAwardedTotal = data.availablePoints;
+        // Sync server-side spin count back to localStorage
+        if (typeof data.spinsToday === 'number') {
+          var st = _loadSpinState();
+          st.spinsUsed = data.spinsToday;
+          _saveSpinState(st);
+          _updateSpinUI();
+        }
         var rpEl2 = document.getElementById('referPoints');
         if (rpEl2) rpEl2.textContent = data.availablePoints;
         var rdEl2 = document.getElementById('rewardPointsDisplay');
