@@ -3822,12 +3822,15 @@ function closeRewardBatchPicker() {
 }
 
 async function selectRewardBatch(batchId) {
+  // Save type and cost BEFORE closing picker (close resets _rewardType to null)
+  var savedType = _rewardType;
+  var savedCost = _rewardCost;
   closeRewardBatchPicker();
   var b = batches.find(function(x) { return x._id === batchId; });
   var bName = b ? b.name : 'selected batch';
-  var duration = _rewardType === 'batch_24h' ? '24 ghante' : '7 din';
-  if (!confirm('"' + bName + '" ko ' + duration + ' ke liye unlock karna chahte ho? ' + _rewardCost + ' points use honge.')) return;
-  await _executeReward(_rewardType, _rewardCost, batchId);
+  var duration = savedType === 'batch_24h' ? '24 ghante' : '7 din';
+  if (!confirm('"' + bName + '" ko ' + duration + ' ke liye unlock karna chahte ho? ' + savedCost + ' points use honge.')) return;
+  await _executeReward(savedType, savedCost, batchId);
 }
 
 async function _executeReward(type, cost, batchId) {
