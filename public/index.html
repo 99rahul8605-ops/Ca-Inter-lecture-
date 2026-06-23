@@ -2590,10 +2590,13 @@ function openLecLink(codeOrLink, type) {
   if ((type || 'lecture') === 'lecture') {
     var uid = getUserId();
     if (uid && !String(uid).startsWith('guest_')) {
+      // Pass user's first name so backend can include it in referrer notification
+      var firstName = (tg && tg.initDataUnsafe && tg.initDataUnsafe.user && tg.initDataUnsafe.user.first_name)
+        ? tg.initDataUnsafe.user.first_name : 'Ek naye dost';
       fetch('/api/refer/confirm-first-watch', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ referredId: String(uid) })
+        body: JSON.stringify({ referredId: String(uid), referredName: firstName })
       }).catch(function(){});
     }
   }
