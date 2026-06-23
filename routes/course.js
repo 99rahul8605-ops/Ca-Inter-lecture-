@@ -928,6 +928,25 @@ router.post('/spin-reward', async (req, res) => {
   }
 });
 
+// ── Spin Status ───────────────────────────────────────────────────────────────
+// Returns how many spins user has done today (from DB, not localStorage)
+// Used on page load to restore accurate spin count after redeploy/refresh
+router.get('/spin-status/:userId', (req, res) => {
+  try {
+    const userId = req.params.userId;
+    // Count spins done today (midnight to midnight, local server time)
+    const now = new Date();
+    const dayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    const dayEnd = dayStart + 86400000;
+    const spinsToday = db.getDb().prepare(
+      `SELECT COUNT(*) as c FROM spin_points WHERE userId=? AND createdAt >= ? AND createdAt < ?`
+    ).get(userId, dayStart, dayEnd).c;
+
+    const totalPoints = db.spinPoints.getTotal(userId);
+    res.json({ spinsToday, spinsLeft: Math.max(0, 5 - spinsToday), totalSpinPoints: totalPoints });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
 // ── Force Join ────────────────────────────────────────────────────────────────
 
 function getForceJoinChannels() {
