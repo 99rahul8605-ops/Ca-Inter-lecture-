@@ -345,7 +345,7 @@ body.ready{transition:none}
 .spinner-canvas-wrap{position:relative;width:260px;height:260px}
 #spinnerCanvas{border-radius:50%;box-shadow:0 0 0 4px var(--border),0 4px 24px rgba(0,0,0,0.35)}
 /* Pointer triangle at BOTTOM center pointing UP into the wheel */
-.spinner-pointer{position:absolute;bottom:-14px;left:50%;transform:translateX(-50%);width:0;height:0;border-left:12px solid transparent;border-right:12px solid transparent;border-top:22px solid #f59e0b;filter:drop-shadow(0 -2px 4px rgba(0,0,0,0.4))}
+.spinner-pointer{position:absolute;top:-16px;left:50%;transform:translateX(-50%);width:0;height:0;border-left:13px solid transparent;border-right:13px solid transparent;border-top:24px solid #f59e0b;filter:drop-shadow(0 3px 5px rgba(0,0,0,0.5))}
 .spinner-center-btn{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:52px;height:52px;border-radius:50%;background:linear-gradient(135deg,var(--accent),var(--accent2));border:3px solid var(--bg);box-shadow:0 2px 12px rgba(0,0,0,0.4);display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:18px;transition:transform 0.15s,box-shadow 0.15s;color:#fff;font-weight:700}
 .spinner-center-btn:active{transform:translate(-50%,-50%) scale(0.92)}
 .spinner-center-btn:disabled{opacity:0.5;cursor:not-allowed}
@@ -4284,14 +4284,15 @@ function startSpin() {
   _spinPending = false;
   _updateSpinUI();
 
-  // Pointer is at BOTTOM of wheel = Math.PI/2 in canvas coords.
-  // We want: _spinAngle + resultIdx * arc + arc/2 = Math.PI/2 (mod 2PI)
-  // So: _spinAngle_target = Math.PI/2 - resultIdx * arc - arc/2
+  // Pointer is at TOP of wheel = -Math.PI/2 in canvas coords.
+  // We want the winning segment center to land at top pointer:
+  // _spinAngle + resultIdx*arc + arc/2 ≡ -Math.PI/2  (mod 2PI)
+  // So targetBase = -Math.PI/2 - resultIdx*arc - arc/2
   var n = SPIN_SEGMENTS.length;
   var arc = (2 * Math.PI) / n;
 
-  // Target base angle (where wheel must rest so winning segment faces bottom pointer)
-  var targetBase = Math.PI / 2 - (resultIdx * arc + arc / 2);
+  // Target base angle so winning segment faces top pointer
+  var targetBase = -(Math.PI / 2) - (resultIdx * arc + arc / 2);
 
   // Normalize current angle to [0, 2PI)
   var currentNorm = ((_spinAngle % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
@@ -4370,57 +4371,72 @@ function _showSpinAd() {
     });
 }
 
-/** Award points to user and show result popup. */
+/** Award points to user — saves to localStorage + backend, then shows result popup. */
 function _awardSpinPoints(pts) {
+  // 1. Save to localStorage immediately so UI reflects change even if API fails
   var state = _loadSpinState();
   state.totalPoints = (state.totalPoints || 0) + pts;
   _saveSpinState(state);
   _spinPending = false;
 
-  // Sync points to backend — send TG initData for server-side verification
   var uid = getUserId ? getUserId() : null;
   var initData = tg ? tg.initData : '';
+
+  // 2. Show popup immediately with earned points (don't wait for API)
+  _showSpinPopup(pts);
+  _updateSpinUI();
+
+  // 3. POST to backend — update DB + get fresh authoritative total
   if (uid && initData) {
     fetch('/api/spin-reward', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-tg-init-data': initData   // Required for server-side user verification
+        'x-tg-init-data': initData
       },
-      body: JSON.stringify({ userId: uid, points: pts })
-    }).then(function(r) { return r.json(); }).then(function(data) {
-      // Sync server's authoritative point count back to UI
-      if (data.availablePoints !== undefined) {
+      body: JSON.stringify({ userId: String(uid), points: pts })
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data && data.availablePoints !== undefined) {
+        // Server confirmed — update refer tab with authoritative value
         var rpEl = document.getElementById('referPoints');
         if (rpEl) rpEl.textContent = data.availablePoints;
         var rdEl = document.getElementById('rewardPointsDisplay');
         if (rdEl) rdEl.textContent = data.availablePoints;
+        // Also update earn page badge
+        var epEl = document.getElementById('earnTotalPoints');
+        if (epEl) epEl.textContent = data.availablePoints;
       }
-    }).catch(function() { /* silent fail — localStorage still tracks locally */ });
+    })
+    .catch(function(err) {
+      // API failed — fallback: add pts to whatever is currently shown
+      console.warn('spin-reward API failed, using local fallback:', err);
+      var rpEl = document.getElementById('referPoints');
+      if (rpEl) rpEl.textContent = (parseInt(rpEl.textContent) || 0) + pts;
+      var rdEl = document.getElementById('rewardPointsDisplay');
+      if (rdEl) rdEl.textContent = (parseInt(rdEl.textContent) || 0) + pts;
+    });
+  } else {
+    // No TG initData (testing in browser) — just update UI locally
+    var rpEl = document.getElementById('referPoints');
+    if (rpEl) rpEl.textContent = (parseInt(rpEl.textContent) || 0) + pts;
+    var rdEl = document.getElementById('rewardPointsDisplay');
+    if (rdEl) rdEl.textContent = (parseInt(rdEl.textContent) || 0) + pts;
   }
+}
 
-  // Update refer tab points display if visible (always update regardless of current value)
-  var rpEl = document.getElementById('referPoints');
-  if (rpEl) {
-    var existing = parseInt(rpEl.textContent) || 0;
-    rpEl.textContent = existing + pts;
-  }
-  var rdEl = document.getElementById('rewardPointsDisplay');
-  if (rdEl) {
-    var existingR = parseInt(rdEl.textContent) || 0;
-    rdEl.textContent = existingR + pts;
-  }
-
-  _updateSpinUI();
-
-  // Show result popup
+/** Show spin result popup with earned points. */
+function _showSpinPopup(pts) {
   var emojis = { 1:'😊', 2:'🎉', 3:'🔥', 4:'💎', 5:'🏆' };
-  var emoji = emojis[pts] || '🎉';
   var el = document.getElementById('spinResultEmoji');
   var title = document.getElementById('spinResultTitle');
   var sub = document.getElementById('spinResultSub');
-  if (el) el.textContent = emoji;
-  if (title) { title.textContent = '+' + pts + ' Point' + (pts > 1 ? 's' : '') + '!'; title.style.color = pts >= 4 ? '#f59e0b' : 'var(--green)'; }
+  if (el) el.textContent = emojis[pts] || '🎉';
+  if (title) {
+    title.textContent = '+' + pts + ' Point' + (pts > 1 ? 's' : '') + '!';
+    title.style.color = pts >= 4 ? '#f59e0b' : 'var(--green)';
+  }
   if (sub) sub.textContent = 'Points aapke account mein add ho gaye. Refer tab se redeem karo!';
   document.getElementById('spinResultOverlay').classList.add('show');
 }
