@@ -1380,6 +1380,9 @@ async function load() {
     }
   } catch(e) {}
 
+  // Fetch premium access map from server (expiry-aware) in parallel
+  loadPremiumAccessMap();
+
   // Fetch fresh data in background
   try {
     var fresh = await apiFetch('/api/batches');
@@ -1488,7 +1491,15 @@ function _batchCard(b, isPremiumLocked, pointUnlocked) {
     ? '<div style="display:flex;gap:6px;flex-wrap:wrap">' + viewBtn + buyBtn + '</div>'
     : '';
   var metaExtra = isPremiumLocked ? ' · <span style="color:#f59e0b">🔒 Locked</span>'
-                : pointUnlocked   ? ' · <span style="color:#22c55e">✅ Points Unlocked</span>'
+                : pointUnlocked   ? (function() {
+                    var exp = _premiumAccessMap[b._id];
+                    if (!exp) return ' · <span style="color:#22c55e">✅ Unlocked</span>';
+                    var diff = exp - Date.now();
+                    var hrs  = Math.floor(diff / 3600000);
+                    var mins = Math.floor((diff % 3600000) / 60000);
+                    var timeStr = hrs > 24 ? Math.floor(hrs/24) + 'd ' + (hrs%24) + 'h' : hrs + 'h ' + mins + 'm';
+                    return ' · <span style="color:#22c55e">✅ Expires in ' + timeStr + '</span>';
+                  })()
                 : '';
   return `<div class="batch-card${b.isPremium ? ' batch-card-premium' : ''}" onclick="openBatch('${b._id}')" style="${cardStyle}">
     <div class="batch-img" style="position:relative;overflow:hidden">
@@ -1531,7 +1542,9 @@ function renderBatches(list) {
       ? free.map(function(b) {
           // Show "Unlocked" badge if user redeemed this batch via points
           var curUid = String(getUserId());
-          var pointUnlocked = !isAdmin && b.premiumUsers && b.premiumUsers.includes(curUid);
+          // Check _premiumAccessMap (expiry-aware) instead of premiumUsers array
+          var bExpiry = _premiumAccessMap[b._id];
+          var pointUnlocked = !isAdmin && bExpiry && Date.now() < bExpiry;
           return _batchCard(b, false, pointUnlocked);
         }).join('')
       : '<div class="empty" style="grid-column:1/-1"><i class="ti ti-school"></i>No free batches yet</div>';
@@ -3060,13 +3073,19 @@ openBatch = function(bid) {
   var curUid = String(getUserId());
 
   // Check if user has point-redeemed premium access for this specific batch
-  // This works for ALL batches (public or private) — points redeem adds user to premiumUsers
+  // Use _premiumAccessMap (server-verified with expiry) as source of truth
   if (b && !isAdmin) {
-    var hasPremiumAccess = b.premiumUsers && b.premiumUsers.includes(curUid);
+    var expiresAt = _premiumAccessMap[bid];
+    var hasPremiumAccess = expiresAt && Date.now() < expiresAt;
     if (hasPremiumAccess) {
-      // User unlocked this batch via points — open directly, no ad needed
+      // Valid non-expired premium access via points — open directly
       _origOpenBatch(bid);
       return;
+    } else if (expiresAt && Date.now() >= expiresAt) {
+      // Access existed but now expired — clear from map and fall through
+      delete _premiumAccessMap[bid];
+      // Also clear from batch premiumUsers locally
+      if (b.premiumUsers) b.premiumUsers = b.premiumUsers.filter(function(u) { return u !== curUid; });
     }
   }
 
@@ -3695,6 +3714,8 @@ function getReferLink() {
 // Flag set to true after spin award — prevents loadReferStats from overwriting
 // fresh points until server confirms the new total
 var _spinJustAwarded = false;
+// Map of batchId -> expiresAt for point-redeemed premium access (fetched from server)
+var _premiumAccessMap = {};
 var _spinAwardedTotal = 0; // The server-confirmed total after spin
 
 async function loadReferStats() {
@@ -3893,8 +3914,10 @@ async function _executeReward(type, cost, batchId) {
       if (dot) dot.style.background = 'var(--green)';
       toast('🎉 24h access mil gaya! Points bache: ' + _currentReferPoints, 'success');
     } else if (type === 'batch_24h' || type === 'batch_7d') {
+      // Refresh both batches and premium access map so expiry is tracked correctly
       var fresh = await apiFetch('/api/batches').catch(function(){return null;});
       if (fresh) { batches = fresh; renderBatches(batches); }
+      loadPremiumAccessMap(); // Sync fresh expiry data from server
       var dur = type === 'batch_24h' ? '24h' : '7 din';
       toast('🎉 Batch ' + dur + ' ke liye unlock hua! Points bache: ' + _currentReferPoints, 'success');
     } else {
@@ -4283,6 +4306,22 @@ function _startSpinResetCountdown() {
 }
 
 /** Initialize earn page — fetch spin count from server (survives redeploy/refresh). */
+// Fetch premium batch access map from server — called on app load and after redeem
+function loadPremiumAccessMap() {
+  var uid = getUserId ? getUserId() : null;
+  if (!uid) return;
+  fetch('/api/batch-access/' + uid)
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data && data.accessMap) {
+        _premiumAccessMap = data.accessMap;
+        // Re-render batch cards to show correct expiry state
+        if (typeof renderBatches === 'function') renderBatches();
+      }
+    })
+    .catch(function() {});
+}
+
 function initEarnPage() {
   _drawWheel();
   _updateSpinUI();
