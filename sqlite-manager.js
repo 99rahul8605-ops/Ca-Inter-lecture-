@@ -176,6 +176,17 @@ function _setupTables(db) {
       createdAt INTEGER DEFAULT 0
     );
     CREATE INDEX IF NOT EXISTS idx_spin_points_user ON spin_points(userId);
+
+    -- Premium batch access granted via point redemption (with expiry)
+    CREATE TABLE IF NOT EXISTS premium_access (
+      id        TEXT PRIMARY KEY,
+      userId    TEXT NOT NULL,
+      batchId   TEXT NOT NULL,
+      expiresAt INTEGER NOT NULL,
+      createdAt INTEGER DEFAULT 0
+    );
+    CREATE INDEX IF NOT EXISTS idx_premium_access_user ON premium_access(userId);
+    CREATE INDEX IF NOT EXISTS idx_premium_access_batch ON premium_access(batchId);
   `);
 }
 
@@ -764,6 +775,37 @@ const spinPoints = {
   },
 };
 
+// ── PREMIUM ACCESS Operations ─────────────────────────────────────────────────
+
+const premiumAccess = {
+  // Grant premium access to a batch for a user
+  grant({ id, userId, batchId, expiresAt }) {
+    getDb().prepare(`INSERT OR REPLACE INTO premium_access(id,userId,batchId,expiresAt,createdAt) VALUES(?,?,?,?,?)`)
+      .run(id, userId, batchId, expiresAt, Date.now());
+  },
+  // Check if user has valid (non-expired) access to a specific batch
+  hasAccess(userId, batchId) {
+    const row = getDb().prepare(
+      `SELECT * FROM premium_access WHERE userId=? AND batchId=? AND expiresAt > ? ORDER BY expiresAt DESC LIMIT 1`
+    ).get(userId, batchId, Date.now());
+    return row || null;
+  },
+  // Get all valid batch accesses for a user
+  getActiveForUser(userId) {
+    return getDb().prepare(
+      `SELECT * FROM premium_access WHERE userId=? AND expiresAt > ?`
+    ).all(userId, Date.now());
+  },
+  // Get all expired accesses (for cleanup)
+  getExpired() {
+    return getDb().prepare(`SELECT * FROM premium_access WHERE expiresAt <= ?`).all(Date.now());
+  },
+  // Delete a specific access record
+  remove(id) {
+    getDb().prepare(`DELETE FROM premium_access WHERE id=?`).run(id);
+  },
+};
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 /**
@@ -791,6 +833,7 @@ module.exports = {
   pendingReferral,
   pointsUsage,
   spinPoints,
+  premiumAccess,
   coupon,
   autoLec,
   fileRecord,
