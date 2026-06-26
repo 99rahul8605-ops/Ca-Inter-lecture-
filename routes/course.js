@@ -733,7 +733,7 @@ router.post('/refer/redeem', async (req, res) => {
 
     // Tier validate
     const TIERS = {
-      access_24h:   { cost: 1,  label: '24h Free Access' },
+      access_24h:   { cost: 1,  label: '8h Free Access' },
       premium_1d:   { cost: 10, label: '1 Batch 1-Day Premium', needsBatch: true },
       premium_7d:   { cost: 50, label: '1 Batch 7-Day Premium', needsBatch: true },
     };
@@ -795,7 +795,7 @@ router.post('/refer/redeem', async (req, res) => {
       // Extend free access by 24h
       const existing = db.access.findOne(userId);
       const baseTime = (existing && existing.expiresAt > new Date()) ? existing.expiresAt : new Date();
-      const expiresAt = new Date(baseTime.getTime() + 24 * 60 * 60 * 1000);
+      const expiresAt = new Date(baseTime.getTime() + 8 * 60 * 60 * 1000);
       const today = new Date().toISOString().slice(0, 10);
       const claimsToday = (existing && existing.claimDay === today) ? (existing.claimsToday || 0) : 0;
       db.access.upsert({ userId, expiresAt, claimsToday, claimDay: today });
