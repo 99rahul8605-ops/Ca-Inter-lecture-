@@ -964,12 +964,12 @@ body.ready{transition:none}
       <div style="font-size:13px;font-weight:600;margin-bottom:4px;color:var(--text)">🎁 Rewards</div>
       <div id="rewardPointsBar" style="font-size:11px;color:var(--text2);margin-bottom:12px">Points: <strong id="rewardPointsDisplay" style="color:#f59e0b">–</strong></div>
 
-      <!-- Reward 1: 1 Point → 24h general access -->
+      <!-- Reward 1: 1 Point → 8h general access -->
       <div style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--surface2);border-radius:var(--radius-sm);margin-bottom:8px">
         <span style="font-size:22px">🔓</span>
         <div style="flex:1">
-          <div style="font-size:12px;font-weight:600;color:var(--text)">24h Free Access</div>
-          <div style="font-size:11px;color:var(--text2)">Sabhi free batches ke liye 24 ghante access</div>
+          <div style="font-size:12px;font-weight:600;color:var(--text)">8h Free Access</div>
+          <div style="font-size:11px;color:var(--text2)">Sabhi free batches ke liye 8 ghante access</div>
           <div style="font-size:11px;color:#f59e0b;font-weight:700;margin-top:2px">1 Point</div>
         </div>
         <button onclick="redeemReward('access_24h', 1)" style="background:linear-gradient(135deg,#f59e0b,#d97706);border:none;color:#fff;border-radius:8px;padding:6px 12px;font-size:11px;font-weight:700;cursor:pointer;flex-shrink:0">Redeem</button>
@@ -1054,7 +1054,7 @@ body.ready{transition:none}
           <div style="width:26px;height:26px;border-radius:50%;background:linear-gradient(135deg,#22c55e,#16a34a);color:#fff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px">5</div>
           <div>
             <div style="font-size:12px;font-weight:600;color:var(--text)">Points se rewards redeem karo</div>
-            <div style="font-size:11px;color:var(--text2);margin-top:2px">1 pt = 24h access &nbsp;·&nbsp; 10 pt = koi bhi batch 24h &nbsp;·&nbsp; 50 pt = koi bhi batch 7 din</div>
+            <div style="font-size:11px;color:var(--text2);margin-top:2px">1 pt = 8h access &nbsp;·&nbsp; 10 pt = koi bhi batch 24h &nbsp;·&nbsp; 50 pt = koi bhi batch 7 din</div>
           </div>
         </div>
 
@@ -3815,7 +3815,7 @@ async function redeemReward(type, cost) {
 
   if (type === 'access_24h') {
     // Direct redeem — no batch selection needed
-    if (!confirm('1 point use karke 24h access lena chahte ho?')) return;
+    if (!confirm('1 point use karke 8h access lena chahte ho?')) return;
     await _executeReward(type, cost, null);
   } else {
     // batch_24h or batch_7d — show batch picker
@@ -3914,7 +3914,7 @@ async function _executeReward(type, cost, batchId) {
       startCountdown();
       var dot = document.getElementById('accessDot');
       if (dot) dot.style.background = 'var(--green)';
-      toast('🎉 24h access mil gaya! Points bache: ' + _currentReferPoints, 'success');
+      toast('🎉 8h access mil gaya! Points bache: ' + _currentReferPoints, 'success');
     } else if (type === 'batch_24h' || type === 'batch_7d') {
       // Refresh both batches and premium access map so expiry is tracked correctly
       var fresh = await apiFetch('/api/batches').catch(function(){return null;});
