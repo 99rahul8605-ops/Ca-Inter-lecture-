@@ -857,7 +857,7 @@ router.post('/refer/redeem', async (req, res) => {
       const userName2 = userRec2 ? [userRec2.firstName, userRec2.lastName].filter(Boolean).join(' ') || userRec2.username || userId : userId;
       const usernameTag2 = userRec2 && userRec2.username ? ` (@${userRec2.username})` : '';
       const newPts2 = availablePoints - tierInfo.cost;
-      const expStr2 = new Date(expiresAt.getTime() + 5.5*60*60*1000).toISOString().replace('T',' ').slice(0,19) + ' IST';
+      const expStr2 = new Date(expiresAt + 5.5*60*60*1000).toISOString().replace('T',' ').slice(0,19) + ' IST';
       const rewardEmoji = days === 1 ? '🌟' : '👑';
       notifyOwner(
         `🎁 <b>Points Redeemed!</b>
