@@ -617,13 +617,13 @@ const Referral = mongoose.model('Referral', referralSchema);
 router.get('/refer/stats/:userId', (req, res) => {
   try {
     const userId = req.params.userId;
-    const referralPoints = db.referral.countByReferrer(userId) * POINTS_PER_REFERRAL;
-    // Spin points earned from daily spinner
+    const referralCount = db.referral.countByReferrer(userId); // actual number of referrals
+    const referralPoints = referralCount * POINTS_PER_REFERRAL; // points from referrals
     const earnedSpinPoints = db.spinPoints ? db.spinPoints.getTotal(userId) : 0;
     const totalPoints = referralPoints + earnedSpinPoints;
     const usedPoints = (db.pointsUsage && db.pointsUsage.getTotalUsed) ? db.pointsUsage.getTotalUsed(userId) : 0;
     const availablePoints = Math.max(0, totalPoints - usedPoints);
-    res.json({ referrals: referralPoints, spinPoints: earnedSpinPoints, points: availablePoints });
+    res.json({ referrals: referralCount, referralPoints, spinPoints: earnedSpinPoints, points: availablePoints });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
