@@ -3072,27 +3072,29 @@ openBatch = function(bid) {
   var b = batches.find(x => x._id === bid);
   var curUid = String(getUserId());
 
-  // Check if user has point-redeemed premium access for this specific batch
-  // Use _premiumAccessMap (server-verified with expiry) as source of truth
   if (b && !isAdmin) {
+    // 1. Check point-redeemed access (_premiumAccessMap — expiry aware)
     var expiresAt = _premiumAccessMap[bid];
-    var hasPremiumAccess = expiresAt && Date.now() < expiresAt;
-    if (hasPremiumAccess) {
-      // Valid non-expired premium access via points — open directly
+    if (expiresAt && Date.now() < expiresAt) {
       _origOpenBatch(bid);
       return;
     } else if (expiresAt && Date.now() >= expiresAt) {
-      // Access existed but now expired — clear from map and fall through
+      // Expired point access — clean up
       delete _premiumAccessMap[bid];
-      // Also clear from batch premiumUsers locally
       if (b.premiumUsers) b.premiumUsers = b.premiumUsers.filter(function(u) { return u !== curUid; });
     }
-  }
 
-  // Private/premium batch — only admin-added premiumUsers can open (no points path here)
-  if (b && b.isPremium && !isAdmin) {
-    toast('🔒 Yeh premium batch hai! Admin se access maango.', 'error');
-    return;
+    // 2. isPremium batch — check premiumUsers (admin-added OR payment purchased)
+    if (b.isPremium) {
+      var inPremiumUsers = b.premiumUsers && b.premiumUsers.includes(curUid);
+      if (!inPremiumUsers) {
+        toast('🔒 Yeh premium batch hai! Purchase karo ya admin se access maango.', 'error');
+        return;
+      }
+      // User is in premiumUsers (purchased/admin granted) — open directly
+      _origOpenBatch(bid);
+      return;
+    }
   }
 
   // Public batch — needs normal 24h ad-based access
