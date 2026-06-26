@@ -834,25 +834,23 @@ router.post('/refer/redeem', async (req, res) => {
 
     if (tier === 'premium_1d' || tier === 'premium_7d') {
       const days = tier === 'premium_1d' ? 1 : 7;
-      // Add user to batch premiumUsers with expiry — SQLite first
       const batch = db.batch.getOne(batchId);
       if (!batch) return res.status(404).json({ error: 'Batch not found' });
-      // Allow any public batch (not just isPremium ones)
 
       const uid = String(userId);
+      const expiresAt = Date.now() + days * 24 * 60 * 60 * 1000;
+
+      // Save to premium_access table (source of truth for expiry)
+      const accessId = require('crypto').randomBytes(12).toString('hex');
+      db.premiumAccess.grant({ id: accessId, userId: uid, batchId, expiresAt });
+
+      // Also add to batch premiumUsers for immediate frontend use
       if (!batch.premiumUsers) batch.premiumUsers = [];
       if (!batch.premiumUsers.includes(uid)) {
         batch.premiumUsers.push(uid);
         db.batch.upsert(batch);
         if (isMongo()) Batch.findByIdAndUpdate(batchId, { $addToSet: { premiumUsers: uid } }).catch(() => {});
       }
-
-      // Schedule removal after N days (store expiry in MongoDB)
-      const PremiumExpiry = mongoose.models.PremiumExpiry || mongoose.model('PremiumExpiry', new mongoose.Schema({
-        userId: String, batchId: String, expiresAt: Date, removed: { type: Boolean, default: false }
-      }));
-      const expiresAt = new Date(Date.now() + days * 24 * 60 * 60 * 1000);
-      if (isMongo()) await PremiumExpiry.create({ userId: uid, batchId, expiresAt }).catch(() => {});
 
       // Notify owner
       const userRec2 = await getTgUserInfo(userId);
@@ -967,6 +965,44 @@ router.get('/spin-status/:userId', (req, res) => {
     res.json({ spinsToday, spinsLeft: Math.max(0, 5 - spinsToday), totalSpinPoints: totalPoints });
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
+
+// ── Batch Premium Access Check ────────────────────────────────────────────────
+// Returns all batches user has active premium access to (from points redeem)
+// Frontend uses this to check expiry instead of relying on premiumUsers array
+router.get('/batch-access/:userId', (req, res) => {
+  try {
+    const userId = req.params.userId;
+    const active = db.premiumAccess.getActiveForUser(userId);
+    // Return map of batchId -> expiresAt for quick lookup
+    const accessMap = {};
+    active.forEach(function(row) { accessMap[row.batchId] = row.expiresAt; });
+    res.json({ accessMap });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Premium Access Expiry Cleanup (runs every hour) ───────────────────────────
+// Removes expired users from batch premiumUsers array so access is truly revoked
+setInterval(function _cleanupExpiredPremiumAccess() {
+  try {
+    const expired = db.premiumAccess.getExpired();
+    if (!expired.length) return;
+    expired.forEach(function(row) {
+      // Remove from SQLite premium_access
+      db.premiumAccess.remove(row.id);
+      // Remove from batch premiumUsers array
+      const batch = db.batch.getOne(row.batchId);
+      if (batch && batch.premiumUsers) {
+        batch.premiumUsers = batch.premiumUsers.filter(function(u) { return u !== row.userId; });
+        db.batch.upsert(batch);
+        // Sync to MongoDB
+        if (mongoose.connection.readyState === 1) {
+          Batch.findByIdAndUpdate(row.batchId, { $pull: { premiumUsers: row.userId } }).catch(() => {});
+        }
+      }
+      console.log(`[PremiumExpiry] Removed userId=${row.userId} from batchId=${row.batchId}`);
+    });
+  } catch(e) { console.error('[PremiumExpiry] Cleanup error:', e.message); }
+}, 60 * 60 * 1000); // Every hour
 
 // ── Force Join ────────────────────────────────────────────────────────────────
 
