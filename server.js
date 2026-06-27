@@ -298,7 +298,20 @@ async function startBot() {
         const record = db.fileRecord.findByCode(param);
         if (!record) return bot.sendMessage(chatId, `File not found. Link may be invalid.`);
         const isVideo = record.file_type==="video"||record.file_type==="video_note";
-        if (isVideo && record.delivered_to.includes(chatId)) return bot.sendMessage(chatId, `⚠️ This video was already delivered. It auto-deletes within 6 hours.`);
+
+        // Check if video was recently delivered (within last 6 hours)
+        // After 6hr, Telegram deletes it so we allow re-delivery
+        const SIX_HOURS = 6 * 60 * 60 * 1000;
+        const deliveryEntry = record.delivered_to.find(x =>
+          (typeof x === 'object' ? x.chatId : x) === chatId
+        );
+        const deliveredAt = deliveryEntry ? (typeof deliveryEntry === 'object' ? deliveryEntry.deliveredAt : 0) : null;
+        const recentlyDelivered = deliveredAt && (Date.now() - deliveredAt) < SIX_HOURS;
+
+        if (isVideo && recentlyDelivered) {
+          const remaining = Math.ceil((SIX_HOURS - (Date.now() - deliveredAt)) / 60000);
+          return bot.sendMessage(chatId, `⚠️ This video was already delivered and will auto-delete in <b>${remaining} min</b>. After deletion, you can request it again.`, { parse_mode:"HTML" });
+        }
         if (isVideo && !isOwner(userId)) {
           const lim = checkAndIncrementVideoLimit(userId);
           if (!lim.allowed) return bot.sendMessage(chatId, `🚫 <b>Daily limit reached!</b>\n\nYou've watched <b>${DAILY_VIDEO_LIMIT} videos</b> today.\n📅 Resets at midnight.`, { parse_mode:"HTML" });
@@ -306,7 +319,6 @@ async function startBot() {
           await scheduleDelete(bot,chatId,sentMsg.message_id,new Date(Date.now()+6*60*60*1000));
           db.fileRecord.addDeliveredTo(record.id,chatId);
           if (mongoConnected) FileRecord.updateOne({ code:record.code },{ $addToSet:{ delivered_to:chatId } }).catch(() => {});
-          setTimeout(() => { db.fileRecord.removeDeliveredTo(record.id,chatId); if (mongoConnected) FileRecord.updateOne({ code:record.code },{ $pull:{ delivered_to:chatId } }).catch(() => {}); }, 6*60*60*1000);
 
           // Pehla lecture watch hone pe referral confirm karo aur referrer ko +5 points do
           (async () => {
@@ -355,7 +367,6 @@ async function startBot() {
           await scheduleDelete(bot,chatId,sentMsg.message_id,new Date(Date.now()+6*60*60*1000));
           db.fileRecord.addDeliveredTo(record.id,chatId);
           if (mongoConnected) FileRecord.updateOne({ code:record.code },{ $addToSet:{ delivered_to:chatId } }).catch(() => {});
-          setTimeout(() => { db.fileRecord.removeDeliveredTo(record.id,chatId); if (mongoConnected) FileRecord.updateOne({ code:record.code },{ $pull:{ delivered_to:chatId } }).catch(() => {}); }, 6*60*60*1000);
           await bot.sendMessage(chatId, `⚠️ This video auto-deletes in 6 hours.`);
         }
       } catch (err) { console.error("Deep link error:", err.message); bot.sendMessage(chatId, `Error occurred. Please try again.`); }

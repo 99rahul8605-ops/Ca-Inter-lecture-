@@ -648,13 +648,22 @@ const fileRecord = {
   addDeliveredTo(id, chatId) {
     const r = getDb().prepare(`SELECT delivered_to FROM file_records WHERE id=?`).get(id);
     if (!r) return;
-    const arr = JSON.parse(r.delivered_to||'[]');
-    if (!arr.includes(chatId)) { arr.push(chatId); getDb().prepare(`UPDATE file_records SET delivered_to=? WHERE id=?`).run(JSON.stringify(arr), id); }
+    // Store as array of {chatId, deliveredAt} objects to support re-delivery after 6hr
+    let arr = [];
+    try { arr = JSON.parse(r.delivered_to||'[]'); } catch(e) { arr = []; }
+    // Migrate old plain chatId entries to object format
+    arr = arr.map(x => (typeof x === 'object' ? x : { chatId: x, deliveredAt: 0 }));
+    // Remove existing entry for this chatId (will re-add with fresh timestamp)
+    arr = arr.filter(x => x.chatId !== chatId);
+    arr.push({ chatId, deliveredAt: Date.now() });
+    getDb().prepare(`UPDATE file_records SET delivered_to=? WHERE id=?`).run(JSON.stringify(arr), id);
   },
   removeDeliveredTo(id, chatId) {
     const r = getDb().prepare(`SELECT delivered_to FROM file_records WHERE id=?`).get(id);
     if (!r) return;
-    const arr = JSON.parse(r.delivered_to||'[]').filter(x => x !== chatId);
+    let arr = [];
+    try { arr = JSON.parse(r.delivered_to||'[]'); } catch(e) { arr = []; }
+    arr = arr.filter(x => (typeof x === 'object' ? x.chatId : x) !== chatId);
     getDb().prepare(`UPDATE file_records SET delivered_to=? WHERE id=?`).run(JSON.stringify(arr), id);
   },
   deleteByCode(code, uploadedBy) {
