@@ -295,6 +295,7 @@ router.post("/batches/:bid/subjects", verifyAdmin, async (req, res) => {
   try {
     const batch = db.batch.getOne(req.params.bid);
     if (!batch) return res.status(404).json({ error: "Batch not found" });
+    if (!batch.subjects) batch.subjects = [];
     batch.subjects.push({ name: req.body.name, icon: req.body.icon||"📚", color: req.body.color||"#4f8ef7", order: batch.subjects.length });
     db.batch.upsert(batch);
     if (isMongo()) _mongoBackupBatch(req.params.bid);
@@ -334,6 +335,7 @@ router.post("/batches/:bid/subjects/:sid/chapters", verifyAdmin, async (req, res
     const batch = db.batch.getOne(req.params.bid);
     const subj = batch && _findById(batch.subjects, req.params.sid);
     if (!subj) return res.status(404).json({ error: "Not found" });
+    if (!subj.chapters) subj.chapters = []; // Safety: initialize if undefined
     subj.chapters.push({ name: req.body.name, order: subj.chapters.length, lectures: [], units: [] });
     db.batch.upsert(batch);
     if (isMongo()) _mongoBackupBatch(req.params.bid);
@@ -375,6 +377,7 @@ router.post("/batches/:bid/subjects/:sid/chapters/:cid/units", verifyAdmin, asyn
     const subj = batch && _findById(batch.subjects, req.params.sid);
     const chap = subj && _findById(subj.chapters, req.params.cid);
     if (!chap) return res.status(404).json({ error: "Not found" });
+    if (!chap.units) chap.units = [];
     chap.units.push({ name: req.body.name, order: chap.units.length, lectures: [] });
     db.batch.upsert(batch);
     if (isMongo()) _mongoBackupBatch(req.params.bid);
@@ -417,6 +420,7 @@ router.post("/batches/:bid/subjects/:sid/chapters/:cid/lectures", verifyAdmin, a
     const subj = batch && _findById(batch.subjects, req.params.sid);
     const chap = subj && _findById(subj.chapters, req.params.cid);
     if (!chap) return res.status(404).json({ error: "Not found" });
+    if (!chap.lectures) chap.lectures = [];
     chap.lectures.push({ name: req.body.name, link: req.body.link, notes: req.body.notes||"", order: chap.lectures.length, isDemo: req.body.isDemo===true });
     db.batch.upsert(batch);
     if (isMongo()) _mongoBackupBatch(req.params.bid);
@@ -464,6 +468,7 @@ router.post("/batches/:bid/subjects/:sid/chapters/:cid/units/:uid/lectures", ver
     const chap = subj && _findById(subj.chapters, req.params.cid);
     const unit = chap && _findById(chap.units, req.params.uid);
     if (!unit) return res.status(404).json({ error: "Not found" });
+    if (!unit.lectures) unit.lectures = [];
     unit.lectures.push({ name: req.body.name, link: req.body.link, notes: req.body.notes||"", order: unit.lectures.length, isDemo: req.body.isDemo===true });
     db.batch.upsert(batch);
     if (isMongo()) _mongoBackupBatch(req.params.bid);
