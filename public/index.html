@@ -4170,6 +4170,8 @@ var _spinning = false;        // Whether animation is running
 var _spinPending = false;     // Spin happened, waiting for ad
 var _pendingPoints = 0;       // Points waiting to be awarded after ad
 var _spinResetTimer = null;   // Interval for countdown display
+var _spinCooldownEnd = 0;     // Timestamp when cooldown ends (30s after each spin)
+var _spinCooldownTimer = null; // Interval for cooldown countdown UI
 
 /**
  * Get today's date string (YYYY-MM-DD) based on user local time.
@@ -4276,10 +4278,17 @@ function _updateSpinUI() {
   var btn = document.getElementById('earnSpinBtn');
   var cBtn = document.getElementById('spinCenterBtn');
   var notice = document.getElementById('spinAdNotice');
+  var now = Date.now();
+  var inCooldown = _spinCooldownEnd > now;
+  var cooldownSec = inCooldown ? Math.ceil((_spinCooldownEnd - now) / 1000) : 0;
 
   if (left === 0) {
     if (btn) { btn.disabled = true; btn.innerHTML = '<i class="ti ti-ban"></i> No Spins Left Today'; }
     if (cBtn) { cBtn.disabled = true; cBtn.textContent = '0'; }
+  } else if (inCooldown) {
+    // Cooldown active — disable button and show countdown
+    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="ti ti-clock"></i> Wait ' + cooldownSec + 's...'; }
+    if (cBtn) { cBtn.disabled = true; cBtn.textContent = cooldownSec + 's'; }
   } else {
     if (btn) { btn.disabled = _spinning; btn.innerHTML = _spinning ? '<i class="ti ti-loader-2" style="animation:spin 0.8s linear infinite;display:inline-block"></i> Spinning...' : '<i class="ti ti-rotate-clockwise"></i> Spin Now'; }
     if (cBtn) { cBtn.disabled = _spinning; cBtn.textContent = _spinning ? '⏳' : 'SPIN'; }
@@ -4367,6 +4376,13 @@ function startSpin() {
     return;
   }
 
+  // Cooldown check — 30 seconds between spins to prevent spam
+  if (_spinCooldownEnd > Date.now()) {
+    var remaining = Math.ceil((_spinCooldownEnd - Date.now()) / 1000);
+    toast('⏳ ' + remaining + ' seconds baad spin karo!', 'error');
+    return;
+  }
+
   // Check Monetag SDK is available BEFORE doing anything
   if (typeof show_11011844 === 'undefined') {
     toast('Ad load nahi hua. Ad blocker band karo!', 'error');
@@ -4392,6 +4408,17 @@ function startSpin() {
       var st = _loadSpinState();
       st.spinsUsed += 1;
       _saveSpinState(st);
+
+      // Start 30s cooldown — prevents spam clicking after each spin
+      _spinCooldownEnd = Date.now() + 30000;
+      if (_spinCooldownTimer) clearInterval(_spinCooldownTimer);
+      _spinCooldownTimer = setInterval(function() {
+        if (Date.now() >= _spinCooldownEnd) {
+          clearInterval(_spinCooldownTimer);
+          _spinCooldownTimer = null;
+        }
+        _updateSpinUI();
+      }, 1000);
 
       _spinPending = false;
       _playWheelAnimation(resultIdx);
