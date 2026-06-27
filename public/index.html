@@ -4410,7 +4410,7 @@ function startSpin() {
       _saveSpinState(st);
 
       // Start 30s cooldown — prevents spam clicking after each spin
-      _spinCooldownEnd = Date.now() + 30000;
+      _spinCooldownEnd = Date.now() + 15000;
       if (_spinCooldownTimer) clearInterval(_spinCooldownTimer);
       _spinCooldownTimer = setInterval(function() {
         if (Date.now() >= _spinCooldownEnd) {
