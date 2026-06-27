@@ -1951,7 +1951,7 @@ function _renderManageLevel() {
         <span class="manage-item-icon">🎓</span>
         <div class="manage-item-info" style="cursor:pointer" onclick="_mDrill('subjects','${b._id}')">
           <div class="manage-item-name">${b.name}${premTag}</div>
-          <div class="manage-item-sub">${b.subjects.length} subjects · ${pub ? '🟢 Public' : '🔒 Private'}</div>
+          <div class="manage-item-sub">${(b.subjects||[]).length} subjects · ${pub ? '🟢 Public' : '🔒 Private'}</div>
         </div>
         <button class="${pubClass}" onclick="togglePublish('${b._id}')">${pubLabel}</button>
         ${manageUsersBtn}
@@ -1964,12 +1964,12 @@ function _renderManageLevel() {
     var b = batches.find(x => x._id === _mState.bid);
     if (!b) return;
     if (!b.subjects.length) { html = '<div style="text-align:center;padding:20px;color:var(--text2);font-size:13px">No subjects yet</div>'; }
-    b.subjects.forEach(s => {
+    (b.subjects||[]).forEach(s => {
       html += `<div class="manage-item">
         <span class="manage-item-icon">${s.icon}</span>
         <div class="manage-item-info" style="cursor:pointer" onclick="_mDrill('chapters','${b._id}','${s._id}')">
           <div class="manage-item-name">${s.name}</div>
-          <div class="manage-item-sub">${s.chapters.length} chapters</div>
+          <div class="manage-item-sub">${(s.chapters||[]).length} chapters</div>
         </div>
         <button class="edit-btn" onclick="openEdit('subject','${b._id}','${s._id}')"><i class="ti ti-pencil"></i></button>
         <button class="del-btn" onclick="delSubject('${b._id}','${s._id}')"><i class="ti ti-trash"></i></button>
@@ -1980,10 +1980,10 @@ function _renderManageLevel() {
     var b = batches.find(x => x._id === _mState.bid);
     var s = b && b.subjects.find(x => x._id === _mState.sid);
     if (!s) return;
-    if (!s.chapters.length) { html = '<div style="text-align:center;padding:20px;color:var(--text2);font-size:13px">No chapters yet</div>'; }
-    s.chapters.forEach(c => {
+    if (!(s.chapters||[]).length) { html = '<div style="text-align:center;padding:20px;color:var(--text2);font-size:13px">No chapters yet</div>'; }
+    (s.chapters||[]).forEach(c => {
       var cs = c.comingSoon ? '<span class="coming-soon-badge">🔜 Coming Soon</span>' : '';
-      var lecCount = c.lectures.length + c.units.reduce((a,u)=>a+u.lectures.length,0);
+      var lecCount = (c.lectures||[]).length + (c.units||[]).reduce((a,u)=>a+(u.lectures||[]).length,0);
       html += `<div class="manage-item">
         <span class="manage-item-icon">📂</span>
         <div class="manage-item-info" style="cursor:pointer" onclick="_mDrill('lectures','${b._id}','${s._id}','${c._id}')">
@@ -1998,7 +1998,7 @@ function _renderManageLevel() {
   } else if (_mState.level === 'lectures') {
     var b = batches.find(x => x._id === _mState.bid);
     var s = b && b.subjects.find(x => x._id === _mState.sid);
-    var ch = s && s.chapters.find(x => x._id === _mState.cid);
+    var ch = s && (s.chapters||[]).find(x => x._id === _mState.cid);
     if (!ch) return;
     // Show units with edit/delete buttons
     if (ch.units && ch.units.length) {
@@ -2046,7 +2046,7 @@ function _renderManageLevel() {
         </div>`;
       });
     }
-    if (!ch.units.length && !ch.lectures.length) {
+    if (!(ch.units||[]).length && !(ch.lectures||[]).length) {
       html = '<div style="text-align:center;padding:20px;color:var(--text2);font-size:13px">No lectures yet</div>';
     }
   }
@@ -2070,8 +2070,8 @@ function _renderBreadcrumb() {
   if (!el) return;
   if (_mState.level === 'batches') { el.innerHTML = ''; return; }
   var b = batches.find(x => x._id === _mState.bid);
-  var s = b && batches.find(x=>x._id===_mState.bid).subjects.find(x => x._id === _mState.sid);
-  var ch = s && s.chapters.find(x => x._id === _mState.cid);
+  var s = b && (b.subjects||[]).find(x => x._id === _mState.sid);
+  var ch = s && (s.chapters||[]).find(x => x._id === _mState.cid);
   var parts = [{ label: 'Batches', level: 'batches' }];
   if (b) parts.push({ label: b.name, level: 'subjects', bid: b._id });
   if (s) parts.push({ label: s.name, level: 'chapters', bid: b._id, sid: s._id });
