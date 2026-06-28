@@ -385,20 +385,34 @@ async function syncFromMongo(mongoose) {
   } catch (e) { console.error('  ❌ BulkBatches sync error:', e.message); }
 
   try {
-    // 10. PendingDeletes
+    // 10. PendingDeletes — only sync future ones, clear stale past ones
     const PendingDelete = mongoose.models.PendingDelete;
     if (PendingDelete) {
+      const now = Date.now();
+      const MAX_AGE = 48 * 60 * 60 * 1000;
       const pds = await PendingDelete.find({}).lean();
       const upsertPD = db.prepare(`INSERT INTO pending_deletes(id,chat_id,message_id,delete_at)
         VALUES(?,?,?,?) ON CONFLICT(id) DO NOTHING`);
+      let stale = 0;
       const pdTx = db.transaction(() => {
-        for (const p of pds) upsertPD.run(
-          String(p._id), p.chat_id, p.message_id,
-          new Date(p.delete_at).getTime()
-        );
+        for (const p of pds) {
+          const deleteAt = new Date(p.delete_at).getTime();
+          if (now - deleteAt > MAX_AGE) {
+            // Stale — skip inserting, will be cleaned from MongoDB below
+            stale++;
+          } else {
+            upsertPD.run(String(p._id), p.chat_id, p.message_id, deleteAt);
+          }
+        }
       });
       pdTx();
-      console.log(`  ✅ PendingDeletes: ${pds.length}`);
+      // Clean stale records from MongoDB too
+      if (stale > 0) {
+        const cutoff = new Date(now - MAX_AGE);
+        PendingDelete.deleteMany({ delete_at: { $lt: cutoff } }).catch(() => {});
+        console.log(`  🗑️  Cleared ${stale} stale pending deletes from MongoDB`);
+      }
+      console.log(`  ✅ PendingDeletes: ${pds.length - stale} valid (${stale} stale skipped)`);
     }
   } catch (e) { console.error('  ❌ PendingDeletes sync error:', e.message); }
 

@@ -181,11 +181,36 @@ async function scheduleDelete(bot, chatId, messageId, deleteAt) {
 
 async function recoverPendingDeletes(bot) {
   const pending = db.pendingDelete.getAll();
-  console.log(`Recovering ${pending.length} pending DM deletions...`);
-  for (const p of pending) {
-    const delay = Math.max(0, new Date(p.delete_at) - Date.now());
+  const now = Date.now();
+  // Skip records older than 48 hours — Telegram messages are already gone
+  const MAX_AGE = 48 * 60 * 60 * 1000;
+  let skipped = 0;
+  const valid = pending.filter(p => {
+    const deleteAt = new Date(p.delete_at).getTime();
+    if (now - deleteAt > MAX_AGE) {
+      // Too old — just clean up DB, don't even try to delete
+      db.pendingDelete.deleteById(p._id);
+      if (mongoConnected) PendingDelete.deleteOne({ _id: p._id }).catch(() => {});
+      skipped++;
+      return false;
+    }
+    return true;
+  });
+  if (skipped) console.log(`Skipped ${skipped} stale pending deletes (>48h old)`);
+  console.log(`Recovering ${valid.length} pending DM deletions...`);
+
+  for (const p of valid) {
+    const delay = Math.max(0, new Date(p.delete_at) - now);
     setTimeout(async () => {
-      try { await bot.deleteMessage(p.chat_id, p.message_id); } catch (err) { console.error("Recovered deletion error:", err.message); }
+      try {
+        await bot.deleteMessage(p.chat_id, p.message_id);
+      } catch (err) {
+        // 400 = already deleted or never existed — safe to ignore
+        if (!err.message.includes('400') && !err.message.includes('not found')) {
+          console.error('Deletion error:', err.message);
+        }
+      }
+      // Always remove from DB regardless of success/failure
       db.pendingDelete.deleteById(p._id);
       if (mongoConnected) PendingDelete.deleteOne({ _id: p._id }).catch(() => {});
     }, delay);
