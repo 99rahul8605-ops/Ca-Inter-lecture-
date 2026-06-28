@@ -422,6 +422,20 @@ async function syncFromMongo(mongoose) {
 
 // ── BATCH Operations ──────────────────────────────────────────────────────────
 
+// ── Batch Write Queue — prevents race conditions on concurrent writes ──────────
+// Multiple simultaneous requests (add lecture + add subject) could read stale
+// batch data and overwrite each other. Queue serializes all batch writes.
+const _batchWriteQueue = {};
+
+async function queuedBatchWrite(batchId, writeFn) {
+  // Create a promise chain per batchId so writes are serialized
+  if (!_batchWriteQueue[batchId]) _batchWriteQueue[batchId] = Promise.resolve();
+  _batchWriteQueue[batchId] = _batchWriteQueue[batchId].then(async () => {
+    try { await writeFn(); } catch(e) { console.error(`[BatchWrite] ${batchId}:`, e.message); }
+  });
+  return _batchWriteQueue[batchId];
+}
+
 const batch = {
   getAll() {
     const rows = getDb().prepare(`SELECT data FROM batches ORDER BY json_extract(data,'$.order') ASC`).all();
@@ -833,6 +847,7 @@ module.exports = {
   getDb,
   syncFromMongo,
   mongoBackup,
+  queuedBatchWrite,
   batch,
   user,
   announcement,

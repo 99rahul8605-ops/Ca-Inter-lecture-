@@ -54,6 +54,23 @@ if (MONGO_URI) {
     try { await mongoose.connection.collection("filerecords").updateMany({ expires_at: { $ne: null } }, { $set: { expires_at: null } }); } catch (e) {}
     // Sync MongoDB → SQLite on startup
     await db.syncFromMongo(mongoose);
+
+    // Periodic re-sync every 5 minutes — catches any drift between MongoDB and SQLite
+    // Only syncs batches (most critical) to keep it lightweight
+    setInterval(async () => {
+      if (!mongoConnected) return;
+      try {
+        const Batch = mongoose.model('Batch');
+        const batches = await Batch.find({}).lean();
+        const upsertBatch = db.getDb().prepare(`INSERT INTO batches(id,data,updated_at) VALUES(?,?,?)
+          ON CONFLICT(id) DO UPDATE SET data=excluded.data, updated_at=excluded.updated_at`);
+        const tx = db.getDb().transaction(() => {
+          for (const b of batches) upsertBatch.run(String(b._id), JSON.stringify(b), Date.now());
+        });
+        tx();
+        console.log(`[AutoSync] Batches re-synced: ${batches.length}`);
+      } catch(e) { console.warn('[AutoSync] Error:', e.message); }
+    }, 5 * 60 * 1000); // Every 5 minutes
   }).catch((err) => {
     console.warn("⚠️  MongoDB connection failed:", err.message, "— running SQLite-only.");
   });
