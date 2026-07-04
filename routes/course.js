@@ -1154,7 +1154,24 @@ router.get('/stats', (req, res) => {
         activeAccess: db.access.countActive(),
         grantedToday: db.access.countClaimedOnDay(new Date().toISOString().slice(0, 10)),
       },
-      referrals: { totalReferrals: db.referral.count(), uniqueReferrers: db.referral.distinctReferrers() },
+      referrals: (() => {
+        const totalReferrals = db.referral.count();
+        const uniqueReferrers = db.referral.distinctReferrers();
+        const top5 = db.referral.topReferrers(5).map((r) => {
+          const u = db.user.findOne(r.referrerId);
+          const name = u ? (u.firstName || u.username || `User ${r.referrerId}`) : `User ${r.referrerId}`;
+          return { userId: r.referrerId, name, count: r.c };
+        });
+        return {
+          totalReferrals,
+          uniqueReferrers,
+          referralsToday: db.referral.countSince(now - 24*60*60*1000),
+          referralsThisWeek: db.referral.countSince(now - 7*24*60*60*1000),
+          avgPerReferrer: uniqueReferrers > 0 ? +(totalReferrals / uniqueReferrers).toFixed(1) : 0,
+          totalPointsEarned: totalReferrals * POINTS_PER_REFERRAL,
+          topReferrers: top5,
+        };
+      })(),
       spinWheel: {
         spinsToday: db.spinHistory.countSinceGlobal(now - 24*60*60*1000),
         totalSpinners: db.spinHistory.distinctSpinners(),
