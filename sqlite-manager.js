@@ -3,15 +3,18 @@
  * ─────────────────
  * Single source of truth for ALL SQLite operations.
  * Strategy:
- *   READ  → SQLite (primary, fast)
- *   WRITE → SQLite first, then MongoDB async (backup only)
+ *   READ  → SQLite (fast, local)
+ *   WRITE → SQLite first, then MongoDB async (backup)
  *   STARTUP → sync from MongoDB into SQLite
  */
 
 const BetterSqlite3 = require('better-sqlite3');
 const path = require('path');
 
-const DB_PATH = process.env.SQLITE_PATH || path.join(__dirname, 'bot_cache.db');
+// Render pe /tmp use karo (writable), VPS pe home directory
+const IS_RENDER = !!process.env.RENDER_SERVICE_ID || process.env.RENDER === 'true';
+const USE_SQLITE = !IS_RENDER && process.env.USE_SQLITE !== 'false';
+const DB_PATH = process.env.SQLITE_PATH || (IS_RENDER ? '/tmp/bot_cache.db' : path.join(__dirname, 'bot_cache.db'));
 let _db = null;
 
 function getDb() {
@@ -27,6 +30,21 @@ function getDb() {
 // ── Table Setup ───────────────────────────────────────────────────────────────
 
 function _setupTables(db) {
+  // ── Self-healing schema check (must run BEFORE the CREATE TABLE block below) ──
+  // reward_redemptions / batch_reward_access are brand-new tables for this
+  // feature. If an earlier/partial deploy left either one on disk with an
+  // incompatible schema (missing columns, or — as seen in production — an
+  // unexpected leftover NOT NULL column with no default, e.g. a stray `reward`
+  // column), CREATE TABLE IF NOT EXISTS is a no-op and every insert would keep
+  // failing forever. Since these are pure ledger tables for a new feature (no
+  // legacy data worth preserving), the safest fix is: if the actual columns
+  // don't EXACTLY match what this code expects, drop the table so it gets
+  // recreated fresh, correct, right below.
+  _resetTableIfIncompatible(db, 'reward_redemptions', ['id', 'userId', 'rewardType', 'batchId', 'batchName', 'pointsCost', 'redeemedAt', 'expiresAt']);
+  _resetTableIfIncompatible(db, 'batch_reward_access', ['userId', 'batchId', 'batchName', 'expiresAt', 'grantedAt']);
+  _resetTableIfIncompatible(db, 'spin_tokens', ['id', 'userId', 'token', 'issuedAt', 'expiresAt']);
+  _resetTableIfIncompatible(db, 'spin_history', ['id', 'userId', 'pointsWon', 'spunAt']);
+
   db.exec(`
     -- Batches (full document stored as JSON blob for simplicity)
     CREATE TABLE IF NOT EXISTS batches (
@@ -149,45 +167,76 @@ function _setupTables(db) {
       resetDate TEXT NOT NULL
     );
 
-    -- Pending referrals (confirmed hone se pehle)
-    CREATE TABLE IF NOT EXISTS pending_referrals (
-      referredId  TEXT PRIMARY KEY,
-      referrerId  TEXT NOT NULL,
-      confirmed   INTEGER DEFAULT 0,
-      createdAt   INTEGER DEFAULT 0
+    -- Reward Redemptions (points-spend ledger — history of every reward claimed)
+    CREATE TABLE IF NOT EXISTS reward_redemptions (
+      id         TEXT PRIMARY KEY,
+      userId     TEXT NOT NULL,
+      rewardType TEXT NOT NULL,        -- 'accessPass' | 'batch24h' | 'batch7d'
+      batchId    TEXT DEFAULT NULL,    -- NULL for accessPass (not batch-specific)
+      batchName  TEXT DEFAULT '',      -- snapshot of batch name at redeem time
+      pointsCost INTEGER NOT NULL,
+      redeemedAt INTEGER DEFAULT 0,
+      expiresAt  INTEGER DEFAULT 0
     );
+    CREATE INDEX IF NOT EXISTS idx_reward_redemptions_user ON reward_redemptions(userId);
 
-    -- Points usage (redeem history)
-    CREATE TABLE IF NOT EXISTS points_usage (
-      id          TEXT PRIMARY KEY,
-      userId      TEXT NOT NULL,
-      pointsUsed  INTEGER NOT NULL,
-      tier        TEXT,
-      batchId     TEXT,
-      createdAt   INTEGER DEFAULT 0
-    );
-    CREATE INDEX IF NOT EXISTS idx_points_usage_user ON points_usage(userId);
-
-    -- Spin points earned from daily spinner (separate from referral points)
-    CREATE TABLE IF NOT EXISTS spin_points (
-      id        TEXT PRIMARY KEY,
-      userId    TEXT NOT NULL,
-      points    INTEGER NOT NULL,
-      createdAt INTEGER DEFAULT 0
-    );
-    CREATE INDEX IF NOT EXISTS idx_spin_points_user ON spin_points(userId);
-
-    -- Premium batch access granted via point redemption (with expiry)
-    CREATE TABLE IF NOT EXISTS premium_access (
-      id        TEXT PRIMARY KEY,
+    -- Batch Reward Access (live, time-limited premium-batch unlocks granted via points)
+    -- Kept completely separate from batches.premiumUsers (which is permanent/paid access),
+    -- so an expiring reward can never accidentally strip someone's permanent access.
+    CREATE TABLE IF NOT EXISTS batch_reward_access (
       userId    TEXT NOT NULL,
       batchId   TEXT NOT NULL,
-      expiresAt INTEGER NOT NULL,
-      createdAt INTEGER DEFAULT 0
+      batchName TEXT DEFAULT '',
+      expiresAt INTEGER DEFAULT 0,
+      grantedAt INTEGER DEFAULT 0,
+      PRIMARY KEY (userId, batchId)
     );
-    CREATE INDEX IF NOT EXISTS idx_premium_access_user ON premium_access(userId);
-    CREATE INDEX IF NOT EXISTS idx_premium_access_batch ON premium_access(batchId);
+    CREATE INDEX IF NOT EXISTS idx_batch_reward_access_user ON batch_reward_access(userId);
+
+    -- Spin Tokens (proves a spin's ad was actually watched, before the spin is allowed to count)
+    -- Mirrors the ad_tokens table's exact pattern, kept separate so the Earn tab's
+    -- ad-watch flow never interferes with the Access tab's ad-watch flow.
+    CREATE TABLE IF NOT EXISTS spin_tokens (
+      id        TEXT PRIMARY KEY,
+      userId    TEXT NOT NULL,
+      token     TEXT NOT NULL,
+      issuedAt  INTEGER DEFAULT 0,
+      expiresAt INTEGER DEFAULT 0
+    );
+    CREATE INDEX IF NOT EXISTS idx_spin_tokens_user ON spin_tokens(userId);
+
+    -- Spin History (ledger of completed spins). Three jobs in one table:
+    -- 1) SUM(pointsWon) = total points earned from spinning (feeds the points formula)
+    -- 2) COUNT(*) since midnight = today's spin count (feeds the daily-5-spin limit)
+    -- 3) MAX(spunAt) = last spin time (feeds the 10-second cooldown)
+    CREATE TABLE IF NOT EXISTS spin_history (
+      id        TEXT PRIMARY KEY,
+      userId    TEXT NOT NULL,
+      pointsWon INTEGER NOT NULL,
+      spunAt    INTEGER DEFAULT 0
+    );
+    CREATE INDEX IF NOT EXISTS idx_spin_history_user ON spin_history(userId);
   `);
+}
+
+function _resetTableIfIncompatible(db, table, expectedColumns) {
+  let existingCols;
+  try {
+    existingCols = db.prepare(`PRAGMA table_info(${table})`).all().map(c => c.name);
+  } catch (e) {
+    return; // couldn't inspect it — leave it for CREATE TABLE IF NOT EXISTS to handle
+  }
+  if (existingCols.length === 0) return; // table doesn't exist yet — nothing to reset
+  const existingSet = new Set(existingCols);
+  const matches = existingCols.length === expectedColumns.length && expectedColumns.every(c => existingSet.has(c));
+  if (!matches) {
+    console.log(`  🔧 ${table} schema mismatch (has: [${existingCols.join(',')}], expected: [${expectedColumns.join(',')}]) — resetting table`);
+    try {
+      db.exec(`DROP TABLE IF EXISTS ${table}`);
+    } catch (e) {
+      console.error(`  ❌ Failed to reset ${table}:`, e.message);
+    }
+  }
 }
 
 // ── Startup Sync from MongoDB ─────────────────────────────────────────────────
@@ -338,30 +387,18 @@ async function syncFromMongo(mongoose) {
       const upsertFile = db.prepare(`INSERT INTO file_records(id,code,file_id,file_type,file_name,uploaded_by,expires_at,delivered_to,created_at,channel_msg_id)
         VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET
         file_id=excluded.file_id,delivered_to=excluded.delivered_to,channel_msg_id=excluded.channel_msg_id`);
-      let skipped = 0;
       const fileTx = db.transaction(() => {
-        for (const f of files) {
-          try {
-            upsertFile.run(
-              String(f._id), f.code, f.file_id, f.file_type, f.file_name||'file',
-              f.uploaded_by||null,
-              f.expires_at ? new Date(f.expires_at).getTime() : null,
-              JSON.stringify(f.delivered_to||[]),
-              new Date(f.created_at||0).getTime(),
-              f.channel_msg_id||null
-            );
-          } catch (rowErr) {
-            // Duplicate `code` from a different _id — skip this row, don't abort the sync
-            if (/UNIQUE constraint failed: file_records\.code/.test(rowErr.message)) {
-              skipped++;
-            } else {
-              throw rowErr;
-            }
-          }
-        }
+        for (const f of files) upsertFile.run(
+          String(f._id), f.code, f.file_id, f.file_type, f.file_name||'file',
+          f.uploaded_by||null,
+          f.expires_at ? new Date(f.expires_at).getTime() : null,
+          JSON.stringify(f.delivered_to||[]),
+          new Date(f.created_at||0).getTime(),
+          f.channel_msg_id||null
+        );
       });
       fileTx();
-      console.log(`  ✅ FileRecords: ${files.length}${skipped ? ` (skipped ${skipped} duplicate code)` : ''}`);
+      console.log(`  ✅ FileRecords: ${files.length}`);
     }
   } catch (e) { console.error('  ❌ FileRecords sync error:', e.message); }
 
@@ -385,34 +422,20 @@ async function syncFromMongo(mongoose) {
   } catch (e) { console.error('  ❌ BulkBatches sync error:', e.message); }
 
   try {
-    // 10. PendingDeletes — only sync future ones, clear stale past ones
+    // 10. PendingDeletes
     const PendingDelete = mongoose.models.PendingDelete;
     if (PendingDelete) {
-      const now = Date.now();
-      const MAX_AGE = 48 * 60 * 60 * 1000;
       const pds = await PendingDelete.find({}).lean();
       const upsertPD = db.prepare(`INSERT INTO pending_deletes(id,chat_id,message_id,delete_at)
         VALUES(?,?,?,?) ON CONFLICT(id) DO NOTHING`);
-      let stale = 0;
       const pdTx = db.transaction(() => {
-        for (const p of pds) {
-          const deleteAt = new Date(p.delete_at).getTime();
-          if (now - deleteAt > MAX_AGE) {
-            // Stale — skip inserting, will be cleaned from MongoDB below
-            stale++;
-          } else {
-            upsertPD.run(String(p._id), p.chat_id, p.message_id, deleteAt);
-          }
-        }
+        for (const p of pds) upsertPD.run(
+          String(p._id), p.chat_id, p.message_id,
+          new Date(p.delete_at).getTime()
+        );
       });
       pdTx();
-      // Clean stale records from MongoDB too
-      if (stale > 0) {
-        const cutoff = new Date(now - MAX_AGE);
-        PendingDelete.deleteMany({ delete_at: { $lt: cutoff } }).catch(() => {});
-        console.log(`  🗑️  Cleared ${stale} stale pending deletes from MongoDB`);
-      }
-      console.log(`  ✅ PendingDeletes: ${pds.length - stale} valid (${stale} stale skipped)`);
+      console.log(`  ✅ PendingDeletes: ${pds.length}`);
     }
   } catch (e) { console.error('  ❌ PendingDeletes sync error:', e.message); }
 
@@ -431,24 +454,62 @@ async function syncFromMongo(mongoose) {
     }
   } catch (e) { console.error('  ❌ DailyVideoLimits sync error:', e.message); }
 
+  try {
+    // 12. Reward Redemptions
+    const RewardRedemption = mongoose.models.RewardRedemption;
+    if (RewardRedemption) {
+      const rows = await RewardRedemption.find({}).lean();
+      const upsertRR = db.prepare(`INSERT INTO reward_redemptions(id,userId,rewardType,batchId,batchName,pointsCost,redeemedAt,expiresAt)
+        VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(id) DO NOTHING`);
+      const rrTx = db.transaction(() => {
+        for (const r of rows) upsertRR.run(
+          String(r._id), r.userId, r.rewardType, r.batchId || null, r.batchName || '',
+          r.pointsCost, new Date(r.redeemedAt || 0).getTime(), new Date(r.expiresAt || 0).getTime()
+        );
+      });
+      rrTx();
+      console.log(`  ✅ Reward Redemptions: ${rows.length}`);
+    }
+  } catch (e) { console.error('  ❌ Reward Redemptions sync error:', e.message); }
+
+  try {
+    // 13. Batch Reward Access
+    const BatchRewardAccess = mongoose.models.BatchRewardAccess;
+    if (BatchRewardAccess) {
+      const rows = await BatchRewardAccess.find({}).lean();
+      const upsertBRA = db.prepare(`INSERT INTO batch_reward_access(userId,batchId,batchName,expiresAt,grantedAt)
+        VALUES(?,?,?,?,?) ON CONFLICT(userId,batchId) DO UPDATE SET
+        expiresAt=excluded.expiresAt, batchName=excluded.batchName`);
+      const braTx = db.transaction(() => {
+        for (const r of rows) upsertBRA.run(
+          r.userId, r.batchId, r.batchName || '',
+          new Date(r.expiresAt || 0).getTime(), new Date(r.grantedAt || 0).getTime()
+        );
+      });
+      braTx();
+      console.log(`  ✅ Batch Reward Access: ${rows.length}`);
+    }
+  } catch (e) { console.error('  ❌ Batch Reward Access sync error:', e.message); }
+
+  try {
+    // 14. Spin History (spin_tokens are short-lived ad-watch proofs — not worth syncing, same as ad_tokens)
+    const SpinHistory = mongoose.models.SpinHistory;
+    if (SpinHistory) {
+      const rows = await SpinHistory.find({}).lean();
+      const upsertSH = db.prepare(`INSERT INTO spin_history(id,userId,pointsWon,spunAt)
+        VALUES(?,?,?,?) ON CONFLICT(id) DO NOTHING`);
+      const shTx = db.transaction(() => {
+        for (const r of rows) upsertSH.run(String(r._id), r.userId, r.pointsWon, new Date(r.spunAt || 0).getTime());
+      });
+      shTx();
+      console.log(`  ✅ Spin History: ${rows.length}`);
+    }
+  } catch (e) { console.error('  ❌ Spin History sync error:', e.message); }
+
   console.log('✅ SQLite sync complete');
 }
 
 // ── BATCH Operations ──────────────────────────────────────────────────────────
-
-// ── Batch Write Queue — prevents race conditions on concurrent writes ──────────
-// Multiple simultaneous requests (add lecture + add subject) could read stale
-// batch data and overwrite each other. Queue serializes all batch writes.
-const _batchWriteQueue = {};
-
-async function queuedBatchWrite(batchId, writeFn) {
-  // Create a promise chain per batchId so writes are serialized
-  if (!_batchWriteQueue[batchId]) _batchWriteQueue[batchId] = Promise.resolve();
-  _batchWriteQueue[batchId] = _batchWriteQueue[batchId].then(async () => {
-    try { await writeFn(); } catch(e) { console.error(`[BatchWrite] ${batchId}:`, e.message); }
-  });
-  return _batchWriteQueue[batchId];
-}
 
 const batch = {
   getAll() {
@@ -533,11 +594,6 @@ const access = {
   },
   countActive() {
     return getDb().prepare(`SELECT COUNT(*) as c FROM access WHERE expiresAt > ?`).get(Date.now()).c;
-  },
-  // Count access granted today using claimDay (YYYY-MM-DD)
-  countToday() {
-    const today = new Date().toISOString().slice(0, 10);
-    return getDb().prepare(`SELECT COUNT(*) as c FROM access WHERE claimDay = ?`).get(today).c;
   },
 };
 
@@ -676,22 +732,13 @@ const fileRecord = {
   addDeliveredTo(id, chatId) {
     const r = getDb().prepare(`SELECT delivered_to FROM file_records WHERE id=?`).get(id);
     if (!r) return;
-    // Store as array of {chatId, deliveredAt} objects to support re-delivery after 6hr
-    let arr = [];
-    try { arr = JSON.parse(r.delivered_to||'[]'); } catch(e) { arr = []; }
-    // Migrate old plain chatId entries to object format
-    arr = arr.map(x => (typeof x === 'object' ? x : { chatId: x, deliveredAt: 0 }));
-    // Remove existing entry for this chatId (will re-add with fresh timestamp)
-    arr = arr.filter(x => x.chatId !== chatId);
-    arr.push({ chatId, deliveredAt: Date.now() });
-    getDb().prepare(`UPDATE file_records SET delivered_to=? WHERE id=?`).run(JSON.stringify(arr), id);
+    const arr = JSON.parse(r.delivered_to||'[]');
+    if (!arr.includes(chatId)) { arr.push(chatId); getDb().prepare(`UPDATE file_records SET delivered_to=? WHERE id=?`).run(JSON.stringify(arr), id); }
   },
   removeDeliveredTo(id, chatId) {
     const r = getDb().prepare(`SELECT delivered_to FROM file_records WHERE id=?`).get(id);
     if (!r) return;
-    let arr = [];
-    try { arr = JSON.parse(r.delivered_to||'[]'); } catch(e) { arr = []; }
-    arr = arr.filter(x => (typeof x === 'object' ? x.chatId : x) !== chatId);
+    const arr = JSON.parse(r.delivered_to||'[]').filter(x => x !== chatId);
     getDb().prepare(`UPDATE file_records SET delivered_to=? WHERE id=?`).run(JSON.stringify(arr), id);
   },
   deleteByCode(code, uploadedBy) {
@@ -770,88 +817,108 @@ const dailyVideoLimit = {
   },
 };
 
-// ── PENDING REFERRAL Operations ──────────────────────────────────────────────
+// ── REWARD REDEMPTION Operations (points-spend ledger / history) ──────────────
+// Points themselves are never stored as a balance column — they are always derived
+// as (total referrals earned) - (total points spent here), so the numbers can
+// never drift out of sync with the referral system.
 
-const pendingReferral = {
-  upsert({ referredId, referrerId }) {
-    getDb().prepare(`INSERT INTO pending_referrals(referredId,referrerId,confirmed,createdAt)
-      VALUES(?,?,0,?) ON CONFLICT(referredId) DO NOTHING`)
-      .run(referredId, referrerId, Date.now());
+const rewardRedemption = {
+  insert({ id, userId, rewardType, batchId, batchName, pointsCost, redeemedAt, expiresAt }) {
+    getDb().prepare(`INSERT INTO reward_redemptions(id,userId,rewardType,batchId,batchName,pointsCost,redeemedAt,expiresAt)
+      VALUES(?,?,?,?,?,?,?,?)`)
+      .run(id, userId, rewardType, batchId || null, batchName || '', pointsCost,
+        new Date(redeemedAt || Date.now()).getTime(), new Date(expiresAt).getTime());
   },
-  findByReferred(referredId) {
-    return getDb().prepare(`SELECT * FROM pending_referrals WHERE referredId=? AND confirmed=0`).get(referredId);
+  // Lifetime points a user has spent — subtract this from their referral count to get the spendable balance
+  totalSpent(userId) {
+    return getDb().prepare(`SELECT COALESCE(SUM(pointsCost),0) as total FROM reward_redemptions WHERE userId=?`)
+      .get(userId).total;
   },
-  confirm(referredId) {
-    getDb().prepare(`UPDATE pending_referrals SET confirmed=1 WHERE referredId=?`).run(referredId);
+  history(userId, limit) {
+    return getDb().prepare(`SELECT * FROM reward_redemptions WHERE userId=? ORDER BY redeemedAt DESC LIMIT ?`)
+      .all(userId, limit || 20)
+      .map(r => ({ ...r, redeemedAt: new Date(r.redeemedAt), expiresAt: new Date(r.expiresAt) }));
+  },
+  count() {
+    return getDb().prepare(`SELECT COUNT(*) as c FROM reward_redemptions`).get().c;
   },
 };
 
-// ── POINTS USAGE Operations ───────────────────────────────────────────────────
+// ── BATCH REWARD ACCESS Operations (live, time-limited premium access via points) ──
+// Separate from batches.premiumUsers on purpose — that array is permanent (paid/admin
+// granted), this table is the temporary layer that quietly expires on its own.
 
-const pointsUsage = {
-  insert({ id, userId, pointsUsed, tier, batchId }) {
-    getDb().prepare(`INSERT INTO points_usage(id,userId,pointsUsed,tier,batchId,createdAt) VALUES(?,?,?,?,?,?)`)
-      .run(id, userId, pointsUsed, tier||null, batchId||null, Date.now());
+const batchRewardAccess = {
+  findOne(userId, batchId) {
+    const r = getDb().prepare(`SELECT * FROM batch_reward_access WHERE userId=? AND batchId=?`).get(userId, batchId);
+    if (!r) return null;
+    return { ...r, expiresAt: new Date(r.expiresAt), grantedAt: new Date(r.grantedAt) };
   },
-  getTotalUsed(userId) {
-    return getDb().prepare(`SELECT SUM(pointsUsed) as total FROM points_usage WHERE userId=?`).get(userId).total || 0;
-  },
-};
-
-// ── SPIN POINTS Operations ────────────────────────────────────────────────────
-
-const spinPoints = {
-  // Add earned spin points for a user
-  add({ id, userId, points }) {
-    getDb().prepare(`INSERT INTO spin_points(id,userId,points,createdAt) VALUES(?,?,?,?)`)
-      .run(id, userId, points, Date.now());
-  },
-  // Get total spin points earned by a user (all time)
-  getTotal(userId) {
-    return getDb().prepare(`SELECT SUM(points) as total FROM spin_points WHERE userId=?`).get(userId).total || 0;
-  },
-};
-
-// ── PREMIUM ACCESS Operations ─────────────────────────────────────────────────
-
-const premiumAccess = {
-  // Grant premium access to a batch for a user
-  grant({ id, userId, batchId, expiresAt }) {
-    getDb().prepare(`INSERT OR REPLACE INTO premium_access(id,userId,batchId,expiresAt,createdAt) VALUES(?,?,?,?,?)`)
-      .run(id, userId, batchId, expiresAt, Date.now());
-  },
-  // Check if user has valid (non-expired) access to a specific batch
+  // Fast boolean check used by access-gating logic — true only while not yet expired
   hasAccess(userId, batchId) {
-    const row = getDb().prepare(
-      `SELECT * FROM premium_access WHERE userId=? AND batchId=? AND expiresAt > ? ORDER BY expiresAt DESC LIMIT 1`
-    ).get(userId, batchId, Date.now());
-    return row || null;
+    if (!userId || !batchId) return false;
+    const r = getDb().prepare(`SELECT expiresAt FROM batch_reward_access WHERE userId=? AND batchId=?`).get(userId, batchId);
+    return !!r && r.expiresAt > Date.now();
   },
-  // Get all valid batch accesses for a user
-  getActiveForUser(userId) {
-    return getDb().prepare(
-      `SELECT * FROM premium_access WHERE userId=? AND expiresAt > ?`
-    ).all(userId, Date.now());
+  upsert({ userId, batchId, batchName, expiresAt, grantedAt }) {
+    getDb().prepare(`INSERT INTO batch_reward_access(userId,batchId,batchName,expiresAt,grantedAt) VALUES(?,?,?,?,?)
+      ON CONFLICT(userId,batchId) DO UPDATE SET expiresAt=excluded.expiresAt, batchName=excluded.batchName`)
+      .run(userId, batchId, batchName || '', new Date(expiresAt).getTime(), new Date(grantedAt || Date.now()).getTime());
   },
-  // Get all expired accesses (for cleanup)
-  getExpired() {
-    return getDb().prepare(`SELECT * FROM premium_access WHERE expiresAt <= ?`).all(Date.now());
+  // All currently-active (non-expired) reward unlocks for a user — drives the "active access" UI
+  listActiveByUser(userId) {
+    return getDb().prepare(`SELECT * FROM batch_reward_access WHERE userId=? AND expiresAt>?`)
+      .all(userId, Date.now())
+      .map(r => ({ ...r, expiresAt: new Date(r.expiresAt), grantedAt: new Date(r.grantedAt) }));
   },
-  // Delete a specific access record
-  remove(id) {
-    getDb().prepare(`DELETE FROM premium_access WHERE id=?`).run(id);
+  countActive() {
+    return getDb().prepare(`SELECT COUNT(*) as c FROM batch_reward_access WHERE expiresAt>?`).get(Date.now()).c;
+  },
+};
+
+// ── SPIN TOKEN Operations (proves the spin's ad was watched — mirrors adToken exactly) ──
+
+const spinToken = {
+  create({ id, userId, token, issuedAt, expiresAt }) {
+    getDb().prepare(`INSERT INTO spin_tokens(id,userId,token,issuedAt,expiresAt) VALUES(?,?,?,?,?)`)
+      .run(id, userId, token, new Date(issuedAt || Date.now()).getTime(), new Date(expiresAt).getTime());
+  },
+  findOne({ userId, token }) {
+    const r = getDb().prepare(`SELECT * FROM spin_tokens WHERE userId=? AND token=?`).get(userId, token);
+    if (!r) return null;
+    return { ...r, issuedAt: new Date(r.issuedAt), expiresAt: new Date(r.expiresAt) };
+  },
+  deleteByUser(userId) {
+    getDb().prepare(`DELETE FROM spin_tokens WHERE userId=?`).run(userId);
+  },
+  deleteById(id) {
+    getDb().prepare(`DELETE FROM spin_tokens WHERE id=?`).run(id);
+  },
+};
+
+// ── SPIN HISTORY Operations (ledger of completed spins) ────────────────────────
+
+const spinHistory = {
+  insert({ id, userId, pointsWon, spunAt }) {
+    getDb().prepare(`INSERT INTO spin_history(id,userId,pointsWon,spunAt) VALUES(?,?,?,?)`)
+      .run(id, userId, pointsWon, new Date(spunAt || Date.now()).getTime());
+  },
+  // Lifetime points earned from spinning — feeds directly into the points balance formula
+  totalEarned(userId) {
+    return getDb().prepare(`SELECT COALESCE(SUM(pointsWon),0) as total FROM spin_history WHERE userId=?`).get(userId).total;
+  },
+  // Number of spins completed since a given timestamp (caller passes today's midnight for the daily cap)
+  countSince(userId, sinceMs) {
+    return getDb().prepare(`SELECT COUNT(*) as c FROM spin_history WHERE userId=? AND spunAt>=?`).get(userId, sinceMs).c;
+  },
+  // Timestamp of the most recent spin — used to enforce the cooldown
+  lastSpinAt(userId) {
+    const r = getDb().prepare(`SELECT MAX(spunAt) as t FROM spin_history WHERE userId=?`).get(userId);
+    return (r && r.t) ? new Date(r.t) : null;
   },
 };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-
-/**
- * Fire-and-forget MongoDB backup.
- * Usage: mongoBackup(() => MyModel.findOneAndUpdate(...))
- */
-function mongoBackup(fn) {
-  fn().catch(err => console.error('⚠️ Mongo backup failed:', err.message));
-}
 
 function generateId() {
   return require('crypto').randomBytes(12).toString('hex');
@@ -860,23 +927,21 @@ function generateId() {
 module.exports = {
   getDb,
   syncFromMongo,
-  mongoBackup,
-  queuedBatchWrite,
   batch,
   user,
   announcement,
   access,
   adToken,
   referral,
-  pendingReferral,
-  pointsUsage,
-  spinPoints,
-  premiumAccess,
   coupon,
   autoLec,
   fileRecord,
   bulkBatch,
   pendingDelete,
   dailyVideoLimit,
+  rewardRedemption,
+  batchRewardAccess,
+  spinToken,
+  spinHistory,
   generateId,
 };

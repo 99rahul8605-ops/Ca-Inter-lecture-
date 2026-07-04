@@ -1,5 +1,3 @@
-require("dotenv").config();
-
 const TelegramBot = require("node-telegram-bot-api");
 const mongoose = require("mongoose");
 const express = require("express");
@@ -20,8 +18,7 @@ const CONTACT_LINK = process.env.CONTACT_LINK || "";
 let BOT_USERNAME = "";
 let bot = null;
 
-if (!TOKEN || !WEB_URL || !OWNER_ID) { console.error("Missing env: BOT_TOKEN, WEB_URL, OWNER_ID are required."); process.exit(1); }
-if (!MONGO_URI) console.warn("⚠️  MONGO_URI not set — SQLite-only mode (no Mongo backup).");
+if (!TOKEN || !MONGO_URI || !WEB_URL || !OWNER_ID) { console.error("Missing env: BOT_TOKEN, MONGO_URI, WEB_URL, OWNER_ID are required."); process.exit(1); }
 if (!STORAGE_CHANNEL_ID) console.warn("Warning: STORAGE_CHANNEL_ID not set.");
 
 function isOwner(userId) { return userId === OWNER_ID; }
@@ -44,39 +41,14 @@ const dailyLimitSchema = new mongoose.Schema({ userId: { type: Number, required:
 const DailyVideoLimit = mongoose.model("DailyVideoLimit", dailyLimitSchema);
 const DAILY_VIDEO_LIMIT = 10;
 
-// ── MongoDB connect (optional — SQLite is primary) ────────────────────────────
-let mongoConnected = false;
-if (MONGO_URI) {
-  mongoose.connect(MONGO_URI).then(async () => {
-    mongoConnected = true;
-    console.log("✅ MongoDB connected (backup mode)");
-    try { await mongoose.connection.collection("filerecords").dropIndex("expires_at_1"); } catch (e) {}
-    try { await mongoose.connection.collection("filerecords").updateMany({ expires_at: { $ne: null } }, { $set: { expires_at: null } }); } catch (e) {}
-    // Sync MongoDB → SQLite on startup
-    await db.syncFromMongo(mongoose);
-
-    // Periodic re-sync every 5 minutes — catches any drift between MongoDB and SQLite
-    // Only syncs batches (most critical) to keep it lightweight
-    setInterval(async () => {
-      if (!mongoConnected) return;
-      try {
-        const Batch = mongoose.model('Batch');
-        const batches = await Batch.find({}).lean();
-        const upsertBatch = db.getDb().prepare(`INSERT INTO batches(id,data,updated_at) VALUES(?,?,?)
-          ON CONFLICT(id) DO UPDATE SET data=excluded.data, updated_at=excluded.updated_at`);
-        const tx = db.getDb().transaction(() => {
-          for (const b of batches) upsertBatch.run(String(b._id), JSON.stringify(b), Date.now());
-        });
-        tx();
-        console.log(`[AutoSync] Batches re-synced: ${batches.length}`);
-      } catch(e) { console.warn('[AutoSync] Error:', e.message); }
-    }, 5 * 60 * 1000); // Every 5 minutes
-  }).catch((err) => {
-    console.warn("⚠️  MongoDB connection failed:", err.message, "— running SQLite-only.");
-  });
-} else {
-  console.log("ℹ️  No MONGO_URI — SQLite-only mode.");
-}
+// ── MongoDB connect ───────────────────────────────────────────────────────────
+mongoose.connect(MONGO_URI).then(async () => {
+  console.log("MongoDB connected");
+  try { await mongoose.connection.collection("filerecords").dropIndex("expires_at_1"); } catch (e) {}
+  try { await mongoose.connection.collection("filerecords").updateMany({ expires_at: { $ne: null } }, { $set: { expires_at: null } }); } catch (e) {}
+  // Sync all MongoDB → SQLite on startup
+  await db.syncFromMongo(mongoose);
+}).catch((err) => { console.error("MongoDB error:", err.message); process.exit(1); });
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function getTodayIST() { const now = new Date(); return new Date(now.getTime() + 5.5*60*60*1000).toISOString().slice(0,10); }
@@ -88,7 +60,7 @@ function checkAndIncrementVideoLimit(userId) {
   if (rec.count >= DAILY_VIDEO_LIMIT) return { allowed: false, used: rec.count, remaining: 0 };
   const newCount = rec.count + 1;
   db.dailyVideoLimit.upsert({ userId, count: newCount, resetDate: today });
-  if (mongoConnected) DailyVideoLimit.findOneAndUpdate({ userId }, { userId, count: newCount, resetDate: today }, { upsert: true }).catch(() => {});
+  DailyVideoLimit.findOneAndUpdate({ userId }, { userId, count: newCount, resetDate: today }, { upsert: true }).catch(() => {});
   return { allowed: true, used: newCount, remaining: DAILY_VIDEO_LIMIT - newCount };
 }
 
@@ -111,9 +83,7 @@ async function saveToStorageChannel(bot, fileInfo) {
   if (!STORAGE_CHANNEL_ID) return fileInfo;
   try {
     let sentMsg;
-    // Caption is just the plain file_name — same name as stored/shown in DB,
-    // no emoji prefix, no original Telegram caption.
-    const caption = fileInfo.file_name;
+    const caption = fileInfo.caption || `📎 ${fileInfo.file_name}`;
     switch(fileInfo.file_type) {
       case "photo":      sentMsg = await bot.sendPhoto(STORAGE_CHANNEL_ID, fileInfo.file_id, { caption }); break;
       case "video":      sentMsg = await bot.sendVideo(STORAGE_CHANNEL_ID, fileInfo.file_id, { caption }); break;
@@ -129,7 +99,7 @@ async function saveToStorageChannel(bot, fileInfo) {
 }
 
 async function sendFile(bot, chatId, record) {
-  const caption = record.file_name;
+  const caption = `📎 ${record.file_name}`;
   const protect = !isOwner(chatId);
   try {
     switch(record.file_type) {
@@ -142,16 +112,7 @@ async function sendFile(bot, chatId, record) {
     }
   } catch (err) {
     if (STORAGE_CHANNEL_ID && record.channel_msg_id) {
-      // Use copyMessage, NOT forwardMessage — forwardMessage shows a
-      // "Forwarded from <Storage Channel>" header to the user, leaking
-      // the storage channel's name/identity. copyMessage delivers the
-      // same content with no forward attribution.
-      // IMPORTANT: explicitly pass caption here too — without it,
-      // copyMessage just copies whatever caption is currently sitting
-      // on the storage channel message (which may be stale/original
-      // if that message was saved before the caption fix), instead of
-      // using record.file_name like the direct-send path above.
-      try { return await bot.copyMessage(chatId, STORAGE_CHANNEL_ID, record.channel_msg_id, { caption, protect_content: protect }); } catch (_) {}
+      try { return await bot.forwardMessage(chatId, STORAGE_CHANNEL_ID, record.channel_msg_id); } catch (_) {}
     }
     throw err;
   }
@@ -170,49 +131,24 @@ function cleanFileName(name) {
 async function scheduleDelete(bot, chatId, messageId, deleteAt) {
   const id = db.generateId();
   db.pendingDelete.create({ id, chat_id: chatId, message_id: messageId, delete_at: deleteAt });
-  if (mongoConnected) PendingDelete.create({ chat_id: chatId, message_id: messageId, delete_at: deleteAt }).catch(() => {});
+  PendingDelete.create({ chat_id: chatId, message_id: messageId, delete_at: deleteAt }).catch(() => {});
   const delay = Math.max(0, new Date(deleteAt) - Date.now());
   setTimeout(async () => {
     try { await bot.deleteMessage(chatId, messageId); } catch (err) { if (!err.message?.includes("message to delete not found")) console.error("Auto DM deletion error:", err.message); }
     db.pendingDelete.deleteByChatMsg(chatId, messageId);
-    if (mongoConnected) PendingDelete.deleteOne({ chat_id: chatId, message_id: messageId }).catch(() => {});
+    PendingDelete.deleteOne({ chat_id: chatId, message_id: messageId }).catch(() => {});
   }, delay);
 }
 
 async function recoverPendingDeletes(bot) {
   const pending = db.pendingDelete.getAll();
-  const now = Date.now();
-  // Skip records older than 48 hours — Telegram messages are already gone
-  const MAX_AGE = 48 * 60 * 60 * 1000;
-  let skipped = 0;
-  const valid = pending.filter(p => {
-    const deleteAt = new Date(p.delete_at).getTime();
-    if (now - deleteAt > MAX_AGE) {
-      // Too old — just clean up DB, don't even try to delete
-      db.pendingDelete.deleteById(p._id);
-      if (mongoConnected) PendingDelete.deleteOne({ _id: p._id }).catch(() => {});
-      skipped++;
-      return false;
-    }
-    return true;
-  });
-  if (skipped) console.log(`Skipped ${skipped} stale pending deletes (>48h old)`);
-  console.log(`Recovering ${valid.length} pending DM deletions...`);
-
-  for (const p of valid) {
-    const delay = Math.max(0, new Date(p.delete_at) - now);
+  console.log(`Recovering ${pending.length} pending DM deletions...`);
+  for (const p of pending) {
+    const delay = Math.max(0, new Date(p.delete_at) - Date.now());
     setTimeout(async () => {
-      try {
-        await bot.deleteMessage(p.chat_id, p.message_id);
-      } catch (err) {
-        // 400 = already deleted or never existed — safe to ignore
-        if (!err.message.includes('400') && !err.message.includes('not found')) {
-          console.error('Deletion error:', err.message);
-        }
-      }
-      // Always remove from DB regardless of success/failure
+      try { await bot.deleteMessage(p.chat_id, p.message_id); } catch (err) { console.error("Recovered deletion error:", err.message); }
       db.pendingDelete.deleteById(p._id);
-      if (mongoConnected) PendingDelete.deleteOne({ _id: p._id }).catch(() => {});
+      PendingDelete.deleteOne({ _id: p._id }).catch(() => {});
     }, delay);
   }
 }
@@ -277,9 +213,6 @@ async function startBot() {
   BOT_USERNAME = me.username;
   console.log(`Bot started: @${BOT_USERNAME}`);
 
-  // Expose bot globally so course.js routes can send notifications
-  global._botInstance = bot;
-
   try {
     await fetch(`https://api.telegram.org/bot${TOKEN}/setChatMenuButton`, { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ menu_button:{ type:"web_app", text:"Open EduBot", web_app:{ url:WEB_URL } } }) });
     console.log("Menu button set:", WEB_URL);
@@ -297,20 +230,21 @@ async function startBot() {
 
     if (userId) {
       db.user.upsert({ userId: String(userId), firstName: msg.from.first_name||"", lastName: msg.from.last_name||"", username: msg.from.username||"", firstSeen: new Date(), lastSeen: new Date() });
-      if (mongoConnected) User.findOneAndUpdate({ userId: String(userId) }, { userId: String(userId), firstName: msg.from.first_name||"", lastName: msg.from.last_name||"", username: msg.from.username||"", lastSeen: new Date() }, { upsert: true }).catch(() => {});
+      User.findOneAndUpdate({ userId: String(userId) }, { userId: String(userId), firstName: msg.from.first_name||"", lastName: msg.from.last_name||"", username: msg.from.username||"", lastSeen: new Date() }, { upsert: true }).catch(() => {});
     }
 
     if (param) {
       if (param.startsWith("ref_")) {
         const referrerId = param.replace("ref_","");
         bot.sendMessage(chatId, `👋 Hello ${msg.from.first_name}!\n\nTap below to browse all lectures! 📚`, { reply_markup:{ inline_keyboard:[[{ text:"📚 Browse Lectures", web_app:{ url:WEB_URL } }]] } });
-        // Sirf pending referral store karo — point milega pehla lecture dekhne ke baad
-        if (referrerId && referrerId !== String(userId) && isNewUser) {
+        if (referrerId && referrerId !== String(userId)) {
           try {
-            await fetch(`http://localhost:${PORT}/api/refer/record`, {
-              method:"POST", headers:{"Content-Type":"application/json"},
-              body: JSON.stringify({ referrerId, referredId: String(userId), isNewUser, pending: true })
-            });
+            const r = await fetch(`http://localhost:${PORT}/api/refer/record`, { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ referrerId, referredId: String(userId), isNewUser }) });
+            const d = await r.json();
+            if (d.isNew) {
+              const s = await (await fetch(`http://localhost:${PORT}/api/refer/stats/${referrerId}`)).json();
+              bot.sendMessage(parseInt(referrerId), `🎉 <b>New Referral!</b>\n\n${msg.from.first_name} joined using your link!\n⭐ <b>+5 Points!</b> Total: <b>${s.points}</b>`, { parse_mode:"HTML" }).catch(() => {});
+            }
           } catch (_) {}
         }
         return;
@@ -340,64 +274,15 @@ async function startBot() {
         const record = db.fileRecord.findByCode(param);
         if (!record) return bot.sendMessage(chatId, `File not found. Link may be invalid.`);
         const isVideo = record.file_type==="video"||record.file_type==="video_note";
-
-        // Check if video was recently delivered (within last 6 hours)
-        // After 6hr, Telegram deletes it so we allow re-delivery
-        const SIX_HOURS = 6 * 60 * 60 * 1000;
-        const deliveryEntry = record.delivered_to.find(x =>
-          (typeof x === 'object' ? x.chatId : x) === chatId
-        );
-        const deliveredAt = deliveryEntry ? (typeof deliveryEntry === 'object' ? deliveryEntry.deliveredAt : 0) : null;
-        const recentlyDelivered = deliveredAt && (Date.now() - deliveredAt) < SIX_HOURS;
-
-        if (isVideo && recentlyDelivered) {
-          const remaining = Math.ceil((SIX_HOURS - (Date.now() - deliveredAt)) / 60000);
-          return bot.sendMessage(chatId, `⚠️ This video was already delivered and will auto-delete in <b>${remaining} min</b>. After deletion, you can request it again.`, { parse_mode:"HTML" });
-        }
+        if (isVideo && record.delivered_to.includes(chatId)) return bot.sendMessage(chatId, `⚠️ This video was already delivered. It auto-deletes within 6 hours.`);
         if (isVideo && !isOwner(userId)) {
           const lim = checkAndIncrementVideoLimit(userId);
           if (!lim.allowed) return bot.sendMessage(chatId, `🚫 <b>Daily limit reached!</b>\n\nYou've watched <b>${DAILY_VIDEO_LIMIT} videos</b> today.\n📅 Resets at midnight.`, { parse_mode:"HTML" });
           const sentMsg = await sendFile(bot, chatId, record);
           await scheduleDelete(bot,chatId,sentMsg.message_id,new Date(Date.now()+6*60*60*1000));
           db.fileRecord.addDeliveredTo(record.id,chatId);
-          if (mongoConnected) FileRecord.updateOne({ code:record.code },{ $addToSet:{ delivered_to:chatId } }).catch(() => {});
-
-          // Pehla lecture watch hone pe referral confirm karo aur referrer ko +5 points do
-          (async () => {
-            try {
-              const r = await fetch(`http://localhost:${PORT}/api/refer/confirm-first-watch`, {
-                method:"POST", headers:{"Content-Type":"application/json"},
-                body: JSON.stringify({ referredId: String(userId) })
-              });
-              const d = await r.json();
-              if (d.confirmed && d.referrerId) {
-                // Fetch updated stats to show correct total
-                let totalPts = '?';
-                try {
-                  const s = await (await fetch(`http://localhost:${PORT}/api/refer/stats/${d.referrerId}`)).json();
-                  // +5 points per referral — stats API returns referrals*5 equivalent via spinPoints now
-                  // Show raw referral count * 5 as earned points
-                  totalPts = s.points !== undefined ? s.points : '?';
-                } catch(_) {}
-
-                try {
-                  await bot.sendMessage(
-                    parseInt(d.referrerId),
-                    `🎉 <b>Referral Point Mila!</b>\n\n` +
-                    `👤 <b>${msg.from.first_name}</b> ne apna pehla lecture dekha!\n\n` +
-                    `⭐ <b>+5 Points</b> aapke account mein add ho gaye!\n` +
-                    `💰 <b>Total Points: ${totalPts}</b>`,
-                    { parse_mode:"HTML" }
-                  );
-                } catch(msgErr) {
-                  console.error("Referral message send failed:", msgErr.message);
-                }
-              }
-            } catch (err) {
-              console.error("Referral confirm error:", err.message);
-            }
-          })();
-
+          FileRecord.updateOne({ code:record.code },{ $addToSet:{ delivered_to:chatId } }).catch(() => {});
+          setTimeout(() => { db.fileRecord.removeDeliveredTo(record.id,chatId); FileRecord.updateOne({ code:record.code },{ $pull:{ delivered_to:chatId } }).catch(() => {}); }, 6*60*60*1000);
           const lines=[`⚠️ This video auto-deletes in 6 hours.`,``,`📊 <b>Today:</b> ${lim.used}/${DAILY_VIDEO_LIMIT} videos`];
           if(lim.remaining===0) lines.push(`🚫 Limit reached for today!`);
           else if(lim.remaining<=3) lines.push(`⚠️ Only <b>${lim.remaining}</b> left today!`);
@@ -408,31 +293,23 @@ async function startBot() {
         if (isVideo) {
           await scheduleDelete(bot,chatId,sentMsg.message_id,new Date(Date.now()+6*60*60*1000));
           db.fileRecord.addDeliveredTo(record.id,chatId);
-          if (mongoConnected) FileRecord.updateOne({ code:record.code },{ $addToSet:{ delivered_to:chatId } }).catch(() => {});
+          FileRecord.updateOne({ code:record.code },{ $addToSet:{ delivered_to:chatId } }).catch(() => {});
+          setTimeout(() => { db.fileRecord.removeDeliveredTo(record.id,chatId); FileRecord.updateOne({ code:record.code },{ $pull:{ delivered_to:chatId } }).catch(() => {}); }, 6*60*60*1000);
           await bot.sendMessage(chatId, `⚠️ This video auto-deletes in 6 hours.`);
         }
       } catch (err) { console.error("Deep link error:", err.message); bot.sendMessage(chatId, `Error occurred. Please try again.`); }
       return;
     }
 
-    if (isOwner(userId)) {
-      const adminText = `👋 Hello Admin!\n\nTap below to browse lectures! 📚\n\n📁 File Store:\n/bulk — bulk upload\n/myfiles — view files\n/delete <code> — delete file\n/rmword 'word' — remove word from names\n/cancel — cancel bulk\n\n📡 Broadcast:\n/broadcast <text> or reply to media`;
-      return bot.sendMessage(chatId, adminText, { reply_markup:{ inline_keyboard:[[{ text:"📚 Browse Lectures", web_app:{ url:WEB_URL } }]] } });
-    }
-
-    // Normal user — welcome + invite link
-    const refLink = `https://t.me/${BOT_USERNAME}?start=ref_${userId}`;
-    const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(refLink)}&text=${encodeURIComponent('Join aur free lectures dekho! 📚')}`;
-    const welcomeText = `👋 Hello ${msg.from.first_name}!\n\nTap below to browse all lectures! 📚\n\n🔗 <b>Tera Invite Link:</b>\n<code>${refLink}</code>\n\nFriends ko share karo — jab wo pehla video dekhe, tujhe <b>+1 Point</b> milega! 🎉`;
-    bot.sendMessage(chatId, welcomeText, {
-      parse_mode: "HTML",
-      reply_markup: {
-        inline_keyboard: [
-          [{ text: "📚 Browse Lectures", web_app: { url: WEB_URL } }],
-          [{ text: "🔗 Invite Friends", url: shareUrl }]
-        ]
-      }
-    });
+    const referLink = userId ? `https://t.me/${BOT_USERNAME}?start=ref_${userId}` : "";
+    const referLinkCode = referLink ? `<code>${referLink}</code>` : "";
+    const welcomeText = isOwner(userId)
+      ? `👋 Hello Admin!\n\nTap below to browse lectures! 📚\n\n📁 File Store:\n/bulk — bulk upload\n/myfiles — view files\n/delete &lt;code&gt; — delete file\n/rmword 'word' — remove word from names\n/cancel — cancel bulk\n\n📡 Broadcast:\n/broadcast &lt;text&gt; or reply to media\n\n🔗 <b>Your Invite Link:</b> (tap to copy)\n${referLinkCode}`
+      : `👋 Hello ${msg.from.first_name}!\n\nTap below to browse all lectures! 📚\n\n🔗 <b>Your Invite Link:</b> (tap to copy)\n${referLinkCode}\n\nShare karo aur har referral pe <b>5 points</b> kamao! 🎁`;
+    const shareUrl = referLink ? `https://t.me/share/url?url=${encodeURIComponent(referLink)}&text=${encodeURIComponent("Join and get free lectures! 📚")}` : "";
+    const startButtons = [[{ text:"📚 Browse Lectures", web_app:{ url:WEB_URL } }]];
+    if (shareUrl) startButtons.push([{ text:"📤 Share & Earn Points", url: shareUrl }]);
+    bot.sendMessage(chatId, welcomeText, { parse_mode:"HTML", reply_markup:{ inline_keyboard: startButtons } });
   });
 
   // ── /bulk ─────────────────────────────────────────────────────────────────
@@ -460,7 +337,7 @@ async function startBot() {
       for (const f of session.files) storedFiles.push(await saveToStorageChannel(bot,f));
       const id=db.generateId();
       db.bulkBatch.create({ id, batch_code:batchCode, user_id:userId, files:storedFiles });
-      if (mongoConnected) BulkBatch.create({ batch_code:batchCode, user_id:userId, files:storedFiles }).catch(() => {});
+      BulkBatch.create({ batch_code:batchCode, user_id:userId, files:storedFiles }).catch(() => {});
       const link=`https://t.me/${BOT_USERNAME}?start=${batchCode}`;
       await bot.deleteMessage(chatId,processing.message_id);
       const fileList=session.files.map((f,i)=>`${i+1}. ${f.file_name}`).join("\n");
@@ -541,8 +418,8 @@ async function startBot() {
     if(isGroupChat(msg)||!isOwner(msg.from?.id)) return;
     const chatId=msg.chat.id; const code=match[1].trim();
     try {
-      if(db.fileRecord.deleteByCode(code,msg.from.id)){if (mongoConnected) FileRecord.deleteOne({code:{$regex:new RegExp(`^${code}$`,"i")},uploaded_by:msg.from.id}).catch(()=>{});return bot.sendMessage(chatId,`✅ File deleted!`);}
-      if(db.bulkBatch.deleteByCode(code,msg.from.id)){if (mongoConnected) BulkBatch.deleteOne({batch_code:{$regex:new RegExp(`^${code}$`,"i")},user_id:msg.from.id}).catch(()=>{});return bot.sendMessage(chatId,`✅ Batch deleted!`);}
+      if(db.fileRecord.deleteByCode(code,msg.from.id)){FileRecord.deleteOne({code:{$regex:new RegExp(`^${code}$`,"i")},uploaded_by:msg.from.id}).catch(()=>{});return bot.sendMessage(chatId,`✅ File deleted!`);}
+      if(db.bulkBatch.deleteByCode(code,msg.from.id)){BulkBatch.deleteOne({batch_code:{$regex:new RegExp(`^${code}$`,"i")},user_id:msg.from.id}).catch(()=>{});return bot.sendMessage(chatId,`✅ Batch deleted!`);}
       bot.sendMessage(chatId,`Code not found.`);
     } catch(_){bot.sendMessage(chatId,`Deletion failed.`);}
   });
@@ -581,10 +458,10 @@ async function startBot() {
         await bot.deleteMessage(chatId,forwarded.message_id).catch(()=>{});
         const session=bulkSessions.get(userId);
         if(session){session.files.push(fileInfo);return bot.editMessageText(`✅ File ${session.files.length} added: ${fileInfo.file_name}\n📦 Total: ${session.files.length}\n\nSend more or /done`,{chat_id:chatId,message_id:processing.message_id});}
-        fileInfo.file_name=cleanFileName(fileInfo.file_name); const stored=await saveToStorageChannel(bot,fileInfo);
+        const stored=await saveToStorageChannel(bot,fileInfo); stored.file_name=cleanFileName(stored.file_name);
         const code=getUniqueCode(); const id=db.generateId();
         db.fileRecord.create({id,code,file_id:stored.file_id,file_type:stored.file_type,file_name:stored.file_name,uploaded_by:userId,channel_msg_id:stored.channel_msg_id||null});
-        if (mongoConnected) FileRecord.create({code,file_id:stored.file_id,file_type:stored.file_type,file_name:stored.file_name,uploaded_by:userId,expires_at:null,channel_msg_id:stored.channel_msg_id||null}).catch(()=>{});
+        FileRecord.create({code,file_id:stored.file_id,file_type:stored.file_type,file_name:stored.file_name,uploaded_by:userId,expires_at:null,channel_msg_id:stored.channel_msg_id||null}).catch(()=>{});
         const link=`https://t.me/${BOT_USERNAME}?start=${code}`;
         await bot.deleteMessage(chatId,processing.message_id);
         if(autoLectureSession&&autoLectureSession.active){
@@ -617,10 +494,10 @@ async function startBot() {
     enqueueFile(userId, async () => {
       const processing=await bot.sendMessage(chatId,`⏳ Saving: ${fileInfo.file_name}...`);
       try {
-        fileInfo.file_name=cleanFileName(fileInfo.file_name); const stored=await saveToStorageChannel(bot,fileInfo);
+        const stored=await saveToStorageChannel(bot,fileInfo); stored.file_name=cleanFileName(stored.file_name);
         const code=getUniqueCode(); const id=db.generateId();
         db.fileRecord.create({id,code,file_id:stored.file_id,file_type:stored.file_type,file_name:stored.file_name,uploaded_by:userId,channel_msg_id:stored.channel_msg_id||null});
-        if (mongoConnected) FileRecord.create({code,file_id:stored.file_id,file_type:stored.file_type,file_name:stored.file_name,uploaded_by:userId,expires_at:null,channel_msg_id:stored.channel_msg_id||null}).catch(()=>{});
+        FileRecord.create({code,file_id:stored.file_id,file_type:stored.file_type,file_name:stored.file_name,uploaded_by:userId,expires_at:null,channel_msg_id:stored.channel_msg_id||null}).catch(()=>{});
         const link=`https://t.me/${BOT_USERNAME}?start=${code}`;
         await bot.deleteMessage(chatId,processing.message_id);
         if(autoLectureSession&&autoLectureSession.active){
@@ -695,66 +572,13 @@ async function startBot() {
   bot.onText(/\/stats/, async (msg) => {
     if(isGroupChat(msg)||!isOwner(msg.from?.id)) return;
     const chatId=msg.chat.id;
-    const processing=await bot.sendMessage(chatId,"⏳ Gathering stats...");
+    const processing=await bot.sendMessage(chatId,"⏳ Fetching stats...");
     try {
       const s=await (await fetch(`http://localhost:${PORT}/api/stats`)).json();
-
-      // Uptime formatting
-      const uptime=process.uptime();
-      const ud=Math.floor(uptime/86400), uh=Math.floor((uptime%86400)/3600), um=Math.floor((uptime%3600)/60);
-      const uptimeStr = ud>0 ? `${ud}d ${uh}h ${um}m` : uh>0 ? `${uh}h ${um}m` : `${um}m`;
-
-      // DB status
-      const mongoStatus = mongoose.connection.readyState===1 ? "🟢 Online" : "🔴 Offline";
-
-      // Build message
-      const text = [
-        `╔═══════════════════════╗`,
-        `      📊 <b>BOT DASHBOARD</b>`,
-        `╚═══════════════════════╝`,
-        ``,
-        `👥 <b>USERS</b>`,
-        `┣ Total Users: <b>${s.users.totalUsers.toLocaleString()}</b>`,
-        `┣ New Today: <b>+${s.users.newToday}</b>`,
-        `┗ This Week: <b>+${s.users.recentUsers}</b>`,
-        ``,
-        `📚 <b>CONTENT</b>`,
-        `┣ Batches: <b>${s.content.totalBatches}</b> (🟢 ${s.content.publicBatches} Public · 🔒 ${s.content.privateBatches} Private)`,
-        `┣ Subjects: <b>${s.content.totalSubjects}</b>  |  Chapters: <b>${s.content.totalChapters}</b>`,
-        `┗ Lectures: <b>${s.content.totalLectures}</b>`,
-        ``,
-        `🔑 <b>ACCESS</b>`,
-        `┣ Total Granted: <b>${s.access.totalAccess}</b>`,
-        `┣ Granted Today: <b>+${s.access.grantedToday}</b>`,
-        `┗ Currently Active: <b>${s.access.activeAccess}</b>`,
-        ``,
-        `👫 <b>REFERRALS</b>`,
-        `┣ Total Referrals: <b>${s.referrals.totalReferrals}</b>`,
-        `┗ Unique Referrers: <b>${s.referrals.uniqueReferrers}</b>`,
-        ``,
-        `🎰 <b>SPIN WHEEL</b>`,
-        `┣ Spins Today: <b>${s.points.todaySpins}</b>`,
-        `┣ Total Spinners: <b>${s.points.totalSpinners}</b>`,
-        `┣ Total Pts Earned: <b>${s.points.totalSpinPoints}</b>`,
-        `┗ Total Pts Redeemed: <b>${s.points.totalRedeemed}</b>`,
-        ``,
-        `📁 <b>FILE STORE</b>`,
-        `┣ Files: <b>${s.files.total}</b>`,
-        `┗ Bulk Batches: <b>${s.files.bulk}</b>`,
-        ``,
-        `⚙️ <b>SERVER</b>`,
-        `┣ Uptime: <b>${uptimeStr}</b>`,
-        `┣ MongoDB: ${mongoStatus}`,
-        `┗ SQLite: ✅ Active`,
-        ``,
-        `<i>🕐 ${new Date().toLocaleString('en-IN', {timeZone:'Asia/Kolkata'})}</i>`,
-      ].join('\n');
-
+      const uptime=process.uptime(); const h=Math.floor(uptime/3600); const m=Math.floor((uptime%3600)/60);
+      const text=`📊 <b>Bot Stats</b>\n\n👤 <b>Users</b>\n• Total: ${s.users.totalUsers}\n• New This Week: ${s.users.recentUsers}\n\n📚 <b>Content</b>\n• Batches: ${s.content.totalBatches} (🟢 ${s.content.publicBatches} · 🔒 ${s.content.privateBatches})\n• Subjects: ${s.content.totalSubjects} | Chapters: ${s.content.totalChapters} | Lectures: ${s.content.totalLectures}\n\n📁 <b>File Store</b>\n• Files: ${db.fileRecord.count()} | Bulk: ${db.bulkBatch.count()}\n\n🔑 <b>Access</b>\n• Total: ${s.access.totalAccess} | Active: ${s.access.activeAccess}\n\n👥 <b>Referrals</b>\n• Total: ${s.referrals.totalReferrals} | Referrers: ${s.referrals.uniqueReferrers}\n\n⚙️ <b>Server</b>\n• Uptime: ${h}h ${m}m\n• MongoDB: ${mongoose.connection.readyState===1?"🟢 Connected":"🔴 Disconnected"}\n• SQLite: ✅ Active (all reads)`;
       await bot.editMessageText(text,{chat_id:chatId,message_id:processing.message_id,parse_mode:"HTML"});
-    } catch(err){
-      console.error('Stats error:', err.message);
-      bot.editMessageText("❌ Could not fetch stats. Check logs.",{chat_id:chatId,message_id:processing.message_id});
-    }
+    } catch(err){bot.editMessageText("❌ Could not fetch stats.",{chat_id:chatId,message_id:processing.message_id});}
   });
 
   bot.on("polling_error",(err)=>console.error("Polling error:",err.message));
