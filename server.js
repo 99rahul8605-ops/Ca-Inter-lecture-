@@ -122,7 +122,7 @@ async function sendFile(bot, chatId, record) {
     }
   } catch (err) {
     if (STORAGE_CHANNEL_ID && record.channel_msg_id) {
-      try { return await bot.forwardMessage(chatId, STORAGE_CHANNEL_ID, record.channel_msg_id); } catch (_) {}
+      try { return await bot.copyMessage(chatId, STORAGE_CHANNEL_ID, record.channel_msg_id); } catch (_) {}
     }
     throw err;
   }
