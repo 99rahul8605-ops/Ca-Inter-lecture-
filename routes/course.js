@@ -5,15 +5,6 @@ const mongoose = require("mongoose");
 const Batch = require("../models/Course");
 const db = require("../sqlite-manager");
 
-// MongoDB connection check
-function isMongo() { return mongoose.connection.readyState === 1; }
-
-// Points awarded per successful referral
-const POINTS_PER_REFERRAL = 5;
-
-// Helper: find subdoc by _id (replaces mongoose .id() on plain objects)
-function _findById(arr, id) { return (arr||[]).find(x => String(x._id) === String(id)) || null; }
-
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const OWNER_ID = parseInt(process.env.OWNER_ID || "0");
 
@@ -85,12 +76,23 @@ function stripPremiumLinks(b) {
   };
 }
 
+// ── Helper: does this user have access to a premium batch? ───────────────────
+// Checks BOTH permanent access (admin/payment-granted premiumUsers list) AND
+// temporary reward-granted access (from the points-redemption system). Either
+// one is sufficient — this is the single source of truth used everywhere batch
+// content is gated, so the reward system and the permanent-access system never
+// have to be kept in sync manually.
+function hasPremiumAccess(userId, batch) {
+  if (!userId) return false;
+  if ((batch.premiumUsers || []).includes(userId)) return true;
+  return db.batchRewardAccess.hasAccess(userId, String(batch._id));
+}
+
 // ── Helper: save batch to MongoDB async (backup) ──────────────────────────────
 function _mongoBackupBatch(batchId) {
   // Re-read from SQLite and push to MongoDB async — fire and forget
   setImmediate(async () => {
     try {
-      if (!isMongo()) return;
       const data = db.batch.getOne(batchId);
       if (!data) return;
       await Batch.findByIdAndUpdate(batchId, data, { upsert: true });
@@ -127,46 +129,18 @@ async function autoAddLecture({ batchId, subjectId, chapterId, unitId, name, lin
   if (unitId) {
     const unit = (chap.units||[]).find(u => String(u._id) === unitId);
     if (!unit) throw new Error('Unit not found');
-    if (!unit.lectures) unit.lectures = [];
     newLec.order = unit.lectures.length;
     unit.lectures.push(newLec);
   } else {
-    if (!chap.lectures) chap.lectures = [];
     newLec.order = chap.lectures.length;
     chap.lectures.push(newLec);
   }
 
-  // Write to SQLite — use queued write to prevent race conditions
-  await db.queuedBatchWrite(batchId, async () => {
-    // Re-read latest batch data inside queue to avoid stale overwrites
-    const freshBatch = db.batch.getOne(batchId);
-    if (!freshBatch) return;
-    const freshSubj = (freshBatch.subjects||[]).find(s => String(s._id) === subjectId);
-    const freshChap = freshSubj && (freshSubj.chapters||[]).find(c => String(c._id) === chapterId);
-    if (!freshChap) return;
-    if (unitId) {
-      const freshUnit = (freshChap.units||[]).find(u => String(u._id) === unitId);
-      if (freshUnit) {
-        if (!freshUnit.lectures) freshUnit.lectures = [];
-        // Only add if not already present (idempotent)
-        if (!freshUnit.lectures.find(l => l.link === newLec.link)) {
-          newLec.order = freshUnit.lectures.length;
-          freshUnit.lectures.push(newLec);
-        }
-      }
-    } else {
-      if (!freshChap.lectures) freshChap.lectures = [];
-      if (!freshChap.lectures.find(l => l.link === newLec.link)) {
-        newLec.order = freshChap.lectures.length;
-        freshChap.lectures.push(newLec);
-      }
-    }
-    db.batch.upsert(freshBatch);
-  });
+  // Write to SQLite
+  db.batch.upsert(batchData);
 
-  // MongoDB backup (async)
-  if (isMongo()) {
-  const mongoBatch = await Batch.findById(batchId).catch(() => null);
+  // Write to MongoDB (source of truth backup)
+  const mongoBatch = await Batch.findById(batchId);
   if (mongoBatch) {
     const ms = mongoBatch.subjects.id(subjectId);
     const mc = ms && ms.chapters.id(chapterId);
@@ -176,7 +150,6 @@ async function autoAddLecture({ batchId, subjectId, chapterId, unitId, name, lin
       await mongoBatch.save();
     }
   }
-  }
 }
 
 // ── Batches ───────────────────────────────────────────────────────────────────
@@ -185,15 +158,14 @@ router.get("/batches", async (req, res) => {
   try {
     const admin = isAdminRequest(req);
     // Admin: fresh from MongoDB
-    if (admin) { return res.json(db.batch.getAll()); }
+    if (admin) { return res.json(await Batch.find({}).sort({ order: 1 })); }
 
     // Users: from SQLite ⚡
     const batches = db.batch.getAll();
     const userId = getRequestUserId(req);
     res.json(batches.map(b => {
       if (!b.isPremium) return b;
-      const hasAccess = userId && (b.premiumUsers||[]).includes(userId);
-      return hasAccess ? b : stripPremiumLinks(b);
+      return hasPremiumAccess(userId, b) ? b : stripPremiumLinks(b);
     }));
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -201,72 +173,70 @@ router.get("/batches", async (req, res) => {
 router.get("/batches/:bid", async (req, res) => {
   try {
     const admin = isAdminRequest(req);
-    const b = db.batch.getOne(req.params.bid);
     if (admin) {
+      const b = await Batch.findById(req.params.bid);
       if (!b) return res.status(404).json({ error: "Not found" });
-      return res.json(b);
+      return res.json(b.toObject());
     }
+    const b = db.batch.getOne(req.params.bid);
     if (!b) return res.status(404).json({ error: "Not found" });
     const userId = getRequestUserId(req);
-    const hasAccess = userId && (b.premiumUsers||[]).includes(userId);
-    res.json(b.isPremium && !hasAccess ? stripPremiumLinks(b) : b);
+    const userHasAccess = hasPremiumAccess(userId, b);
+    res.json(b.isPremium && !userHasAccess ? stripPremiumLinks(b) : b);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 router.post("/batches/migrate-publish", verifyAdmin, async (req, res) => {
   try {
-    const allBatches = db.batch.getAll();
-    let updated = 0;
-    for (const b of allBatches) { if (!b.isPublic) { b.isPublic = true; db.batch.upsert(b); updated++; } }
-    if (isMongo()) Batch.updateMany({ isPublic: false }, { $set: { isPublic: true } }).catch(e => console.error('[MongoDB sync error]', e.message));
-    res.json({ success: true, updated });
+    const result = await Batch.updateMany({ isPublic: false }, { $set: { isPublic: true } });
+    // Sync all back to SQLite
+    const batches = await Batch.find({}).lean();
+    for (const b of batches) db.batch.upsert(b);
+    res.json({ success: true, updated: result.modifiedCount });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 router.post("/batches", verifyAdmin, async (req, res) => {
   try {
     const count = db.batch.count();
-    // SQLite first — generate id locally
-    const newId = new (require('mongoose').Types.ObjectId)().toString();
-    const newBatch = { _id: newId, name: req.body.name, pic: req.body.pic||"", description: req.body.description||"", order: count, isPublic: false, isPremium: req.body.isPremium===true, premiumUsers: [], price: req.body.price ? Number(req.body.price) : 0, subjects: [] };
-    db.batch.upsert(newBatch);
-    // MongoDB backup (async)
-    if (isMongo()) Batch.create(newBatch).catch(e => console.error('Batch create mongo backup:', e.message));
-    res.json(newBatch);
+    // Write to MongoDB first (gets real _id)
+    const batch = await Batch.create({ name: req.body.name, pic: req.body.pic||"", description: req.body.description||"", order: count, isPublic: false, isPremium: req.body.isPremium===true, premiumUsers: [], price: req.body.price ? Number(req.body.price) : 0 });
+    db.batch.upsert(batch.toObject());
+    res.json(batch);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 router.patch("/batches/:bid/publish", verifyAdmin, async (req, res) => {
   try {
-    const batchData = db.batch.getOne(req.params.bid);
-    if (!batchData) return res.status(404).json({ error: "Batch not found" });
-    batchData.isPublic = !batchData.isPublic;
-    db.batch.upsert(batchData);
-    if (isMongo()) Batch.findByIdAndUpdate(req.params.bid, { isPublic: batchData.isPublic }).catch(e => console.error('[MongoDB sync error]', e.message));
-    res.json({ success: true, isPublic: batchData.isPublic });
+    const batch = await Batch.findById(req.params.bid);
+    if (!batch) return res.status(404).json({ error: "Batch not found" });
+    batch.isPublic = !batch.isPublic;
+    await batch.save();
+    db.batch.upsert(batch.toObject());
+    res.json({ success: true, isPublic: batch.isPublic });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 router.delete("/batches/:bid", verifyAdmin, async (req, res) => {
   try {
+    await Batch.findByIdAndDelete(req.params.bid);
     db.batch.delete(req.params.bid);
-    if (isMongo()) Batch.findByIdAndDelete(req.params.bid).catch(e => console.error('[MongoDB sync error]', e.message));
     res.json({ success: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 router.patch("/batches/:bid/edit", verifyAdmin, async (req, res) => {
   try {
-    const batchData = db.batch.getOne(req.params.bid);
-    if (!batchData) return res.status(404).json({ error: "Batch not found" });
-    if (req.body.name) batchData.name = req.body.name;
-    if (req.body.description !== undefined) batchData.description = req.body.description;
-    if (req.body.isPremium !== undefined) batchData.isPremium = req.body.isPremium;
-    if (req.body.price !== undefined) batchData.price = Number(req.body.price)||0;
-    if (req.body.pic !== undefined) batchData.pic = req.body.pic;
-    db.batch.upsert(batchData);
-    if (isMongo()) Batch.findByIdAndUpdate(req.params.bid, batchData).catch(e => console.error('[MongoDB sync error]', e.message));
-    res.json(batchData);
+    const batch = await Batch.findById(req.params.bid);
+    if (!batch) return res.status(404).json({ error: "Batch not found" });
+    if (req.body.name) batch.name = req.body.name;
+    if (req.body.description !== undefined) batch.description = req.body.description;
+    if (req.body.isPremium !== undefined) batch.isPremium = req.body.isPremium;
+    if (req.body.price !== undefined) batch.price = Number(req.body.price)||0;
+    if (req.body.pic !== undefined) batch.pic = req.body.pic;
+    await batch.save();
+    db.batch.upsert(batch.toObject());
+    res.json(batch);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -282,26 +252,25 @@ router.get("/batches/:bid/premium-users", verifyAdmin, async (req, res) => {
 
 router.post("/batches/:bid/premium-users", verifyAdmin, async (req, res) => {
   try {
-    const batchData = db.batch.getOne(req.params.bid);
-    if (!batchData) return res.status(404).json({ error: "Batch not found" });
+    const batch = await Batch.findById(req.params.bid);
+    if (!batch) return res.status(404).json({ error: "Batch not found" });
     const uid = String(req.body.userId||'').trim();
     if (!uid) return res.status(400).json({ error: "userId required" });
-    if (!batchData.premiumUsers) batchData.premiumUsers = [];
-    if (!batchData.premiumUsers.includes(uid)) { batchData.premiumUsers.push(uid); }
-    db.batch.upsert(batchData);
-    if (isMongo()) Batch.findByIdAndUpdate(req.params.bid, { $addToSet: { premiumUsers: uid } }).catch(e => console.error('[MongoDB sync error]', e.message));
-    res.json({ success: true, premiumUsers: batchData.premiumUsers });
+    if (!batch.premiumUsers) batch.premiumUsers = [];
+    if (!batch.premiumUsers.includes(uid)) { batch.premiumUsers.push(uid); await batch.save(); }
+    db.batch.upsert(batch.toObject());
+    res.json({ success: true, premiumUsers: batch.premiumUsers });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 router.delete("/batches/:bid/premium-users/:uid", verifyAdmin, async (req, res) => {
   try {
-    const batchData = db.batch.getOne(req.params.bid);
-    if (!batchData) return res.status(404).json({ error: "Batch not found" });
-    batchData.premiumUsers = (batchData.premiumUsers||[]).filter(u => u !== req.params.uid);
-    db.batch.upsert(batchData);
-    if (isMongo()) Batch.findByIdAndUpdate(req.params.bid, { $pull: { premiumUsers: req.params.uid } }).catch(e => console.error('[MongoDB sync error]', e.message));
-    res.json({ success: true, premiumUsers: batchData.premiumUsers });
+    const batch = await Batch.findById(req.params.bid);
+    if (!batch) return res.status(404).json({ error: "Batch not found" });
+    batch.premiumUsers = (batch.premiumUsers||[]).filter(u => u !== req.params.uid);
+    await batch.save();
+    db.batch.upsert(batch.toObject());
+    res.json({ success: true, premiumUsers: batch.premiumUsers });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -309,8 +278,16 @@ router.get("/batches/:bid/premium-check/:userId", async (req, res) => {
   try {
     const b = db.batch.getOne(req.params.bid);
     if (!b) return res.status(404).json({ error: "Batch not found" });
-    const hasAccess = (b.premiumUsers||[]).includes(String(req.params.userId));
-    res.json({ hasAccess, isPremium: b.isPremium===true });
+    const userId = String(req.params.userId);
+    const isPermanent = (b.premiumUsers||[]).includes(userId);
+    const rewardAccess = db.batchRewardAccess.findOne(userId, String(b._id));
+    const rewardActive = !!rewardAccess && rewardAccess.expiresAt > new Date();
+    res.json({
+      hasAccess: isPermanent || rewardActive,
+      isPremium: b.isPremium===true,
+      isPermanent,
+      rewardAccessExpiresAt: rewardActive ? rewardAccess.expiresAt : null,
+    });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -318,37 +295,36 @@ router.get("/batches/:bid/premium-check/:userId", async (req, res) => {
 
 router.post("/batches/:bid/subjects", verifyAdmin, async (req, res) => {
   try {
-    const batch = db.batch.getOne(req.params.bid);
+    const batch = await Batch.findById(req.params.bid);
     if (!batch) return res.status(404).json({ error: "Batch not found" });
-    if (!batch.subjects) batch.subjects = [];
     batch.subjects.push({ name: req.body.name, icon: req.body.icon||"📚", color: req.body.color||"#4f8ef7", order: batch.subjects.length });
-    db.batch.upsert(batch);
-    if (isMongo()) _mongoBackupBatch(req.params.bid);
+    await batch.save();
+    db.batch.upsert(batch.toObject());
     res.json(batch);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 router.delete("/batches/:bid/subjects/:sid", verifyAdmin, async (req, res) => {
   try {
-    const batch = db.batch.getOne(req.params.bid);
+    const batch = await Batch.findById(req.params.bid);
     if (!batch) return res.status(404).json({ error: "Batch not found" });
     batch.subjects = batch.subjects.filter(s => s._id.toString() !== req.params.sid);
-    db.batch.upsert(batch);
-    if (isMongo()) _mongoBackupBatch(req.params.bid);
+    await batch.save();
+    db.batch.upsert(batch.toObject());
     res.json({ success: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 router.patch("/batches/:bid/subjects/:sid/edit", verifyAdmin, async (req, res) => {
   try {
-    const batch = db.batch.getOne(req.params.bid);
-    const subj = batch && _findById(batch.subjects, req.params.sid);
+    const batch = await Batch.findById(req.params.bid);
+    const subj = batch && batch.subjects.id(req.params.sid);
     if (!subj) return res.status(404).json({ error: "Not found" });
     if (req.body.name) subj.name = req.body.name;
     if (req.body.icon) subj.icon = req.body.icon;
     if (req.body.color) subj.color = req.body.color;
-    db.batch.upsert(batch);
-    if (isMongo()) _mongoBackupBatch(req.params.bid);
+    await batch.save();
+    db.batch.upsert(batch.toObject());
     res.json(batch);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -357,39 +333,38 @@ router.patch("/batches/:bid/subjects/:sid/edit", verifyAdmin, async (req, res) =
 
 router.post("/batches/:bid/subjects/:sid/chapters", verifyAdmin, async (req, res) => {
   try {
-    const batch = db.batch.getOne(req.params.bid);
-    const subj = batch && _findById(batch.subjects, req.params.sid);
+    const batch = await Batch.findById(req.params.bid);
+    const subj = batch && batch.subjects.id(req.params.sid);
     if (!subj) return res.status(404).json({ error: "Not found" });
-    if (!subj.chapters) subj.chapters = []; // Safety: initialize if undefined
-    subj.chapters.push({ name: req.body.name, order: subj.chapters.length, lectures: [], units: [] });
-    db.batch.upsert(batch);
-    if (isMongo()) _mongoBackupBatch(req.params.bid);
+    subj.chapters.push({ name: req.body.name, order: subj.chapters.length });
+    await batch.save();
+    db.batch.upsert(batch.toObject());
     res.json(batch);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 router.delete("/batches/:bid/subjects/:sid/chapters/:cid", verifyAdmin, async (req, res) => {
   try {
-    const batch = db.batch.getOne(req.params.bid);
-    const subj = batch && _findById(batch.subjects, req.params.sid);
+    const batch = await Batch.findById(req.params.bid);
+    const subj = batch && batch.subjects.id(req.params.sid);
     if (!subj) return res.status(404).json({ error: "Not found" });
     subj.chapters = subj.chapters.filter(c => c._id.toString() !== req.params.cid);
-    db.batch.upsert(batch);
-    if (isMongo()) _mongoBackupBatch(req.params.bid);
+    await batch.save();
+    db.batch.upsert(batch.toObject());
     res.json({ success: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 router.patch("/batches/:bid/subjects/:sid/chapters/:cid/edit", verifyAdmin, async (req, res) => {
   try {
-    const batch = db.batch.getOne(req.params.bid);
-    const subj = batch && _findById(batch.subjects, req.params.sid);
-    const chap = subj && _findById(subj.chapters, req.params.cid);
+    const batch = await Batch.findById(req.params.bid);
+    const subj = batch && batch.subjects.id(req.params.sid);
+    const chap = subj && subj.chapters.id(req.params.cid);
     if (!chap) return res.status(404).json({ error: "Not found" });
     if (req.body.name) chap.name = req.body.name;
     if (req.body.comingSoon !== undefined) chap.comingSoon = req.body.comingSoon;
-    db.batch.upsert(batch);
-    if (isMongo()) _mongoBackupBatch(req.params.bid);
+    await batch.save();
+    db.batch.upsert(batch.toObject());
     res.json(batch);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -398,41 +373,40 @@ router.patch("/batches/:bid/subjects/:sid/chapters/:cid/edit", verifyAdmin, asyn
 
 router.post("/batches/:bid/subjects/:sid/chapters/:cid/units", verifyAdmin, async (req, res) => {
   try {
-    const batch = db.batch.getOne(req.params.bid);
-    const subj = batch && _findById(batch.subjects, req.params.sid);
-    const chap = subj && _findById(subj.chapters, req.params.cid);
+    const batch = await Batch.findById(req.params.bid);
+    const subj = batch && batch.subjects.id(req.params.sid);
+    const chap = subj && subj.chapters.id(req.params.cid);
     if (!chap) return res.status(404).json({ error: "Not found" });
-    if (!chap.units) chap.units = [];
-    chap.units.push({ name: req.body.name, order: chap.units.length, lectures: [] });
-    db.batch.upsert(batch);
-    if (isMongo()) _mongoBackupBatch(req.params.bid);
+    chap.units.push({ name: req.body.name, order: chap.units.length });
+    await batch.save();
+    db.batch.upsert(batch.toObject());
     res.json(batch);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 router.delete("/batches/:bid/subjects/:sid/chapters/:cid/units/:uid", verifyAdmin, async (req, res) => {
   try {
-    const batch = db.batch.getOne(req.params.bid);
-    const subj = batch && _findById(batch.subjects, req.params.sid);
-    const chap = subj && _findById(subj.chapters, req.params.cid);
+    const batch = await Batch.findById(req.params.bid);
+    const subj = batch && batch.subjects.id(req.params.sid);
+    const chap = subj && subj.chapters.id(req.params.cid);
     if (!chap) return res.status(404).json({ error: "Not found" });
     chap.units = chap.units.filter(u => u._id.toString() !== req.params.uid);
-    db.batch.upsert(batch);
-    if (isMongo()) _mongoBackupBatch(req.params.bid);
+    await batch.save();
+    db.batch.upsert(batch.toObject());
     res.json({ success: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 router.patch("/batches/:bid/subjects/:sid/chapters/:cid/units/:uid/edit", verifyAdmin, async (req, res) => {
   try {
-    const batch = db.batch.getOne(req.params.bid);
-    const subj = batch && _findById(batch.subjects, req.params.sid);
-    const chap = subj && _findById(subj.chapters, req.params.cid);
-    const unit = chap && _findById(chap.units, req.params.uid);
+    const batch = await Batch.findById(req.params.bid);
+    const subj = batch && batch.subjects.id(req.params.sid);
+    const chap = subj && subj.chapters.id(req.params.cid);
+    const unit = chap && chap.units.id(req.params.uid);
     if (!unit) return res.status(404).json({ error: "Not found" });
     if (req.body.name) unit.name = req.body.name;
-    db.batch.upsert(batch);
-    if (isMongo()) _mongoBackupBatch(req.params.bid);
+    await batch.save();
+    db.batch.upsert(batch.toObject());
     res.json(batch);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -441,45 +415,44 @@ router.patch("/batches/:bid/subjects/:sid/chapters/:cid/units/:uid/edit", verify
 
 router.post("/batches/:bid/subjects/:sid/chapters/:cid/lectures", verifyAdmin, async (req, res) => {
   try {
-    const batch = db.batch.getOne(req.params.bid);
-    const subj = batch && _findById(batch.subjects, req.params.sid);
-    const chap = subj && _findById(subj.chapters, req.params.cid);
+    const batch = await Batch.findById(req.params.bid);
+    const subj = batch && batch.subjects.id(req.params.sid);
+    const chap = subj && subj.chapters.id(req.params.cid);
     if (!chap) return res.status(404).json({ error: "Not found" });
-    if (!chap.lectures) chap.lectures = [];
     chap.lectures.push({ name: req.body.name, link: req.body.link, notes: req.body.notes||"", order: chap.lectures.length, isDemo: req.body.isDemo===true });
-    db.batch.upsert(batch);
-    if (isMongo()) _mongoBackupBatch(req.params.bid);
+    await batch.save();
+    db.batch.upsert(batch.toObject());
     res.json(batch);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 router.delete("/batches/:bid/subjects/:sid/chapters/:cid/lectures/:lid", verifyAdmin, async (req, res) => {
   try {
-    const batch = db.batch.getOne(req.params.bid);
-    const subj = batch && _findById(batch.subjects, req.params.sid);
-    const chap = subj && _findById(subj.chapters, req.params.cid);
+    const batch = await Batch.findById(req.params.bid);
+    const subj = batch && batch.subjects.id(req.params.sid);
+    const chap = subj && subj.chapters.id(req.params.cid);
     if (!chap) return res.status(404).json({ error: "Not found" });
     chap.lectures = chap.lectures.filter(l => l._id.toString() !== req.params.lid);
-    db.batch.upsert(batch);
-    if (isMongo()) _mongoBackupBatch(req.params.bid);
+    await batch.save();
+    db.batch.upsert(batch.toObject());
     res.json({ success: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 router.patch("/batches/:bid/subjects/:sid/chapters/:cid/lectures/:lid/edit", verifyAdmin, async (req, res) => {
   try {
-    const batch = db.batch.getOne(req.params.bid);
-    const subj = batch && _findById(batch.subjects, req.params.sid);
-    const chap = subj && _findById(subj.chapters, req.params.cid);
-    const lec = chap && _findById(chap.lectures, req.params.lid);
+    const batch = await Batch.findById(req.params.bid);
+    const subj = batch && batch.subjects.id(req.params.sid);
+    const chap = subj && subj.chapters.id(req.params.cid);
+    const lec = chap && chap.lectures.id(req.params.lid);
     if (!lec) return res.status(404).json({ error: "Not found" });
     if (req.body.name) lec.name = req.body.name;
     if (req.body.link !== undefined) lec.link = req.body.link;
     if (req.body.notes !== undefined) lec.notes = req.body.notes;
     if (req.body.comingSoon !== undefined) lec.comingSoon = req.body.comingSoon;
     if (req.body.isDemo !== undefined) lec.isDemo = req.body.isDemo;
-    db.batch.upsert(batch);
-    if (isMongo()) _mongoBackupBatch(req.params.bid);
+    await batch.save();
+    db.batch.upsert(batch.toObject());
     res.json(batch);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -488,48 +461,47 @@ router.patch("/batches/:bid/subjects/:sid/chapters/:cid/lectures/:lid/edit", ver
 
 router.post("/batches/:bid/subjects/:sid/chapters/:cid/units/:uid/lectures", verifyAdmin, async (req, res) => {
   try {
-    const batch = db.batch.getOne(req.params.bid);
-    const subj = batch && _findById(batch.subjects, req.params.sid);
-    const chap = subj && _findById(subj.chapters, req.params.cid);
-    const unit = chap && _findById(chap.units, req.params.uid);
+    const batch = await Batch.findById(req.params.bid);
+    const subj = batch && batch.subjects.id(req.params.sid);
+    const chap = subj && subj.chapters.id(req.params.cid);
+    const unit = chap && chap.units.id(req.params.uid);
     if (!unit) return res.status(404).json({ error: "Not found" });
-    if (!unit.lectures) unit.lectures = [];
     unit.lectures.push({ name: req.body.name, link: req.body.link, notes: req.body.notes||"", order: unit.lectures.length, isDemo: req.body.isDemo===true });
-    db.batch.upsert(batch);
-    if (isMongo()) _mongoBackupBatch(req.params.bid);
+    await batch.save();
+    db.batch.upsert(batch.toObject());
     res.json(batch);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 router.delete("/batches/:bid/subjects/:sid/chapters/:cid/units/:uid/lectures/:lid", verifyAdmin, async (req, res) => {
   try {
-    const batch = db.batch.getOne(req.params.bid);
-    const subj = batch && _findById(batch.subjects, req.params.sid);
-    const chap = subj && _findById(subj.chapters, req.params.cid);
-    const unit = chap && _findById(chap.units, req.params.uid);
+    const batch = await Batch.findById(req.params.bid);
+    const subj = batch && batch.subjects.id(req.params.sid);
+    const chap = subj && subj.chapters.id(req.params.cid);
+    const unit = chap && chap.units.id(req.params.uid);
     if (!unit) return res.status(404).json({ error: "Not found" });
     unit.lectures = unit.lectures.filter(l => l._id.toString() !== req.params.lid);
-    db.batch.upsert(batch);
-    if (isMongo()) _mongoBackupBatch(req.params.bid);
+    await batch.save();
+    db.batch.upsert(batch.toObject());
     res.json({ success: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 router.patch("/batches/:bid/subjects/:sid/chapters/:cid/units/:uid/lectures/:lid/edit", verifyAdmin, async (req, res) => {
   try {
-    const batch = db.batch.getOne(req.params.bid);
-    const subj = batch && _findById(batch.subjects, req.params.sid);
-    const chap = subj && _findById(subj.chapters, req.params.cid);
-    const unit = chap && _findById(chap.units, req.params.uid);
-    const lec = unit && _findById(unit.lectures, req.params.lid);
+    const batch = await Batch.findById(req.params.bid);
+    const subj = batch && batch.subjects.id(req.params.sid);
+    const chap = subj && subj.chapters.id(req.params.cid);
+    const unit = chap && chap.units.id(req.params.uid);
+    const lec = unit && unit.lectures.id(req.params.lid);
     if (!lec) return res.status(404).json({ error: "Not found" });
     if (req.body.name) lec.name = req.body.name;
     if (req.body.link !== undefined) lec.link = req.body.link;
     if (req.body.notes !== undefined) lec.notes = req.body.notes;
     if (req.body.comingSoon !== undefined) lec.comingSoon = req.body.comingSoon;
     if (req.body.isDemo !== undefined) lec.isDemo = req.body.isDemo;
-    db.batch.upsert(batch);
-    if (isMongo()) _mongoBackupBatch(req.params.bid);
+    await batch.save();
+    db.batch.upsert(batch.toObject());
     res.json(batch);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -549,18 +521,16 @@ router.post("/announcements", verifyAdmin, async (req, res) => {
     const { emoji, heading, body } = req.body;
     if (!heading || !body) return res.status(400).json({ error: "heading and body required" });
     // Write to MongoDB to get _id
-    const annId = new (require('mongoose').Types.ObjectId)().toString();
-    const annCreatedAt = new Date();
-    db.announcement.insert({ id: annId, emoji: emoji||"📢", heading, body, createdAt: annCreatedAt });
-    if (isMongo()) Announcement.create({ _id: annId, emoji: emoji||"📢", heading, body, createdAt: annCreatedAt }).catch(e => console.error('[MongoDB sync error]', e.message));
-    res.json({ _id: annId, emoji: emoji||"📢", heading, body, createdAt: annCreatedAt });
+    const ann = await Announcement.create({ emoji: emoji||"📢", heading, body });
+    db.announcement.insert({ id: String(ann._id), emoji: ann.emoji, heading: ann.heading, body: ann.body, createdAt: ann.createdAt });
+    res.json({ ...ann.toObject(), _id: String(ann._id) });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 router.delete("/announcements/:id", verifyAdmin, async (req, res) => {
   try {
+    await Announcement.findByIdAndDelete(req.params.id);
     db.announcement.delete(req.params.id);
-    if (isMongo()) Announcement.findByIdAndDelete(req.params.id).catch(e => console.error('[MongoDB sync error]', e.message));
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -594,14 +564,14 @@ router.post("/access/token/:userId", async (req, res) => {
     if (claimsToday >= 3) return res.status(429).json({ error: "Aaj ke 3 claims ho gaye! Kal wapas aao.", claimsToday: 3, claimsLeft: 0 });
 
     db.adToken.deleteByUser(userId);
-    if (isMongo()) AdToken.deleteMany({ userId }).catch(e => console.error('[MongoDB sync error]', e.message));
+    await AdToken.deleteMany({ userId });
 
     const token = crypto.randomBytes(32).toString("hex");
     const tokenExpiry = new Date(Date.now() + 10 * 60 * 1000);
     const id = db.generateId();
     db.adToken.create({ id, userId, token, issuedAt: new Date(), expiresAt: tokenExpiry });
     // MongoDB backup
-    AdToken.create({ userId, token, expiresAt: tokenExpiry }).catch(e => console.error('[MongoDB sync error]', e.message));
+    AdToken.create({ userId, token, expiresAt: tokenExpiry }).catch(() => {});
     res.json({ token, claimsToday, claimsLeft: 3 - claimsToday });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -624,7 +594,7 @@ router.post("/access/claim/:userId", async (req, res) => {
     if (claimsToday >= 3) { db.adToken.deleteById(record.id); return res.status(429).json({ error: "Aaj ke 3 claims ho gaye! Kal wapas aao." }); }
 
     db.adToken.deleteById(record.id);
-    AdToken.deleteOne({ userId, token }).catch(e => console.error('[MongoDB sync error]', e.message));
+    AdToken.deleteOne({ userId, token }).catch(() => {});
 
     const baseTime = (existing && existing.expiresAt > new Date()) ? existing.expiresAt : new Date();
     const expiresAt = new Date(baseTime.getTime() + 8 * 60 * 60 * 1000);
@@ -632,7 +602,7 @@ router.post("/access/claim/:userId", async (req, res) => {
 
     db.access.upsert({ userId, expiresAt, claimsToday: newClaimsToday, claimDay: today });
     // MongoDB backup
-    Access.findOneAndUpdate({ userId }, { userId, expiresAt, claimsToday: newClaimsToday, claimDay: today }, { upsert: true }).catch(e => console.error('[MongoDB sync error]', e.message));
+    Access.findOneAndUpdate({ userId }, { userId, expiresAt, claimsToday: newClaimsToday, claimDay: today }, { upsert: true }).catch(() => {});
     res.json({ hasAccess: true, expiresAt, claimsToday: newClaimsToday, claimsLeft: 3 - newClaimsToday });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -646,51 +616,25 @@ const Referral = mongoose.model('Referral', referralSchema);
 
 router.get('/refer/stats/:userId', (req, res) => {
   try {
-    const userId = req.params.userId;
-    const referralCount = db.referral.countByReferrer(userId); // actual number of referrals
-    const referralPoints = referralCount * POINTS_PER_REFERRAL; // points from referrals
-    const earnedSpinPoints = db.spinPoints ? db.spinPoints.getTotal(userId) : 0;
-    const totalPoints = referralPoints + earnedSpinPoints;
-    const usedPoints = (db.pointsUsage && db.pointsUsage.getTotalUsed) ? db.pointsUsage.getTotalUsed(userId) : 0;
-    const availablePoints = Math.max(0, totalPoints - usedPoints);
-    res.json({ referrals: referralCount, referralPoints, spinPoints: earnedSpinPoints, points: availablePoints });
+    const { referrals, spent, points } = getPointsBreakdown(req.params.userId);
+    res.json({ referrals, spent, points });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// Pending referral schema (sirf store karo, confirmed nahi)
-const pendingReferralSchema = new mongoose.Schema({
-  referrerId: { type: String, required: true },
-  referredId: { type: String, required: true, unique: true },
-  confirmed: { type: Boolean, default: false },
-  createdAt: { type: Date, default: Date.now }
-});
-const PendingReferral = mongoose.models.PendingReferral || mongoose.model('PendingReferral', pendingReferralSchema);
-
 router.post('/refer/record', async (req, res) => {
   try {
-    const { referrerId, referredId, isNewUser, pending } = req.body;
+    const { referrerId, referredId } = req.body;
     if (!referrerId || !referredId) return res.status(400).json({ error: 'Missing fields' });
     if (referrerId === referredId) return res.status(400).json({ error: 'Cannot refer yourself' });
-    if (!isNewUser) return res.json({ success: false, isNew: false, reason: 'Not a new user' });
+    if (!req.body.isNewUser) return res.json({ success: false, isNew: false, reason: 'Not a new user' });
 
-    // Already confirmed referral hai?
-    const existingConfirmed = db.referral.findByReferred(referredId);
-    if (existingConfirmed) return res.json({ success: false, isNew: false, reason: 'Already referred' });
+    const existing = db.referral.findByReferred(referredId);
+    if (existing) return res.json({ success: false, isNew: false, reason: 'Already referred' });
 
-    if (pending) {
-      // Sirf pending store karo — point baad mein milega
-      const existingPending = db.pendingReferral.findByReferred(referredId);
-      if (!existingPending) {
-        db.pendingReferral.upsert({ referredId, referrerId });
-        PendingReferral.create({ referrerId, referredId }).catch(e => console.error('[MongoDB sync error]', e.message));
-      }
-      return res.json({ success: true, isNew: true, pending: true });
-    }
-
-    // Direct confirm (legacy fallback)
     const id = db.generateId();
     db.referral.insert({ id, referrerId, referredId });
-    Referral.create({ referrerId, referredId }).catch(e => console.error('[MongoDB sync error]', e.message));
+    // MongoDB backup
+    Referral.create({ referrerId, referredId }).catch(() => {});
     res.json({ success: true, isNew: true });
   } catch (e) {
     if (e.code === 11000) return res.json({ success: false, reason: 'Already referred' });
@@ -698,341 +642,342 @@ router.post('/refer/record', async (req, res) => {
   }
 });
 
-// Pehla lecture watch hone pe pending referral confirm karo
-router.post('/refer/confirm-first-watch', async (req, res) => {
-  try {
-    const { referredId, referredName } = req.body;
-    if (!referredId) return res.status(400).json({ error: 'referredId required' });
+// ── Rewards (spend referral points on real perks) ──────────────────────────────
+// Points are never stored as a mutable balance — they are always DERIVED as
+// (referrals earned) - (points spent, from reward_redemptions). This means the
+// number shown to the user can never drift out of sync with their real referral
+// count, no matter what happens to the reward system itself.
 
-    // Already confirmed?
-    const existingConfirmed = db.referral.findByReferred(referredId);
-    if (existingConfirmed) return res.json({ confirmed: false, reason: 'Already confirmed' });
-
-    // Pending referral dhundo — SQLite first, MongoDB fallback
-    let pendingRef = db.pendingReferral.findByReferred(referredId);
-    if (!pendingRef) {
-      // MongoDB fallback
-      const mongoRef = await PendingReferral.findOne({ referredId, confirmed: false });
-      if (!mongoRef) return res.json({ confirmed: false, reason: 'No pending referral' });
-      pendingRef = { referrerId: mongoRef.referrerId, referredId };
-    }
-
-    // Confirm karo — SQLite + MongoDB
-    db.pendingReferral.confirm(referredId);
-    PendingReferral.findOneAndUpdate({ referredId }, { confirmed: true }).catch(e => console.error('[MongoDB sync error]', e.message));
-
-    const id = db.generateId();
-    db.referral.insert({ id, referrerId: pendingRef.referrerId, referredId });
-    Referral.create({ referrerId: pendingRef.referrerId, referredId }).catch(e => console.error('[MongoDB sync error]', e.message));
-
-    // Send Telegram notification to referrer
-    // Get updated points for display
-    const referralPoints = db.referral.countByReferrer(pendingRef.referrerId) * 5;
-    const spinPts = db.spinPoints ? db.spinPoints.getTotal(pendingRef.referrerId) : 0;
-    const usedPts = db.pointsUsage ? db.pointsUsage.getTotalUsed(pendingRef.referrerId) : 0;
-    const availablePts = Math.max(0, referralPoints + spinPts - usedPts);
-
-    // Fire bot message async — don't block the response
-    const displayName = referredName || 'Ek naye dost';
-    if (global._botInstance) {
-      global._botInstance.sendMessage(
-        parseInt(pendingRef.referrerId),
-        `🎉 <b>Referral Point Mila!</b>\n\n` +
-        `👤 <b>${displayName}</b> ne apna pehla lecture dekha!\n\n` +
-        `⭐ <b>+5 Points</b> aapke account mein add ho gaye!\n` +
-        `💰 <b>Total Points: ${availablePts}</b>\n\n` +
-        `🎯 <i>Aur dosto ko refer karo — aur points kamao!</i>`,
-        { parse_mode: 'HTML' }
-      ).catch(function(e) { console.error('Referral notify failed:', e.message); });
-    }
-
-    res.json({ confirmed: true, referrerId: pendingRef.referrerId });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+const rewardRedemptionSchema = new mongoose.Schema({
+  userId: { type: String, required: true },
+  rewardType: { type: String, required: true },   // 'accessPass' | 'batch24h' | 'batch7d'
+  batchId: { type: String, default: null },
+  batchName: { type: String, default: '' },
+  pointsCost: { type: Number, required: true },
+  redeemedAt: { type: Date, default: Date.now },
+  expiresAt: { type: Date, required: true },
 });
+rewardRedemptionSchema.index({ userId: 1 });
+const RewardRedemption = mongoose.models.RewardRedemption || mongoose.model('RewardRedemption', rewardRedemptionSchema);
 
-// ── Points Redeem ─────────────────────────────────────────────────────────────
-// Reward tiers:
-//   1 point  → 24h free access (ad-style)
-//   5 points → 24h premium access to 1 chosen batch
-//  20 points → 7-day premium access to 1 chosen batch
+const batchRewardAccessSchema = new mongoose.Schema({
+  userId: { type: String, required: true },
+  batchId: { type: String, required: true },
+  batchName: { type: String, default: '' },
+  expiresAt: { type: Date, required: true },
+  grantedAt: { type: Date, default: Date.now },
+});
+batchRewardAccessSchema.index({ userId: 1, batchId: 1 }, { unique: true });
+const BatchRewardAccess = mongoose.models.BatchRewardAccess || mongoose.model('BatchRewardAccess', batchRewardAccessSchema);
 
-router.post('/refer/redeem', async (req, res) => {
+// Reward catalog — single source of truth for cost + duration of every reward.
+// To add a new reward in future, just add an entry here (and a matching branch
+// in the redeem handler below if it needs special grant logic).
+// Each successful referral is worth this many points (single source of truth —
+// change this one number to adjust the referral reward economy).
+const POINTS_PER_REFERRAL = 5;
+
+// Spin & Earn tab configuration
+const SPIN_DAILY_LIMIT = 5;
+const SPIN_COOLDOWN_MS = 10 * 1000;
+const SPIN_AD_WATCH_SECONDS = 2; // NOTE: lower than access/claim's 15s on purpose — that flow has a manual
+// "Claim" button tap AFTER the ad finishes (adding natural delay on top of ad duration), but spins
+// auto-chain claim immediately once the ad SDK's promise resolves, so elapsed here is essentially just
+// the ad's own playback time. Many ad formats (pop/interstitial) resolve in well under 15s, so keeping
+// that threshold here would silently reject every legitimate spin. 2s still blocks trivial direct-API
+// abuse that skips the ad SDK entirely.
+
+const REWARD_CATALOG = {
+  accessPass: { cost: 5, durationMs: 24 * 60 * 60 * 1000, label: '24 Hour Site Access' },
+  batch24h: { cost: 10, durationMs: 24 * 60 * 60 * 1000, label: '24 Hour Premium Batch Access' },
+  batch7d: { cost: 50, durationMs: 7 * 24 * 60 * 60 * 1000, label: '7 Day Premium Batch Access' },
+};
+
+// Single source of truth for the points formula — always fresh from the DB,
+// never trusts a client-sent value. referrals here is the raw referral COUNT;
+// points is the spendable balance (referrals*POINTS_PER_REFERRAL + spinEarned - spent).
+function getPointsBreakdown(userId) {
+  const referrals = db.referral.countByReferrer(userId);
+  const spinEarned = db.spinHistory.totalEarned(userId);
+  const spent = db.rewardRedemption.totalSpent(userId);
+  const points = Math.max(0, referrals * POINTS_PER_REFERRAL + spinEarned - spent);
+  return { referrals, spinEarned, spent, points };
+}
+function getSpendablePoints(userId) {
+  return getPointsBreakdown(userId).points;
+}
+
+// Notify the bot owner whenever someone redeems a reward — fire-and-forget,
+// never allowed to block or fail the actual redeem response to the user.
+function notifyOwnerOfRedemption({ userId, rewardType, catalogEntry, batchDoc, pointsCost, pointsRemaining, expiresAt }) {
+  if (!BOT_TOKEN || !OWNER_ID) return;
   try {
-    const { userId, tier, batchId } = req.body;
-    if (!userId || !tier) return res.status(400).json({ error: 'userId aur tier required hai' });
+    const u = db.user.findOne(userId);
+    const displayName = u ? [u.firstName, u.lastName].filter(Boolean).join(' ').trim() || 'Unknown' : 'Unknown';
+    const usernameStr = u && u.username ? ` (@${u.username})` : '';
+    const expiryStr = new Date(expiresAt).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' });
 
-    // Tier validate
-    const TIERS = {
-      access_24h:   { cost: 1,  label: '8h Free Access' },
-      premium_1d:   { cost: 10, label: '1 Batch 1-Day Premium', needsBatch: true },
-      premium_7d:   { cost: 50, label: '1 Batch 7-Day Premium', needsBatch: true },
+    let text = `🎁 <b>Reward Redeemed!</b>\n\n` +
+      `👤 <b>User:</b> ${displayName}${usernameStr}\n` +
+      `🆔 <b>ID:</b> <code>${userId}</code>\n` +
+      `🎯 <b>Reward:</b> ${catalogEntry.label}\n` +
+      `⭐ <b>Points Spent:</b> ${pointsCost} (Balance left: ${pointsRemaining})\n`;
+    if (batchDoc) text += `🎓 <b>Batch:</b> ${batchDoc.name}\n`;
+    text += `⏳ <b>Access Until:</b> ${expiryStr}`;
+
+    fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: OWNER_ID, text, parse_mode: 'HTML' }),
+    }).catch(() => {});
+  } catch (e) { /* never let a notification failure affect the redeem flow */ }
+}
+
+// GET summary — powers the Rewards page header (points balance + active perks)
+router.get('/rewards/summary/:userId', (req, res) => {
+  try {
+    const userId = req.params.userId;
+    const { referrals, spent, points } = getPointsBreakdown(userId);
+
+    const accessRecord = db.access.findOne(userId);
+    const accessPass = {
+      active: !!accessRecord && accessRecord.expiresAt > new Date(),
+      expiresAt: accessRecord ? accessRecord.expiresAt : null,
     };
-    const tierInfo = TIERS[tier];
-    if (!tierInfo) return res.status(400).json({ error: 'Invalid tier' });
-    if (tierInfo.needsBatch && !batchId) return res.status(400).json({ error: 'Batch select karo' });
 
-    // Current points check — referral points + spin earned points combined
-    const referralPoints = db.referral.countByReferrer(userId) * POINTS_PER_REFERRAL;
-    const earnedSpinPoints = db.spinPoints ? db.spinPoints.getTotal(userId) : 0;
-    const totalPoints = referralPoints + earnedSpinPoints;
-    const usedPoints = (db.pointsUsage && db.pointsUsage.getTotalUsed) ? db.pointsUsage.getTotalUsed(userId) : 0;
-    const availablePoints = Math.max(0, totalPoints - usedPoints);
-    if (availablePoints < tierInfo.cost) {
-      return res.status(400).json({ error: `Insufficient points. ${tierInfo.cost} chahiye, tumhare paas ${availablePoints} hain.` });
+    const activeBatchRewards = db.batchRewardAccess.listActiveByUser(userId)
+      .map(r => ({ batchId: r.batchId, batchName: r.batchName, expiresAt: r.expiresAt }));
+
+    res.json({ referrals, spent, points, accessPass, activeBatchRewards, catalog: REWARD_CATALOG });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// GET eligible batches — the picker list shown when redeeming a batch-based reward.
+// Excludes batches the user already permanently owns (no point wasting points on those).
+router.get('/rewards/eligible-batches/:userId', (req, res) => {
+  try {
+    const userId = req.params.userId;
+    const all = db.batch.getAll();
+    const eligible = all
+      .filter(b => b.isPremium === true && b.isPublic === true)
+      .filter(b => !((b.premiumUsers || []).includes(userId))) // already owned permanently — skip
+      .map(b => {
+        const active = db.batchRewardAccess.findOne(userId, String(b._id));
+        return {
+          _id: b._id,
+          name: b.name,
+          pic: b.pic || '',
+          price: b.price || 0,
+          subjectCount: (b.subjects || []).length,
+          activeRewardExpiresAt: (active && active.expiresAt > new Date()) ? active.expiresAt : null,
+        };
+      });
+    res.json({ batches: eligible });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST redeem — the actual "spend points" action
+router.post('/rewards/redeem', async (req, res) => {
+  try {
+    const { userId, rewardType, batchId } = req.body;
+    if (!userId) return res.status(400).json({ error: 'userId required' });
+    const catalogEntry = REWARD_CATALOG[rewardType];
+    if (!catalogEntry) return res.status(400).json({ error: 'Invalid reward type' });
+
+    let batchDoc = null;
+    if (rewardType === 'batch24h' || rewardType === 'batch7d') {
+      if (!batchId) return res.status(400).json({ error: 'Please select a batch' });
+      batchDoc = db.batch.getOne(batchId);
+      if (!batchDoc || batchDoc.isPublic !== true) return res.status(404).json({ error: 'Batch not found' });
+      if (batchDoc.isPremium !== true) return res.status(400).json({ error: 'This batch is not a premium batch' });
+      if ((batchDoc.premiumUsers || []).includes(userId)) {
+        return res.status(400).json({ error: 'Aapke paas already is batch ka full access hai!' });
+      }
     }
 
-    // Record points usage in MongoDB (SQLite fallback)
-    const PointsUsage = mongoose.models.PointsUsage || mongoose.model('PointsUsage', new mongoose.Schema({
-      userId: { type: String, required: true },
-      pointsUsed: { type: Number, required: true },
-      tier: String,
-      batchId: String,
-      createdAt: { type: Date, default: Date.now }
-    }));
-
-    const usageId2 = new (require('mongoose').Types.ObjectId)().toString();
-    db.pointsUsage.insert({ id: usageId2, userId, pointsUsed: tierInfo.cost, tier, batchId: batchId || null });
-    if (isMongo()) PointsUsage.create({ userId, pointsUsed: tierInfo.cost, tier, batchId: batchId || null }).catch(e => console.error('[MongoDB sync error]', e.message));
-
-    // Helper: get user info from Telegram (best-effort)
-    async function getTgUserInfo(uid) {
-      try {
-        const userRec = db.user.findOne ? db.user.findOne(uid) : null;
-        if (userRec) return userRec;
-      } catch(_) {}
-      return null;
+    // ── Critical section: everything below is synchronous SQLite work with no
+    // `await` in between, so Node's single-threaded event loop guarantees no
+    // other request can interleave here — this is what prevents double-spending
+    // points from two rapid clicks / concurrent requests. ──────────────────────
+    const spendable = getSpendablePoints(userId);
+    if (spendable < catalogEntry.cost) {
+      return res.status(400).json({ error: `Not enough points! Need ${catalogEntry.cost}, you have ${spendable}.`, required: catalogEntry.cost, available: spendable });
     }
 
-    // Helper: send Telegram message to owner
-    async function notifyOwner(text) {
-      if (!BOT_TOKEN || !OWNER_ID) return;
-      try {
-        await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ chat_id: OWNER_ID, text, parse_mode: 'HTML' })
+    let expiresAt;
+    const redeemedAt = new Date();
+    const runGrant = db.getDb().transaction(() => {
+      if (rewardType === 'accessPass') {
+        const existing = db.access.findOne(userId);
+        const baseTime = (existing && existing.expiresAt > redeemedAt) ? existing.expiresAt : redeemedAt;
+        expiresAt = new Date(baseTime.getTime() + catalogEntry.durationMs);
+        // Preserve existing ad-claim counters untouched — this reward is independent of the daily ad-claim cap
+        db.access.upsert({
+          userId, expiresAt,
+          claimsToday: existing ? existing.claimsToday : 0,
+          claimDay: existing ? existing.claimDay : '',
         });
-      } catch(_) {}
-    }
-
-    // Format IST time
-    const now = new Date();
-    const istStr = new Date(now.getTime() + 5.5 * 60 * 60 * 1000)
-      .toISOString().replace('T', ' ').slice(0, 19) + ' IST';
-
-    // Apply the reward
-    if (tier === 'access_24h') {
-      // Extend free access by 24h
-      const existing = db.access.findOne(userId);
-      const baseTime = (existing && existing.expiresAt > new Date()) ? existing.expiresAt : new Date();
-      const expiresAt = new Date(baseTime.getTime() + 8 * 60 * 60 * 1000);
-      const today = new Date().toISOString().slice(0, 10);
-      const claimsToday = (existing && existing.claimDay === today) ? (existing.claimsToday || 0) : 0;
-      db.access.upsert({ userId, expiresAt, claimsToday, claimDay: today });
-      const Access = mongoose.models.Access;
-      if (Access) Access.findOneAndUpdate({ userId }, { userId, expiresAt, claimsToday, claimDay: today }, { upsert: true }).catch(e => console.error('[MongoDB sync error]', e.message));
-
-      // Notify owner
-      const userRec = await getTgUserInfo(userId);
-      const userName = userRec ? [userRec.firstName, userRec.lastName].filter(Boolean).join(' ') || userRec.username || userId : userId;
-      const usernameTag = userRec && userRec.username ? ` (@${userRec.username})` : '';
-      const newPts = availablePoints - tierInfo.cost;
-      const expStr = new Date(expiresAt.getTime() + 5.5*60*60*1000).toISOString().replace('T',' ').slice(0,19) + ' IST';
-      notifyOwner(
-        `🎁 <b>Points Redeemed!</b>
-
-` +
-        `👤 <b>User:</b> ${userName}${usernameTag}
-` +
-        `🆔 <b>User ID:</b> <code>${userId}</code>
-
-` +
-        `🏆 <b>Reward:</b> ⚡ 24h Free Access
-` +
-        `🪙 <b>Points Used:</b> 1
-` +
-        `💰 <b>Points Remaining:</b> ${newPts}
-
-` +
-        `⏰ <b>Access Expires:</b> ${expStr}
-` +
-        `🕐 <b>Redeemed At:</b> ${istStr}`
-      ).catch(e => console.error('[MongoDB sync error]', e.message));
-
-      return res.json({ success: true, reward: '24h_access', expiresAt, newPoints: newPts, points: newPts });
-    }
-
-    if (tier === 'premium_1d' || tier === 'premium_7d') {
-      const days = tier === 'premium_1d' ? 1 : 7;
-      const batch = db.batch.getOne(batchId);
-      if (!batch) return res.status(404).json({ error: 'Batch not found' });
-
-      const uid = String(userId);
-      const expiresAt = Date.now() + days * 24 * 60 * 60 * 1000;
-
-      // Save to premium_access table (source of truth for expiry)
-      const accessId = require('crypto').randomBytes(12).toString('hex');
-      db.premiumAccess.grant({ id: accessId, userId: uid, batchId, expiresAt });
-
-      // Also add to batch premiumUsers for immediate frontend use
-      if (!batch.premiumUsers) batch.premiumUsers = [];
-      if (!batch.premiumUsers.includes(uid)) {
-        batch.premiumUsers.push(uid);
-        db.batch.upsert(batch);
-        if (isMongo()) Batch.findByIdAndUpdate(batchId, { $addToSet: { premiumUsers: uid } }).catch(e => console.error('[MongoDB sync error]', e.message));
+      } else {
+        const existing = db.batchRewardAccess.findOne(userId, String(batchId));
+        const baseTime = (existing && existing.expiresAt > redeemedAt) ? existing.expiresAt : redeemedAt;
+        expiresAt = new Date(baseTime.getTime() + catalogEntry.durationMs);
+        db.batchRewardAccess.upsert({ userId, batchId: String(batchId), batchName: batchDoc.name, expiresAt, grantedAt: redeemedAt });
       }
 
-      // Notify owner
-      const userRec2 = await getTgUserInfo(userId);
-      const userName2 = userRec2 ? [userRec2.firstName, userRec2.lastName].filter(Boolean).join(' ') || userRec2.username || userId : userId;
-      const usernameTag2 = userRec2 && userRec2.username ? ` (@${userRec2.username})` : '';
-      const newPts2 = availablePoints - tierInfo.cost;
-      const expStr2 = new Date(expiresAt + 5.5*60*60*1000).toISOString().replace('T',' ').slice(0,19) + ' IST';
-      const rewardEmoji = days === 1 ? '🌟' : '👑';
-      notifyOwner(
-        `🎁 <b>Points Redeemed!</b>
-
-` +
-        `👤 <b>User:</b> ${userName2}${usernameTag2}
-` +
-        `🆔 <b>User ID:</b> <code>${userId}</code>
-
-` +
-        `${rewardEmoji} <b>Reward:</b> ${days === 1 ? '1-Din' : '1-Hafta'} Premium Access
-` +
-        `📚 <b>Batch:</b> ${batch.name}
-` +
-        `🪙 <b>Points Used:</b> ${tierInfo.cost}
-` +
-        `💰 <b>Points Remaining:</b> ${newPts2}
-
-` +
-        `⏰ <b>Access Expires:</b> ${expStr2}
-` +
-        `🕐 <b>Redeemed At:</b> ${istStr}`
-      ).catch(e => console.error('[MongoDB sync error]', e.message));
-
-      return res.json({ success: true, reward: `premium_${days}d`, batchId, batchName: batch.name, expiresAt, newPoints: newPts2, points: newPts2 });
-    }
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// Get available (unused) points for a user — includes referral + spin earned points
-router.get('/refer/points/:userId', async (req, res) => {
-  try {
-    const userId = req.params.userId;
-    const referralPoints = db.referral.countByReferrer(userId) * POINTS_PER_REFERRAL;
-    const earnedSpinPoints = db.spinPoints ? db.spinPoints.getTotal(userId) : 0;
-    const totalPoints = referralPoints + earnedSpinPoints;
-    const usedPoints = db.pointsUsage.getTotalUsed(userId);
-    const availablePoints = Math.max(0, totalPoints - usedPoints);
-
-    res.json({ totalPoints, referralPoints, spinPoints: earnedSpinPoints, usedPoints, availablePoints });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// ── Spin Reward ───────────────────────────────────────────────────────────────
-// Called from frontend after ad is watched successfully post-spin.
-// Validates user via TG initData, then credits spin points to DB.
-
-router.post('/spin-reward', async (req, res) => {
-  try {
-    // Verify user identity from TG initData header (same as getRequestUserId)
-    const verifiedUserId = getRequestUserId(req);
-    const { userId, points } = req.body;
-
-    // Accept only if initData userId matches body userId (prevents spoofing)
-    if (!verifiedUserId) return res.status(401).json({ error: 'Unauthorized — invalid initData' });
-    if (String(verifiedUserId) !== String(userId)) return res.status(403).json({ error: 'userId mismatch' });
-    if (!points || typeof points !== 'number' || points < 1 || points > 5) {
-      return res.status(400).json({ error: 'Invalid points value (1–5 allowed)' });
-    }
-
-    // Rate limit: max 5 spins per day per user using spin_points table
-    const today = new Date();
-    const dayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
-    const dayEnd = dayStart + 86400000;
-    const spinsToday = db.getDb().prepare(
-      `SELECT COUNT(*) as c FROM spin_points WHERE userId=? AND createdAt >= ? AND createdAt < ?`
-    ).get(String(userId), dayStart, dayEnd).c;
-
-    if (spinsToday >= 5) {
-      return res.status(429).json({ error: 'Daily spin limit (5) reached. Kal wapas aao!' });
-    }
-
-    // Save spin points to DB
-    const spinId = require('crypto').randomBytes(12).toString('hex');
-    db.spinPoints.add({ id: spinId, userId: String(userId), points });
-
-    // Return updated totals
-    const referralPoints = db.referral.countByReferrer(String(userId)) * POINTS_PER_REFERRAL;
-    const totalSpinPoints = db.spinPoints.getTotal(String(userId));
-    const usedPoints = db.pointsUsage.getTotalUsed(String(userId));
-    const availablePoints = Math.max(0, referralPoints + totalSpinPoints - usedPoints);
-
-    res.json({ success: true, pointsAwarded: points, availablePoints, spinsToday: spinsToday + 1 });
-  } catch (e) {
-    console.error('spin-reward error:', e.message);
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// ── Spin Status ───────────────────────────────────────────────────────────────
-// Returns how many spins user has done today (from DB, not localStorage)
-// Used on page load to restore accurate spin count after redeploy/refresh
-router.get('/spin-status/:userId', (req, res) => {
-  try {
-    const userId = req.params.userId;
-    // Count spins done today (midnight to midnight, local server time)
-    const now = new Date();
-    const dayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-    const dayEnd = dayStart + 86400000;
-    const spinsToday = db.getDb().prepare(
-      `SELECT COUNT(*) as c FROM spin_points WHERE userId=? AND createdAt >= ? AND createdAt < ?`
-    ).get(userId, dayStart, dayEnd).c;
-
-    const totalPoints = db.spinPoints.getTotal(userId);
-    res.json({ spinsToday, spinsLeft: Math.max(0, 5 - spinsToday), totalSpinPoints: totalPoints });
-  } catch(e) { res.status(500).json({ error: e.message }); }
-});
-
-// ── Batch Premium Access Check ────────────────────────────────────────────────
-// Returns all batches user has active premium access to (from points redeem)
-// Frontend uses this to check expiry instead of relying on premiumUsers array
-router.get('/batch-access/:userId', (req, res) => {
-  try {
-    const userId = req.params.userId;
-    const active = db.premiumAccess.getActiveForUser(userId);
-    // Return map of batchId -> expiresAt for quick lookup
-    const accessMap = {};
-    active.forEach(function(row) { accessMap[row.batchId] = row.expiresAt; });
-    res.json({ accessMap });
-  } catch(e) { res.status(500).json({ error: e.message }); }
-});
-
-// ── Premium Access Expiry Cleanup (runs every hour) ───────────────────────────
-// Removes expired users from batch premiumUsers array so access is truly revoked
-setInterval(function _cleanupExpiredPremiumAccess() {
-  try {
-    const expired = db.premiumAccess.getExpired();
-    if (!expired.length) return;
-    expired.forEach(function(row) {
-      // Remove from SQLite premium_access
-      db.premiumAccess.remove(row.id);
-      // Remove from batch premiumUsers array
-      const batch = db.batch.getOne(row.batchId);
-      if (batch && batch.premiumUsers) {
-        batch.premiumUsers = batch.premiumUsers.filter(function(u) { return u !== row.userId; });
-        db.batch.upsert(batch);
-        // Sync to MongoDB
-        if (mongoose.connection.readyState === 1) {
-          Batch.findByIdAndUpdate(row.batchId, { $pull: { premiumUsers: row.userId } }).catch(e => console.error('[MongoDB sync error]', e.message));
-        }
-      }
-      console.log(`[PremiumExpiry] Removed userId=${row.userId} from batchId=${row.batchId}`);
+      // Ledger entry — inserting this row IS the "spend"; balance is always derived, never stored directly
+      const id = db.generateId();
+      db.rewardRedemption.insert({
+        id, userId, rewardType,
+        batchId: batchDoc ? String(batchId) : null,
+        batchName: batchDoc ? batchDoc.name : '',
+        pointsCost: catalogEntry.cost, redeemedAt, expiresAt,
+      });
+      return id;
     });
-  } catch(e) { console.error('[PremiumExpiry] Cleanup error:', e.message); }
-}, 60 * 60 * 1000); // Every hour
+    const redemptionId = runGrant();
+    // ── End critical section ───────────────────────────────────────────────────
+
+    // MongoDB backup — fire and forget, matches existing codebase convention
+    RewardRedemption.create({
+      userId, rewardType, batchId: batchDoc ? String(batchId) : null,
+      batchName: batchDoc ? batchDoc.name : '', pointsCost: catalogEntry.cost, redeemedAt, expiresAt,
+    }).catch(() => {});
+    if (rewardType === 'accessPass') {
+      const rec = db.access.findOne(userId);
+      Access.findOneAndUpdate({ userId }, { userId, expiresAt: rec.expiresAt, claimsToday: rec.claimsToday, claimDay: rec.claimDay }, { upsert: true }).catch(() => {});
+    } else {
+      BatchRewardAccess.findOneAndUpdate({ userId, batchId: String(batchId) }, { userId, batchId: String(batchId), batchName: batchDoc.name, expiresAt, grantedAt: redeemedAt }, { upsert: true }).catch(() => {});
+    }
+    notifyOwnerOfRedemption({
+      userId, rewardType, catalogEntry, batchDoc,
+      pointsCost: catalogEntry.cost, pointsRemaining: spendable - catalogEntry.cost, expiresAt,
+    });
+
+    res.json({
+      success: true,
+      redemptionId,
+      rewardType,
+      label: catalogEntry.label,
+      pointsSpent: catalogEntry.cost,
+      pointsRemaining: spendable - catalogEntry.cost,
+      expiresAt,
+      batchId: batchDoc ? String(batchId) : null,
+      batchName: batchDoc ? batchDoc.name : null,
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// GET redemption history — powers a "My Redeemed Rewards" list in the UI
+router.get('/rewards/history/:userId', (req, res) => {
+  try {
+    const limit = Math.min(50, parseInt(req.query.limit) || 20);
+    const history = db.rewardRedemption.history(req.params.userId, limit);
+    res.json({ history });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Spin & Earn ───────────────────────────────────────────────────────────────
+// A daily spin-the-wheel mini-game. Every spin MUST be preceded by watching a
+// full rewarded ad — enforced with the exact same token-issue-then-verify
+// pattern already used by the Access tab's ad flow (see /access/token and
+// /access/claim above), just on its own separate table so the two ad flows
+// can never interfere with each other. The wheel result (1-5 points) is always
+// generated server-side — the client only ever animates to whatever result
+// the server already committed to the database.
+
+const spinHistorySchema = new mongoose.Schema({
+  userId: { type: String, required: true },
+  pointsWon: { type: Number, required: true },
+  spunAt: { type: Date, default: Date.now },
+});
+spinHistorySchema.index({ userId: 1 });
+const SpinHistory = mongoose.models.SpinHistory || mongoose.model('SpinHistory', spinHistorySchema);
+
+function _todayMidnightMs() {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+}
+
+// Single source of truth for "can this user spin right now" — used by all 3 endpoints below
+function getSpinStatus(userId) {
+  const spinsToday = db.spinHistory.countSince(userId, _todayMidnightMs());
+  const spinsLeft = Math.max(0, SPIN_DAILY_LIMIT - spinsToday);
+  const last = db.spinHistory.lastSpinAt(userId);
+  const cooldownRemainingMs = last ? Math.max(0, SPIN_COOLDOWN_MS - (Date.now() - last.getTime())) : 0;
+  const nextResetAt = new Date(_todayMidnightMs() + 24 * 60 * 60 * 1000);
+  return {
+    spinsToday, spinsLeft, maxSpins: SPIN_DAILY_LIMIT,
+    cooldownRemainingMs, canSpin: spinsLeft > 0 && cooldownRemainingMs <= 0,
+    nextResetAt,
+  };
+}
+
+// GET status — powers the Earn tab's UI (spins left, cooldown countdown, spin button enabled/disabled)
+router.get('/spin/status/:userId', (req, res) => {
+  try { res.json(getSpinStatus(req.params.userId)); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST token — issued right before the ad plays; must be redeemed via /spin/claim afterwards
+router.post('/spin/token/:userId', (req, res) => {
+  try {
+    const userId = req.params.userId;
+    const status = getSpinStatus(userId);
+    if (!status.canSpin) {
+      if (status.spinsLeft <= 0) return res.status(429).json({ error: 'Aaj ke saare 5 spins ho gaye! Kal wapas aao.', ...status });
+      return res.status(429).json({ error: `Thoda ruko! Agla spin ${Math.ceil(status.cooldownRemainingMs / 1000)}s mein.`, ...status });
+    }
+
+    db.spinToken.deleteByUser(userId); // one live spin-token per user at a time, same as adToken
+
+    const token = crypto.randomBytes(32).toString('hex');
+    const issuedAt = new Date();
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+    db.spinToken.create({ id: db.generateId(), userId, token, issuedAt, expiresAt });
+
+    res.json({ token });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST claim — verifies the ad was actually watched (min elapsed time, same as access/claim),
+// re-checks the daily limit + cooldown fresh (defends against races/stale client state),
+// then rolls the wheel server-side and records the spin.
+router.post('/spin/claim/:userId', (req, res) => {
+  try {
+    const userId = req.params.userId;
+    const { token } = req.body;
+    if (!token) return res.status(400).json({ error: 'Token required' });
+
+    const record = db.spinToken.findOne({ userId, token });
+    if (!record) return res.status(403).json({ error: 'Invalid or expired spin. Please try again.' });
+    if (record.expiresAt < new Date()) { db.spinToken.deleteById(record.id); return res.status(403).json({ error: 'Spin expired. Please try again.' }); }
+    const elapsed = (Date.now() - record.issuedAt.getTime()) / 1000;
+    if (elapsed < SPIN_AD_WATCH_SECONDS) return res.status(403).json({ error: 'Ad poori dekho pehle! Spin count nahi hoga.' });
+
+    // ── Critical section: everything below is synchronous, no await in between,
+    // so no concurrent request can double-spend this spin (same reasoning as
+    // the reward-redeem endpoint's critical section). ─────────────────────────
+    const status = getSpinStatus(userId);
+    if (!status.canSpin) {
+      db.spinToken.deleteById(record.id);
+      if (status.spinsLeft <= 0) return res.status(429).json({ error: 'Aaj ke saare 5 spins ho gaye! Kal wapas aao.', ...status });
+      return res.status(429).json({ error: `Thoda ruko! Agla spin ${Math.ceil(status.cooldownRemainingMs / 1000)}s mein.`, ...status });
+    }
+
+    db.spinToken.deleteById(record.id);
+
+    const pointsWon = 1 + Math.floor(Math.random() * 5); // uniform 1-5, decided server-side only
+    const spunAt = new Date();
+    db.spinHistory.insert({ id: db.generateId(), userId, pointsWon, spunAt });
+    // ── End critical section ───────────────────────────────────────────────────
+
+    SpinHistory.create({ userId, pointsWon, spunAt }).catch(() => {}); // Mongo backup, fire-and-forget
+
+    const newStatus = getSpinStatus(userId);
+    res.json({ pointsWon, ...newStatus });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 
 // ── Force Join ────────────────────────────────────────────────────────────────
 
@@ -1141,31 +1086,11 @@ router.get('/stats', (req, res) => {
         });
       });
     });
-
-    // Total spin points awarded across all users
-    const totalSpinPointsRow = db.getDb().prepare(`SELECT SUM(points) as t FROM spin_points`).get();
-    const totalSpinPoints = totalSpinPointsRow ? (totalSpinPointsRow.t || 0) : 0;
-    const totalSpinners = db.getDb().prepare(`SELECT COUNT(DISTINCT userId) as c FROM spin_points`).get().c || 0;
-
-    // Today's spins
-    const now = new Date();
-    const dayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-    const todaySpins = db.getDb().prepare(`SELECT COUNT(*) as c FROM spin_points WHERE createdAt >= ?`).get(dayStart).c || 0;
-
-    // Points redeemed total
-    const totalRedeemedRow = db.getDb().prepare(`SELECT SUM(pointsUsed) as t FROM points_usage`).get();
-    const totalRedeemed = totalRedeemedRow ? (totalRedeemedRow.t || 0) : 0;
-
-    // New users today
-    const newToday = db.getDb().prepare(`SELECT COUNT(*) as c FROM users WHERE firstSeen >= ?`).get(dayStart).c || 0;
-
     res.json({
       content: { totalBatches, publicBatches, privateBatches: totalBatches - publicBatches, totalSubjects, totalChapters, totalLectures },
-      users: { totalUsers: db.user.count(), recentUsers: db.user.countSince(Date.now() - 7*24*60*60*1000), newToday },
-      access: { totalAccess: db.access.count(), activeAccess: db.access.countActive(), grantedToday: db.access.countToday() },
+      users: { totalUsers: db.user.count(), recentUsers: db.user.countSince(Date.now() - 7*24*60*60*1000) },
+      access: { totalAccess: db.access.count(), activeAccess: db.access.countActive() },
       referrals: { totalReferrals: db.referral.count(), uniqueReferrers: db.referral.distinctReferrers() },
-      points: { totalSpinPoints, totalSpinners, todaySpins, totalRedeemed },
-      files: { total: db.fileRecord.count(), bulk: db.bulkBatch.count() },
     });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -1184,13 +1109,10 @@ router.post('/coupons', verifyAdmin, async (req, res) => {
   try {
     const { code, discountPct, expiresAt, isActive, batchIds } = req.body;
     if (!code || !discountPct || !expiresAt) return res.status(400).json({ error: 'code, discountPct, expiresAt required' });
-    const cId = new (require('mongoose').Types.ObjectId)().toString();
-    const cCode = code.toUpperCase().trim();
-    const cExpiry = new Date(expiresAt);
-    const cBatchIds = Array.isArray(batchIds) ? batchIds.filter(Boolean) : [];
-    db.coupon.insert({ id: cId, code: cCode, discountPct: Number(discountPct), expiresAt: cExpiry, isActive: isActive!==false, batchIds: cBatchIds, createdAt: new Date() });
-    if (isMongo()) Coupon.create({ _id: cId, code: cCode, discountPct: Number(discountPct), expiresAt: cExpiry, isActive: isActive!==false, batchIds: cBatchIds }).catch(e => console.error('[MongoDB sync error]', e.message));
-    res.json(db.coupon.findById(cId));
+    // Write to MongoDB to get _id
+    const c = await Coupon.create({ code: code.toUpperCase().trim(), discountPct: Number(discountPct), expiresAt: new Date(expiresAt), isActive: isActive!==false, batchIds: Array.isArray(batchIds) ? batchIds.filter(Boolean) : [] });
+    db.coupon.insert({ id: String(c._id), code: c.code, discountPct: c.discountPct, expiresAt: c.expiresAt, isActive: c.isActive, batchIds: c.batchIds, createdAt: c.createdAt });
+    res.json(db.coupon.findById(String(c._id)));
   } catch (e) {
     if (e.code === 11000) return res.status(400).json({ error: 'Coupon code already exists' });
     res.status(500).json({ error: e.message });
@@ -1199,8 +1121,8 @@ router.post('/coupons', verifyAdmin, async (req, res) => {
 
 router.delete('/coupons/:id', verifyAdmin, async (req, res) => {
   try {
+    await Coupon.findByIdAndDelete(req.params.id);
     db.coupon.delete(req.params.id);
-    if (isMongo()) Coupon.findByIdAndDelete(req.params.id).catch(e => console.error('[MongoDB sync error]', e.message));
     res.json({ success: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -1210,7 +1132,7 @@ router.patch('/coupons/:id/toggle', verifyAdmin, async (req, res) => {
     const c = db.coupon.toggle(req.params.id);
     if (!c) return res.status(404).json({ error: 'Not found' });
     // MongoDB backup
-    Coupon.findByIdAndUpdate(req.params.id, { isActive: c.isActive }).catch(e => console.error('[MongoDB sync error]', e.message));
+    Coupon.findByIdAndUpdate(req.params.id, { isActive: c.isActive }).catch(() => {});
     res.json(c);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
