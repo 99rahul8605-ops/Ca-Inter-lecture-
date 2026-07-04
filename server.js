@@ -274,12 +274,21 @@ async function startBot() {
         try {
           const batch = db.bulkBatch.findByCode(param);
           if (!batch) return bot.sendMessage(chatId, `File not found. Link may be invalid.`);
-          let hasVideo = false;
+          let hasVideo = false, failedCount = 0;
           for (const f of batch.files) {
-            const sentMsg = await sendFile(bot, chatId, f);
+            let sentMsg;
+            try {
+              sentMsg = await sendFile(bot, chatId, f);
+            } catch (fileErr) {
+              // One broken file (dead file_id + no channel copy to fall back on) must
+              // not abort the whole batch — skip it and keep sending the rest.
+              failedCount++;
+              continue;
+            }
             if ((f.file_type==="video"||f.file_type==="video_note") && sentMsg) { hasVideo=true; await scheduleDelete(bot,chatId,sentMsg.message_id,new Date(Date.now()+6*60*60*1000)); }
           }
           if (hasVideo) await bot.sendMessage(chatId, `⚠️ Videos will auto-delete after 6 hours.`);
+          if (failedCount > 0) await bot.sendMessage(chatId, `⚠️ ${failedCount} file(s) in this batch couldn't be delivered (owner needs to re-upload them).`);
           return;
         } catch (err) { return bot.sendMessage(chatId, `Error occurred. Please try again.`); }
       }
@@ -477,11 +486,18 @@ async function startBot() {
       const singleFiles = db.fileRecord.findAllWithChannelMsg();
       const batches = db.bulkBatch.findAll();
       const batchJobs = [];
+      const noBackupCodes = []; // files with NO channel_msg_id — can't be auto-fixed, must be re-uploaded
       for (const b of batches) {
-        b.files.forEach((f, idx) => { if (f.channel_msg_id) batchJobs.push({ batch: b, idx }); });
+        b.files.forEach((f, idx) => {
+          if (f.channel_msg_id) batchJobs.push({ batch: b, idx });
+          else noBackupCodes.push(`${b.batch_code} (file ${idx + 1})`);
+        });
       }
       const total = singleFiles.length + batchJobs.length;
-      if (!total) return bot.sendMessage(chatId, `Nothing to migrate — no files have a channel_msg_id.`);
+      if (!total && !noBackupCodes.length) return bot.sendMessage(chatId, `Nothing to migrate.`);
+      if (!total) {
+        return bot.sendMessage(chatId, `⚠️ No files have a channel_msg_id to migrate from.\n\nThese ${noBackupCodes.length} file(s) have no channel backup at all and must be re-uploaded:\n${noBackupCodes.slice(0, 30).map(esc).join(", ")}${noBackupCodes.length > 30 ? "…" : ""}`, { parse_mode: "HTML" });
+      }
 
       const status = await bot.sendMessage(chatId, `🔄 Migrating 0/${total}...`);
       let done = 0, fixed = 0, failed = 0;
@@ -527,6 +543,7 @@ async function startBot() {
 
       let summary = `✅ <b>Migration done!</b>\n\n📦 Total: ${total}\n✅ Fixed: ${fixed}\n🚫 Failed: ${failed}`;
       if (failedCodes.length) summary += `\n\n⚠️ Failed codes (message likely deleted from channel):\n${failedCodes.slice(0, 30).map(esc).join(", ")}${failedCodes.length > 30 ? "…" : ""}`;
+      if (noBackupCodes.length) summary += `\n\n📛 No channel backup at all (re-upload needed):\n${noBackupCodes.slice(0, 30).map(esc).join(", ")}${noBackupCodes.length > 30 ? "…" : ""}`;
       await bot.sendMessage(chatId, summary, { parse_mode: "HTML" });
     } catch (err) {
       console.error("Migrate error:", err.message);
