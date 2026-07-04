@@ -2981,45 +2981,75 @@ var _adWatching = false; // prevent double-click while ad loads
 // Handles both: plain code (e.g. "Abc123") and full links (legacy "https://t.me/bot?start=Abc123")
 // Bot username comes from config — so bot change = no manual DB update needed
 // ── Watched Lecture Tracking ─────────────────────────────────────────────────
-// Purely client-side (per-user via localStorage) — a personal "have I seen
-// this" marker, not a server-tracked progress system. Keyed by lecture _id.
-var _watchedLecturesKey = null;
-var _watchedLectures = {};
+// Server-side (per-user, keyed by the STABLE Telegram userId) — a personal
+// "have I seen this" marker. Deliberately NOT localStorage: this app is often
+// served from a rotating tunnel URL (a new browser origin on every redeploy),
+// which silently wipes localStorage. A DB row keyed by userId survives that.
+var _watchedLectures = {};       // lectureId -> true, populated from the server
+var _watchedLecturesLoaded = false;
 
-function _loadWatchedLectures() {
-  _watchedLecturesKey = 'edubot_watched_' + getUserId();
+async function _loadWatchedLectures() {
+  var uid = getUserId();
+  if (!uid) return;
   try {
-    var raw = localStorage.getItem(_watchedLecturesKey);
-    _watchedLectures = raw ? JSON.parse(raw) : {};
-  } catch (e) { _watchedLectures = {}; }
+    var r = await fetch('/api/watched/' + uid);
+    var data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Failed to load watched lectures');
+    _watchedLectures = {};
+    (data.watched || []).forEach(function (lid) { _watchedLectures[lid] = true; });
+    _watchedLecturesLoaded = true;
+    // Lecture lists rendered before this resolved would have shown everything
+    // as unwatched — re-render whichever list is currently on screen so the
+    // correct green/checkmark state appears without needing user interaction.
+    _refreshVisibleLectureList();
+  } catch (e) {
+    console.error('Watched lectures load error:', e);
+  }
 }
 
-function _saveWatchedLectures() {
-  try { localStorage.setItem(_watchedLecturesKey, JSON.stringify(_watchedLectures)); } catch (e) {}
+// Re-renders whichever lecture list page is currently open, if any — used
+// once the server's watched-list arrives (which happens async, after the
+// list may have already painted once in the "nothing watched yet" state).
+function _refreshVisibleLectureList() {
+  if (_currentOpenUid && typeof openUnit === 'function') {
+    openUnit(_currentOpenBid, _currentOpenSid, _currentOpenCid, _currentOpenUid);
+  } else if (_currentOpenCid && typeof openChapter === 'function') {
+    openChapter(_currentOpenBid, _currentOpenSid, _currentOpenCid);
+  }
 }
 
 function isLectureWatched(lid) {
   return !!_watchedLectures[lid];
 }
 
+// Fire-and-forget sync to the server — the UI already updated optimistically
+// by the time this is called, so a slow/failed request never blocks the user.
+function _syncWatchedToServer(lid, watched) {
+  var uid = getUserId();
+  if (!uid) return;
+  fetch('/api/watched/' + uid, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ lectureId: lid, watched: watched }),
+  }).catch(function (e) { console.error('Watched sync error:', e); });
+}
+
 // Called automatically when the user taps the actual "Lecture" open button
 function markLectureWatched(lid) {
-  if (!lid || _watchedLectures[lid]) return; // already marked — no-op, avoids pointless re-render
-  if (!_watchedLecturesKey) _loadWatchedLectures();
-  _watchedLectures[lid] = Date.now();
-  _saveWatchedLectures();
+  if (!lid || _watchedLectures[lid]) return; // already marked — no-op, avoids pointless re-render/request
+  _watchedLectures[lid] = true;
   _updateLectureRowUI(lid, true);
+  _syncWatchedToServer(lid, true);
 }
 
 // Called when the user taps the corner checkmark badge directly — lets them
 // mark OR unmark manually, independent of actually opening the lecture.
 function toggleLectureWatched(lid) {
   if (!lid) return;
-  if (!_watchedLecturesKey) _loadWatchedLectures();
   if (_watchedLectures[lid]) {
     delete _watchedLectures[lid];
-    _saveWatchedLectures();
     _updateLectureRowUI(lid, false);
+    _syncWatchedToServer(lid, false);
   } else {
     markLectureWatched(lid);
   }
