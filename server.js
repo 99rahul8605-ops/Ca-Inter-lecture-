@@ -113,16 +113,16 @@ async function sendFile(bot, chatId, record) {
   const protect = !isOwner(chatId);
   try {
     switch(record.file_type) {
-      case "photo":      return await bot.sendPhoto(chatId, record.file_id, { caption });
+      case "photo":      return await bot.sendPhoto(chatId, record.file_id, { caption, protect_content: protect });
       case "video":      return await bot.sendVideo(chatId, record.file_id, { caption, protect_content: protect });
-      case "audio":      return await bot.sendAudio(chatId, record.file_id, { caption });
-      case "voice":      return await bot.sendVoice(chatId, record.file_id, { caption });
+      case "audio":      return await bot.sendAudio(chatId, record.file_id, { caption, protect_content: protect });
+      case "voice":      return await bot.sendVoice(chatId, record.file_id, { caption, protect_content: protect });
       case "video_note": return await bot.sendVideoNote(chatId, record.file_id, { protect_content: protect });
-      default:           return await bot.sendDocument(chatId, record.file_id, { caption, filename: record.file_name });
+      default:           return await bot.sendDocument(chatId, record.file_id, { caption, filename: record.file_name, protect_content: protect });
     }
   } catch (err) {
     if (STORAGE_CHANNEL_ID && record.channel_msg_id) {
-      try { return await bot.copyMessage(chatId, STORAGE_CHANNEL_ID, record.channel_msg_id); } catch (_) {}
+      try { return await bot.copyMessage(chatId, STORAGE_CHANNEL_ID, record.channel_msg_id, { protect_content: protect }); } catch (_) {}
     }
     throw err;
   }
