@@ -43,6 +43,8 @@ const BulkBatch = mongoose.model("BulkBatch", bulkBatchSchema);
 
 const pendingDeleteSchema = new mongoose.Schema({ chat_id: Number, message_id: Number, delete_at: Date });
 const PendingDelete = mongoose.model("PendingDelete", pendingDeleteSchema);
+const pendingUndeliverSchema = new mongoose.Schema({ record_id: String, chat_id: Number, undeliver_at: Date });
+const PendingUndeliver = mongoose.model("PendingUndeliver", pendingUndeliverSchema);
 
 const userSchema = new mongoose.Schema({ userId: { type: String, required: true, unique: true }, firstName: { type: String, default: "" }, lastName: { type: String, default: "" }, username: { type: String, default: "" }, firstSeen: { type: Date, default: Date.now }, lastSeen: { type: Date, default: Date.now } });
 const User = mongoose.model("User", userSchema);
@@ -168,6 +170,39 @@ async function recoverPendingDeletes(bot) {
   }
 }
 
+// Clears record.delivered_to[chatId] after the 6h cooldown so the user can request
+// the file again once it's expired on Telegram's side. Persisted (like scheduleDelete)
+// so a bot restart mid-cooldown doesn't leave the user permanently stuck on
+// "already delivered" for a video that no longer exists.
+async function scheduleUndeliver(recordId, chatId, undeliverAt) {
+  const id = db.generateId();
+  db.pendingUndeliver.create({ id, record_id: recordId, chat_id: chatId, undeliver_at: undeliverAt });
+  PendingUndeliver.create({ record_id: recordId, chat_id: chatId, undeliver_at: undeliverAt }).catch(() => {});
+  const delay = Math.max(0, new Date(undeliverAt) - Date.now());
+  setTimeout(() => {
+    db.fileRecord.removeDeliveredTo(recordId, chatId);
+    const rec = db.fileRecord.findById(recordId);
+    if (rec) FileRecord.updateOne({ code: rec.code }, { $pull: { delivered_to: chatId } }).catch(() => {});
+    db.pendingUndeliver.deleteById(id);
+    PendingUndeliver.deleteOne({ record_id: recordId, chat_id: chatId }).catch(() => {});
+  }, delay);
+}
+
+async function recoverPendingUndelivers() {
+  const pending = db.pendingUndeliver.getAll();
+  console.log(`Recovering ${pending.length} pending delivered_to cleanups...`);
+  for (const p of pending) {
+    const delay = Math.max(0, new Date(p.undeliver_at) - Date.now());
+    setTimeout(() => {
+      db.fileRecord.removeDeliveredTo(p.record_id, p.chat_id);
+      const rec = db.fileRecord.findById(p.record_id);
+      if (rec) FileRecord.updateOne({ code: rec.code }, { $pull: { delivered_to: p.chat_id } }).catch(() => {});
+      db.pendingUndeliver.deleteById(p._id);
+      PendingUndeliver.deleteOne({ _id: p._id }).catch(() => {});
+    }, delay);
+  }
+}
+
 const esc = (s) => String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
 async function wait(ms) { return new Promise(r => setTimeout(r, ms)); }
 
@@ -234,6 +269,7 @@ async function startBot() {
   } catch (_) {}
 
   await recoverPendingDeletes(bot);
+  await recoverPendingUndelivers();
 
   // ── /start ────────────────────────────────────────────────────────────────
   bot.onText(/\/start(.*)/, async (msg, match) => {
@@ -306,7 +342,7 @@ async function startBot() {
           await scheduleDelete(bot,chatId,sentMsg.message_id,new Date(Date.now()+6*60*60*1000));
           db.fileRecord.addDeliveredTo(record.id,chatId);
           FileRecord.updateOne({ code:record.code },{ $addToSet:{ delivered_to:chatId } }).catch(() => {});
-          setTimeout(() => { db.fileRecord.removeDeliveredTo(record.id,chatId); FileRecord.updateOne({ code:record.code },{ $pull:{ delivered_to:chatId } }).catch(() => {}); }, 6*60*60*1000);
+          await scheduleUndeliver(record.id, chatId, new Date(Date.now()+6*60*60*1000));
           const lines=[`⚠️ This video auto-deletes in 6 hours.`,``,`📊 <b>Today:</b> ${lim.used}/${DAILY_VIDEO_LIMIT} videos`];
           if(lim.remaining===0) lines.push(`🚫 Limit reached for today!`);
           else if(lim.remaining<=3) lines.push(`⚠️ Only <b>${lim.remaining}</b> left today!`);
@@ -318,7 +354,7 @@ async function startBot() {
           await scheduleDelete(bot,chatId,sentMsg.message_id,new Date(Date.now()+6*60*60*1000));
           db.fileRecord.addDeliveredTo(record.id,chatId);
           FileRecord.updateOne({ code:record.code },{ $addToSet:{ delivered_to:chatId } }).catch(() => {});
-          setTimeout(() => { db.fileRecord.removeDeliveredTo(record.id,chatId); FileRecord.updateOne({ code:record.code },{ $pull:{ delivered_to:chatId } }).catch(() => {}); }, 6*60*60*1000);
+          await scheduleUndeliver(record.id, chatId, new Date(Date.now()+6*60*60*1000));
           await bot.sendMessage(chatId, `⚠️ This video auto-deletes in 6 hours.`);
         }
       } catch (err) { console.error("Deep link error:", err.message); bot.sendMessage(chatId, `Error occurred. Please try again.`); }
@@ -551,6 +587,32 @@ async function startBot() {
     } finally {
       migrateRunning = false;
     }
+  });
+
+  // ── /unstuck ──────────────────────────────────────────────────────────────
+  // One-time cleanup for users stuck on "This video was already delivered" forever.
+  // Cause: the 6h delivered_to-clear timer used to be a plain setTimeout, not
+  // persisted — a bot restart before it fired left delivered_to permanently set
+  // even though the video message itself had already been (correctly) auto-deleted
+  // via the persisted pending_deletes mechanism. Now fixed going forward via
+  // scheduleUndeliver(); this command clears out entries orphaned by the old bug.
+  bot.onText(/\/unstuck/, async (msg) => {
+    if (isGroupChat(msg) || !isOwner(msg.from?.id)) return;
+    const chatId = msg.chat.id;
+    const records = db.fileRecord.findAllWithDelivered();
+    const activeUndelivers = new Set(db.pendingUndeliver.getAll().map(p => `${p.record_id}:${p.chat_id}`));
+    let cleared = 0;
+    for (const rec of records) {
+      for (const cid of rec.delivered_to) {
+        // If there's a live, persisted undeliver timer for this pair, it's not
+        // orphaned — a genuinely recent delivery, leave it alone.
+        if (activeUndelivers.has(`${rec.id}:${cid}`)) continue;
+        db.fileRecord.removeDeliveredTo(rec.id, cid);
+        FileRecord.updateOne({ code: rec.code }, { $pull: { delivered_to: cid } }).catch(() => {});
+        cleared++;
+      }
+    }
+    bot.sendMessage(chatId, `✅ Cleared ${cleared} stuck "already delivered" entr${cleared===1?'y':'ies'}. Affected users can now re-request their videos.`);
   });
 
   // ── Telegram link fetch ───────────────────────────────────────────────────

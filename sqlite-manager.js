@@ -161,6 +161,17 @@ function _setupTables(db) {
       delete_at  INTEGER NOT NULL
     );
 
+    -- Pending "delivered_to" cleanups: mirrors pending_deletes but for clearing the
+    -- delivered-flag on a file_record so the user can re-request it after the 6h
+    -- cooldown. Without this being persisted, a bot restart mid-cooldown left users
+    -- permanently stuck on "already delivered" even after Telegram deleted the video.
+    CREATE TABLE IF NOT EXISTS pending_undeliver (
+      id            TEXT PRIMARY KEY,
+      record_id     TEXT NOT NULL,
+      chat_id       INTEGER NOT NULL,
+      undeliver_at  INTEGER NOT NULL
+    );
+
     -- Daily video limits
     CREATE TABLE IF NOT EXISTS daily_video_limits (
       userId    INTEGER PRIMARY KEY,
@@ -780,6 +791,11 @@ const fileRecord = {
     const arr = JSON.parse(r.delivered_to||'[]').filter(x => x !== chatId);
     getDb().prepare(`UPDATE file_records SET delivered_to=? WHERE id=?`).run(JSON.stringify(arr), id);
   },
+  // Records that currently have at least one chatId marked as delivered —
+  // used to sweep out entries orphaned by pre-fix bot restarts (see cleanup at startup).
+  findAllWithDelivered() {
+    return getDb().prepare(`SELECT * FROM file_records WHERE delivered_to != '[]'`).all().map(_fileRow);
+  },
   deleteByCode(code, uploadedBy) {
     return getDb().prepare(`DELETE FROM file_records WHERE code=? COLLATE NOCASE AND uploaded_by=?`).run(code, uploadedBy).changes > 0;
   },
@@ -861,6 +877,23 @@ const pendingDelete = {
   },
   deleteByChatMsg(chat_id, message_id) {
     getDb().prepare(`DELETE FROM pending_deletes WHERE chat_id=? AND message_id=?`).run(chat_id, message_id);
+  },
+};
+
+// ── PENDING UNDELIVER Operations ──────────────────────────────────────────────
+// Persists the "clear delivered_to after 6h" timer so it survives bot restarts.
+
+const pendingUndeliver = {
+  create({ id, record_id, chat_id, undeliver_at }) {
+    getDb().prepare(`INSERT INTO pending_undeliver(id,record_id,chat_id,undeliver_at) VALUES(?,?,?,?)`)
+      .run(id, record_id, chat_id, new Date(undeliver_at).getTime());
+  },
+  getAll() {
+    return getDb().prepare(`SELECT * FROM pending_undeliver`).all()
+      .map(r => ({ ...r, _id: r.id, undeliver_at: new Date(r.undeliver_at) }));
+  },
+  deleteById(id) {
+    getDb().prepare(`DELETE FROM pending_undeliver WHERE id=?`).run(id);
   },
 };
 
@@ -1029,6 +1062,7 @@ module.exports = {
   fileRecord,
   bulkBatch,
   pendingDelete,
+  pendingUndeliver,
   dailyVideoLimit,
   rewardRedemption,
   batchRewardAccess,
