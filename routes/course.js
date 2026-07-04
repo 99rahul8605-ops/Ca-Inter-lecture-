@@ -979,6 +979,47 @@ router.post('/spin/claim/:userId', (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ── Watched Lectures ────────────────────────────────────────────────────────────
+// Server-side "have I seen this" marker, keyed by the stable Telegram userId.
+// Deliberately NOT browser localStorage — this app is often served from a
+// rotating tunnel URL (a new origin on every redeploy), which would silently
+// wipe any localStorage-based state. A DB row keyed by userId survives that,
+// device switches, and cache clears.
+
+const watchedLectureSchema = new mongoose.Schema({
+  userId: { type: String, required: true },
+  lectureId: { type: String, required: true },
+  watchedAt: { type: Date, default: Date.now },
+});
+watchedLectureSchema.index({ userId: 1, lectureId: 1 }, { unique: true });
+const WatchedLecture = mongoose.models.WatchedLecture || mongoose.model('WatchedLecture', watchedLectureSchema);
+
+// GET — full list of lectureIds this user has marked watched
+router.get('/watched/:userId', (req, res) => {
+  try {
+    const watched = db.watchedLecture.listByUser(req.params.userId);
+    res.json({ watched });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST — mark or unmark a single lecture as watched
+router.post('/watched/:userId', (req, res) => {
+  try {
+    const userId = req.params.userId;
+    const { lectureId, watched } = req.body;
+    if (!lectureId) return res.status(400).json({ error: 'lectureId required' });
+
+    if (watched === false) {
+      db.watchedLecture.unmark(userId, lectureId);
+      WatchedLecture.deleteOne({ userId, lectureId }).catch(() => {});
+    } else {
+      db.watchedLecture.mark(userId, lectureId);
+      WatchedLecture.updateOne({ userId, lectureId }, { userId, lectureId, watchedAt: new Date() }, { upsert: true }).catch(() => {});
+    }
+    res.json({ success: true, lectureId, watched: watched !== false });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ── Force Join ────────────────────────────────────────────────────────────────
 
 function getForceJoinChannels() {
