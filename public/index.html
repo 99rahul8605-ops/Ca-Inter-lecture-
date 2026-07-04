@@ -16,6 +16,8 @@
   --green:#22c55e;--red:#ef4444;--border:#1e2d45;
   --radius:12px;--radius-sm:8px;
   --topbar:#0d1224;
+  --tg-safe-top:0px;
+  --tg-safe-bottom:0px;
 }
 body.light-mode{
   --bg:#f0f4ff;--surface:#ffffff;--surface2:#e8edf8;--surface3:#dce4f5;
@@ -109,7 +111,7 @@ body.ready{transition:none}
 .page.active{transform:translateX(0);z-index:11}
 .page.prev{transform:translateX(-25%)}
 
-.topbar{display:flex;align-items:center;gap:10px;padding:12px 16px;background:var(--topbar);border-bottom:1px solid var(--border);flex-shrink:0;min-height:56px}
+.topbar{display:flex;align-items:center;gap:10px;padding:calc(12px + var(--tg-safe-top,0px)) 16px 12px;background:var(--topbar);border-bottom:1px solid var(--border);flex-shrink:0;min-height:56px}
 .back-btn{width:36px;height:36px;border-radius:50%;background:var(--surface2);border:none;color:var(--text);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0}
 .topbar-title{font-size:16px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1}
 .topbar-sub{font-size:11px;color:var(--text2);margin-top:1px}
@@ -282,7 +284,7 @@ body.ready{transition:none}
 .del-btn{background:none;border:none;color:var(--text3);cursor:pointer;padding:5px;display:flex;align-items:center;font-size:16px}
 .del-btn:active{color:var(--red)}
 
-.bottom-nav{position:fixed;bottom:0;left:0;right:0;background:var(--topbar);border-top:1px solid var(--border);display:flex;z-index:50;max-width:480px;margin:0 auto}
+.bottom-nav{position:fixed;bottom:0;left:0;right:0;background:var(--topbar);border-top:1px solid var(--border);display:flex;z-index:50;max-width:480px;margin:0 auto;padding-bottom:var(--tg-safe-bottom,0px)}
 .nav-tab{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:10px 0 12px;cursor:pointer;color:var(--text3);font-size:10px;font-weight:500;gap:3px;transition:color 0.2s;border:none;background:none}
 .nav-tab i{font-size:22px}
 .nav-tab.active{color:var(--accent)}
@@ -987,6 +989,30 @@ var tg = window.Telegram && window.Telegram.WebApp;
 if (tg) {
   tg.ready();
   tg.expand();
+
+  // Full screen mode (Bot API 8.0+). Older Telegram clients won't have this
+  // method — feature-detect so the app doesn't break on them.
+  if (typeof tg.requestFullscreen === 'function') {
+    try { tg.requestFullscreen(); } catch (e) {}
+  }
+
+  // Fullscreen removes Telegram's own header, so the device's status bar /
+  // notch / gesture-bar area is now raw space the app must avoid itself.
+  // Mirror Telegram's safeAreaInset into CSS vars the stylesheet already
+  // reads (--tg-safe-top / --tg-safe-bottom) so the topbar and bottom nav
+  // pad themselves out from under it, on any device.
+  function applySafeArea() {
+    var top = 0, bottom = 0;
+    if (tg.safeAreaInset) { top += tg.safeAreaInset.top || 0; bottom += tg.safeAreaInset.bottom || 0; }
+    if (tg.contentSafeAreaInset) { top += tg.contentSafeAreaInset.top || 0; bottom += tg.contentSafeAreaInset.bottom || 0; }
+    document.documentElement.style.setProperty('--tg-safe-top', top + 'px');
+    document.documentElement.style.setProperty('--tg-safe-bottom', bottom + 'px');
+  }
+  applySafeArea();
+  tg.onEvent && tg.onEvent('safeAreaChanged', applySafeArea);
+  tg.onEvent && tg.onEvent('contentSafeAreaChanged', applySafeArea);
+  tg.onEvent && tg.onEvent('fullscreenChanged', applySafeArea);
+
   // Fix 2: Force a reflow after expand so the WebView recalculates layout
   // with the new viewport dimensions before the first paint.
   requestAnimationFrame(function() {
