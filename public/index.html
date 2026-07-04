@@ -37,6 +37,66 @@ body.light-mode{
 .edit-btn:active{color:var(--accent)}
 .coming-soon-badge{display:inline-flex;align-items:center;gap:3px;font-size:10px;font-weight:700;color:#f59e0b;background:rgba(245,158,11,0.12);border:1px solid rgba(245,158,11,0.3);border-radius:20px;padding:2px 8px;margin-top:4px}
 
+/* ── Generic Card (was referenced but never defined — powers Refer-page cards) ── */
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px}
+
+/* ── Rewards System ──────────────────────────────────────────────────────────
+   Uses --accent2 (purple) as the reward-system's signature color, kept visually
+   distinct from the amber/gold already used for "premium" elsewhere, so users
+   can tell "reward mechanism" chrome apart from "premium content" chrome even
+   when a reward is unlocking a premium batch. */
+.reward-balance-pill{display:inline-flex;align-items:center;gap:7px;background:linear-gradient(135deg,rgba(124,92,191,0.18),rgba(79,142,247,0.1));border:1px solid rgba(124,92,191,0.4);border-radius:20px;padding:7px 16px;font-size:14px;font-weight:800;color:var(--accent2)}
+.reward-balance-sub{font-size:10px;color:var(--text2);font-weight:500;margin-top:6px}
+
+.reward-active-banner{display:flex;align-items:center;gap:10px;padding:10px 12px;background:linear-gradient(135deg,rgba(34,197,94,0.12),rgba(34,197,94,0.04));border:1px solid rgba(34,197,94,0.3);border-radius:var(--radius-sm);margin-bottom:8px}
+.reward-active-icon{font-size:18px;flex-shrink:0;width:22px;text-align:center}
+.reward-active-info{flex:1;min-width:0}
+.reward-active-title{font-size:12px;font-weight:700;color:var(--text)}
+.reward-active-time{font-size:11px;color:var(--green);font-weight:700;font-variant-numeric:tabular-nums;margin-top:1px}
+
+.reward-tier{display:flex;align-items:center;gap:12px;padding:12px;background:var(--surface2);border-radius:var(--radius-sm);margin-bottom:8px}
+.reward-tier-icon{width:42px;height:42px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:21px;flex-shrink:0;background:linear-gradient(135deg,rgba(124,92,191,0.22),rgba(124,92,191,0.06))}
+.reward-tier-info{flex:1;min-width:0}
+.reward-tier-title{font-size:13px;font-weight:700;color:var(--text)}
+.reward-tier-desc{font-size:11px;color:var(--text2);margin-top:2px;line-height:1.4}
+.reward-tier-cost{font-size:10px;font-weight:800;color:var(--accent2);background:rgba(124,92,191,0.14);border:1px solid rgba(124,92,191,0.3);border-radius:20px;padding:2px 9px;display:inline-block;margin-top:5px;letter-spacing:0.2px}
+
+.reward-redeem-btn{flex-shrink:0;background:linear-gradient(135deg,var(--accent2),#5f4499);color:#fff;border:none;padding:10px 16px;border-radius:20px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;display:flex;align-items:center;gap:5px;transition:opacity 0.15s,transform 0.1s}
+.reward-redeem-btn:active{transform:scale(0.95)}
+.reward-redeem-btn:disabled{background:var(--surface3);color:var(--text3);cursor:not-allowed;box-shadow:none}
+
+.reward-pick-row{display:flex;align-items:center;gap:10px;padding:10px;background:var(--surface2);border-radius:var(--radius-sm);margin-bottom:8px;cursor:pointer;border:2px solid transparent;transition:border-color 0.15s,background 0.15s}
+.reward-pick-row.selected{border-color:var(--accent2);background:rgba(124,92,191,0.1)}
+.reward-pick-row img{width:40px;height:40px;border-radius:9px;object-fit:cover;flex-shrink:0}
+.reward-pick-emoji{width:40px;height:40px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:19px;background:var(--surface3);flex-shrink:0}
+.reward-pick-info{flex:1;min-width:0}
+.reward-pick-name{font-size:13px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.reward-pick-sub{font-size:10px;color:var(--text2);margin-top:2px}
+.reward-pick-check{width:22px;height:22px;border-radius:50%;border:2px solid var(--border);flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:12px;color:#fff;background:var(--surface)}
+.reward-pick-row.selected .reward-pick-check{border-color:var(--accent2);background:var(--accent2)}
+
+.reward-history-row{display:flex;align-items:center;gap:10px;padding:9px 12px;background:var(--surface2);border-radius:var(--radius-sm);margin-bottom:6px}
+.reward-history-icon{font-size:17px;flex-shrink:0;width:20px;text-align:center}
+.reward-history-info{flex:1;min-width:0}
+.reward-history-title{font-size:12px;font-weight:600;color:var(--text)}
+.reward-history-sub{font-size:10px;color:var(--text2);margin-top:1px}
+.reward-history-cost{font-size:11px;font-weight:800;color:var(--accent2);flex-shrink:0;white-space:nowrap}
+
+.reward-view-history-btn{width:100%;background:none;border:1px dashed var(--border);color:var(--text2);padding:9px;border-radius:var(--radius-sm);font-size:11px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;margin-top:2px}
+
+/* ── Spin & Earn Wheel ──────────────────────────────────────────────────────── */
+.spin-wheel-outer{position:relative;width:240px;height:240px;margin:8px auto 20px}
+.spin-wheel-pointer{position:absolute;top:-6px;left:50%;transform:translateX(-50%);font-size:26px;color:var(--accent2);z-index:3;text-shadow:0 2px 4px rgba(0,0,0,0.3)}
+.spin-wheel{position:absolute;inset:0;border-radius:50%;background:conic-gradient(#7c5cbf 0deg 72deg,#4f8ef7 72deg 144deg,#ec4899 144deg 216deg,#f59e0b 216deg 288deg,#22c55e 288deg 360deg);box-shadow:0 4px 24px rgba(124,92,191,0.35),inset 0 0 0 4px rgba(255,255,255,0.08);transition:transform 4s cubic-bezier(0.17,0.67,0.12,0.99)}
+.spin-wheel-label{position:absolute;top:50%;left:50%;width:32px;height:32px;margin-left:-16px;margin-top:-16px;display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:800;color:#fff;text-shadow:0 1px 3px rgba(0,0,0,0.4)}
+.spin-wheel-center{position:absolute;top:50%;left:50%;width:52px;height:52px;margin-left:-26px;margin-top:-26px;border-radius:50%;background:var(--surface);border:3px solid var(--accent2);display:flex;align-items:center;justify-content:center;font-size:22px;color:var(--accent2);z-index:2;box-shadow:0 2px 10px rgba(0,0,0,0.25)}
+
+.spin-btn{background:linear-gradient(135deg,var(--accent2),#5f4499);color:#fff;border:none;padding:14px 20px;border-radius:var(--radius-sm);font-size:14px;font-weight:700;cursor:pointer;width:100%;display:flex;align-items:center;justify-content:center;gap:8px;transition:opacity 0.2s}
+.spin-btn:disabled{background:var(--surface3);color:var(--text3);cursor:not-allowed}
+
+.spin-status-pill{display:inline-flex;align-items:center;gap:6px;background:var(--surface2);border-radius:20px;padding:6px 14px;font-size:12px;font-weight:600;color:var(--text2);margin:0 4px}
+.spin-status-pill b{color:var(--text)}
+
 .toggle-slider:before{content:'☀️';position:absolute;left:3px;top:50%;transform:translateY(-50%);font-size:11px;line-height:1;transition:left 0.25s}
 .toggle-switch input:checked + .toggle-slider{background:var(--accent)}
 .toggle-switch input:checked + .toggle-slider:before{content:'🌙';left:18px}
@@ -332,47 +392,6 @@ body.ready{transition:none}
 .vs-status-text{font-size:11px;color:var(--accent);letter-spacing:2px;text-transform:uppercase;font-weight:700}
 .vs-bar{width:148px;height:2px;background:var(--surface2);border-radius:2px;overflow:hidden}
 .vs-fill{height:100%;width:0%;background:linear-gradient(90deg,var(--accent),var(--accent2));border-radius:2px;transition:width 0.4s ease}
-
-/* ── Earn / Spinner Page ─────────────────────────────────────────────────── */
-.earn-page-wrap{padding:16px;padding-bottom:80px}
-.earn-header-card{background:linear-gradient(135deg,rgba(79,142,247,0.12),rgba(124,92,191,0.08));border:1px solid rgba(79,142,247,0.25);border-radius:var(--radius);padding:20px 16px;text-align:center;margin-bottom:14px}
-.earn-header-title{font-size:18px;font-weight:700;margin-bottom:4px;color:var(--text)}
-.earn-header-sub{font-size:12px;color:var(--text2);line-height:1.5}
-.earn-points-badge{display:inline-flex;align-items:center;gap:6px;background:rgba(245,158,11,0.15);border:1px solid rgba(245,158,11,0.35);border-radius:20px;padding:6px 16px;font-size:14px;font-weight:700;color:#f59e0b;margin-top:10px}
-
-/* Spinner wheel container */
-.spinner-wrap{display:flex;flex-direction:column;align-items:center;gap:14px;margin-bottom:18px}
-.spinner-canvas-wrap{position:relative;width:260px;height:260px}
-#spinnerCanvas{border-radius:50%;box-shadow:0 0 0 4px var(--border),0 4px 24px rgba(0,0,0,0.35)}
-/* Pointer triangle at BOTTOM center pointing UP into the wheel */
-.spinner-pointer{position:absolute;top:-16px;left:50%;transform:translateX(-50%);width:0;height:0;border-left:13px solid transparent;border-right:13px solid transparent;border-top:24px solid #f59e0b;filter:drop-shadow(0 3px 5px rgba(0,0,0,0.5))}
-.spinner-center-btn{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:52px;height:52px;border-radius:50%;background:linear-gradient(135deg,var(--accent),var(--accent2));border:3px solid var(--bg);box-shadow:0 2px 12px rgba(0,0,0,0.4);display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:18px;transition:transform 0.15s,box-shadow 0.15s;color:#fff;font-weight:700}
-.spinner-center-btn:active{transform:translate(-50%,-50%) scale(0.92)}
-.spinner-center-btn:disabled{opacity:0.5;cursor:not-allowed}
-.spin-info-row{display:flex;align-items:center;gap:10px;width:100%;max-width:280px}
-.spin-count-pill{flex:1;background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:10px 14px;text-align:center}
-.spin-count-num{font-size:22px;font-weight:700;color:var(--accent)}
-.spin-count-label{font-size:10px;color:var(--text2);margin-top:2px}
-.spin-reset-pill{background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:10px 14px;text-align:center;flex:1}
-.spin-reset-time{font-size:14px;font-weight:700;color:var(--text);font-variant-numeric:tabular-nums}
-.spin-reset-label{font-size:10px;color:var(--text2);margin-top:2px}
-
-/* Result popup */
-.spin-result-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:700;align-items:center;justify-content:center}
-.spin-result-overlay.show{display:flex}
-.spin-result-modal{background:var(--surface);border-radius:20px;padding:28px 24px;text-align:center;max-width:300px;width:90%;animation:spinResultPop 0.35s cubic-bezier(.4,0,.2,1)}
-@keyframes spinResultPop{from{transform:scale(0.7);opacity:0}to{transform:scale(1);opacity:1}}
-.spin-result-emoji{font-size:52px;margin-bottom:10px;display:block;animation:spinResultBounce 0.5s cubic-bezier(.4,0,.2,1) 0.1s both}
-@keyframes spinResultBounce{from{transform:scale(0.5)}50%{transform:scale(1.15)}to{transform:scale(1)}}
-.spin-result-title{font-size:20px;font-weight:700;margin-bottom:6px;color:var(--green)}
-.spin-result-sub{font-size:13px;color:var(--text2);margin-bottom:18px}
-.spin-result-close{background:linear-gradient(135deg,var(--accent),var(--accent2));border:none;color:#fff;border-radius:var(--radius-sm);padding:11px 28px;font-size:14px;font-weight:700;cursor:pointer;width:100%}
-
-/* Ad gate message */
-.spin-ad-notice{background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.3);border-radius:var(--radius-sm);padding:12px 14px;font-size:12px;color:#f59e0b;text-align:center;margin-bottom:10px;line-height:1.5}
-.earn-spin-btn{width:100%;max-width:280px;padding:14px;border-radius:var(--radius-sm);border:none;background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff;font-size:15px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;transition:opacity 0.2s}
-.earn-spin-btn:disabled{opacity:0.5;cursor:not-allowed}
-.earn-spin-btn:active{opacity:0.85}
 </style>
 </head>
 <body>
@@ -819,112 +838,14 @@ body.ready{transition:none}
     <span id="accessDot" class="access-dot locked" style="position:relative;display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--red);margin-left:4px;vertical-align:middle"></span>
     Access
   </button>
-  <button class="nav-tab" id="navEarn" onclick="switchNavTab('earn')">
-    <i class="ti ti-coin"></i>
-    Earn
-  </button>
   <button class="nav-tab" id="navRefer" onclick="switchNavTab('refer')">
     <i class="ti ti-share"></i>
     Refer
   </button>
-</div>
-
-<!-- Earn Page (Spinner) -->
-<div class="page" id="page-earn">
-  <div class="topbar">
-    <div style="display:flex;align-items:center;gap:10px;flex:1">
-      <div style="width:34px;height:34px;background:linear-gradient(135deg,#f59e0b,#d97706);border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:17px">🎰</div>
-      <div><div style="font-size:15px;font-weight:700">Earn Points</div><div style="font-size:10px;color:var(--text2)">Spin the wheel daily</div></div>
-    </div>
-  </div>
-  <div class="page-body">
-    <div class="earn-page-wrap">
-
-      <!-- Points display card -->
-      <div class="earn-header-card">
-        <div class="earn-header-title">🎯 Daily Spin</div>
-        <div class="earn-header-sub">Spin karo aur 1–5 points jeeto!<br>Ad dekhna zaroori hai reward ke liye.</div>
-        <div class="earn-points-badge"><i class="ti ti-coin" style="font-size:15px"></i> <span id="earnTotalPoints">–</span> Points</div>
-      </div>
-
-      <!-- Spinner wheel -->
-      <div class="spinner-wrap">
-        <div class="spinner-canvas-wrap">
-          <canvas id="spinnerCanvas" width="260" height="260"></canvas>
-          <div class="spinner-pointer"></div>
-          <button class="spinner-center-btn" id="spinCenterBtn" onclick="startSpin()">SPIN</button>
-        </div>
-
-        <!-- Spins remaining + reset timer -->
-        <div class="spin-info-row">
-          <div class="spin-count-pill">
-            <div class="spin-count-num" id="spinsLeft">5</div>
-            <div class="spin-count-label">Spins Left</div>
-          </div>
-          <div class="spin-reset-pill">
-            <div class="spin-reset-time" id="spinResetTimer">00:00:00</div>
-            <div class="spin-reset-label">Next reset (12:00 AM)</div>
-          </div>
-        </div>
-
-        <!-- Ad notice -->
-        <div class="spin-ad-notice" id="spinAdNotice" style="display:none">
-          ⚠️ Har spin ke baad ad dekhna zaroori hai.<br>Ad na dekha to reward nahi milega.
-        </div>
-
-        <!-- Spin button (alternate to center) -->
-        <button class="earn-spin-btn" id="earnSpinBtn" onclick="startSpin()">
-          <i class="ti ti-rotate-clockwise"></i> Spin Now
-        </button>
-      </div>
-
-      <!-- How it works -->
-      <div class="card" style="margin-top:4px">
-        <div style="font-size:13px;font-weight:600;margin-bottom:12px;color:var(--text)">ℹ️ Kaise Kaam Karta Hai?</div>
-        <div style="display:flex;flex-direction:column;gap:10px">
-          <div style="display:flex;align-items:flex-start;gap:10px">
-            <div style="width:26px;height:26px;border-radius:50%;background:var(--accent);color:#fff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0">1</div>
-            <div>
-              <div style="font-size:12px;font-weight:600;color:var(--text)">Spin karo</div>
-              <div style="font-size:11px;color:var(--text2);margin-top:2px">Wheel spin hogi aur ek number pe rukegi (1 se 5)</div>
-            </div>
-          </div>
-          <div style="display:flex;align-items:flex-start;gap:10px">
-            <div style="width:26px;height:26px;border-radius:50%;background:var(--accent);color:#fff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0">2</div>
-            <div>
-              <div style="font-size:12px;font-weight:600;color:var(--text)">Ad dekho</div>
-              <div style="font-size:11px;color:var(--text2);margin-top:2px">Reward milne ke liye poora ad dekhna zaroori hai</div>
-            </div>
-          </div>
-          <div style="display:flex;align-items:flex-start;gap:10px">
-            <div style="width:26px;height:26px;border-radius:50%;background:var(--accent);color:#fff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0">3</div>
-            <div>
-              <div style="font-size:12px;font-weight:600;color:var(--text)">Points milenge!</div>
-              <div style="font-size:11px;color:var(--text2);margin-top:2px">Points refer tab pe use karo rewards ke liye</div>
-            </div>
-          </div>
-          <div style="display:flex;align-items:flex-start;gap:10px">
-            <div style="width:26px;height:26px;border-radius:50%;background:linear-gradient(135deg,#f59e0b,#d97706);color:#fff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0">4</div>
-            <div>
-              <div style="font-size:12px;font-weight:600;color:#f59e0b">Daily 5 spins — 12 baje raat reset!</div>
-              <div style="font-size:11px;color:var(--text2);margin-top:2px">Har roz midnight 12:00 AM pe spins reset ho jaate hain</div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-    </div>
-  </div>
-</div>
-
-<!-- Spin Result Popup -->
-<div class="spin-result-overlay" id="spinResultOverlay">
-  <div class="spin-result-modal">
-    <span class="spin-result-emoji" id="spinResultEmoji">🎉</span>
-    <div class="spin-result-title" id="spinResultTitle">+3 Points!</div>
-    <div class="spin-result-sub" id="spinResultSub">Points aapke account mein add ho gaye.</div>
-    <button class="spin-result-close" onclick="closeSpinResult()">Done ✓</button>
-  </div>
+  <button class="nav-tab" id="navEarn" onclick="switchNavTab('earn')">
+    <i class="ti ti-disc"></i>
+    Earn
+  </button>
 </div>
 
 <!-- Refer Page -->
@@ -954,113 +875,104 @@ body.ready{transition:none}
         </div>
         <div style="background:var(--surface2);border-radius:var(--radius-sm);padding:14px 12px;text-align:center">
           <div id="referPoints" style="font-size:28px;font-weight:700;color:#f59e0b">–</div>
-          <div style="font-size:11px;color:var(--text2);margin-top:4px">Points Earned</div>
+          <div style="font-size:11px;color:var(--text2);margin-top:4px">Points Balance</div>
         </div>
       </div>
     </div>
 
     <!-- Rewards card -->
-    <div class="card" style="margin-bottom:14px;border:1px solid rgba(245,158,11,0.25)">
-      <div style="font-size:13px;font-weight:600;margin-bottom:4px;color:var(--text)">🎁 Rewards</div>
-      <div id="rewardPointsBar" style="font-size:11px;color:var(--text2);margin-bottom:12px">Points: <strong id="rewardPointsDisplay" style="color:#f59e0b">–</strong></div>
-
-      <!-- Reward 1: 1 Point → 8h general access -->
-      <div style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--surface2);border-radius:var(--radius-sm);margin-bottom:8px">
-        <span style="font-size:22px">🔓</span>
-        <div style="flex:1">
-          <div style="font-size:12px;font-weight:600;color:var(--text)">8h Free Access</div>
-          <div style="font-size:11px;color:var(--text2)">Sabhi free batches ke liye 8 ghante access</div>
-          <div style="font-size:11px;color:#f59e0b;font-weight:700;margin-top:2px">1 Point</div>
-        </div>
-        <button onclick="redeemReward('access_24h', 1)" style="background:linear-gradient(135deg,#f59e0b,#d97706);border:none;color:#fff;border-radius:8px;padding:6px 12px;font-size:11px;font-weight:700;cursor:pointer;flex-shrink:0">Redeem</button>
+    <div class="card" style="margin-bottom:14px;border:1px solid rgba(124,92,191,0.3)">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+        <div style="font-size:13px;font-weight:600;color:var(--text)">🎁 Rewards</div>
+        <div class="reward-balance-pill" id="rewardBalancePill">⭐ – points</div>
       </div>
-
-      <!-- Reward 2: 10 Points → Any 1 batch 24h access -->
-      <div style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--surface2);border-radius:var(--radius-sm);margin-bottom:8px">
-        <span style="font-size:22px">📚</span>
-        <div style="flex:1">
-          <div style="font-size:12px;font-weight:600;color:var(--text)">Koi bhi 1 Batch — 24h Access</div>
-          <div style="font-size:11px;color:var(--text2)">Apni choice ka koi bhi batch 24 ghante ke liye unlock</div>
-          <div style="font-size:11px;color:#f59e0b;font-weight:700;margin-top:2px">10 Points</div>
-        </div>
-        <button onclick="redeemReward('batch_24h', 10)" style="background:linear-gradient(135deg,var(--accent),var(--accent2));border:none;color:#fff;border-radius:8px;padding:6px 12px;font-size:11px;font-weight:700;cursor:pointer;flex-shrink:0">Redeem</button>
-      </div>
-
-      <!-- Reward 3: 50 Points → Any 1 batch 7 days access -->
-      <div style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--surface2);border-radius:var(--radius-sm)">
-        <span style="font-size:22px">🏆</span>
-        <div style="flex:1">
-          <div style="font-size:12px;font-weight:600;color:var(--text)">Koi bhi 1 Batch — 7 Din Access</div>
-          <div style="font-size:11px;color:var(--text2)">Apni choice ka koi bhi batch 7 din ke liye unlock</div>
-          <div style="font-size:11px;color:#f59e0b;font-weight:700;margin-top:2px">50 Points</div>
-        </div>
-        <button onclick="redeemReward('batch_7d', 50)" style="background:linear-gradient(135deg,#22c55e,#16a34a);border:none;color:#fff;border-radius:8px;padding:6px 12px;font-size:11px;font-weight:700;cursor:pointer;flex-shrink:0">Redeem</button>
-      </div>
-
-      <div style="margin-top:12px;font-size:11px;color:var(--text3);text-align:center">
-        Each referral = <strong style="color:#f59e0b">5 points</strong>
-      </div>
-    </div>
-
-    <!-- Reward Batch Picker Modal (shown when batch_24h or batch_7d selected) -->
-    <div id="rewardBatchPickerOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:600;align-items:flex-end;justify-content:center" onclick="if(event.target.id==='rewardBatchPickerOverlay')closeRewardBatchPicker()">
-      <div style="background:var(--surface);border-radius:20px 20px 0 0;width:100%;max-width:480px;max-height:80vh;overflow-y:auto;padding:20px 16px 32px">
-        <div style="width:40px;height:4px;background:var(--border);border-radius:2px;margin:0 auto 16px"></div>
-        <div style="font-size:15px;font-weight:700;margin-bottom:4px;display:flex;align-items:center;gap:8px"><span id="rewardBatchPickerIcon">📚</span><span id="rewardBatchPickerTitle">Batch chuno</span></div>
-        <div style="font-size:12px;color:var(--text2);margin-bottom:16px" id="rewardBatchPickerDesc">Jo batch unlock karni ho usse select karo</div>
-        <div id="rewardBatchPickerList" style="display:flex;flex-direction:column;gap:8px"></div>
-        <button onclick="closeRewardBatchPicker()" style="width:100%;margin-top:14px;background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:var(--radius-sm);padding:11px;font-size:13px;font-weight:600;cursor:pointer">Cancel</button>
+      <div id="rewardsCardBody">
+        <div style="text-align:center;padding:16px;color:var(--text3);font-size:13px">Loading rewards...</div>
       </div>
     </div>
 
     <!-- How it works -->
     <div class="card">
-      <div style="font-size:13px;font-weight:600;margin-bottom:12px;color:var(--text)">ℹ️ Kaise Kaam Karta Hai?</div>
-      <div style="display:flex;flex-direction:column;gap:10px">
-
-        <div style="display:flex;align-items:flex-start;gap:10px">
-          <div style="width:26px;height:26px;border-radius:50%;background:var(--accent);color:#fff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px">1</div>
-          <div>
-            <div style="font-size:12px;font-weight:600;color:var(--text)">Apna referral link copy karo</div>
-            <div style="font-size:11px;color:var(--text2);margin-top:2px">Upar diye gaye "Copy Link" button se apna unique link lo</div>
-          </div>
+      <div style="font-size:13px;font-weight:600;margin-bottom:10px;color:var(--text)">ℹ️ How It Works</div>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <div style="display:flex;align-items:center;gap:10px">
+          <div style="width:24px;height:24px;border-radius:50%;background:var(--accent);color:#fff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0">1</div>
+          <div style="font-size:12px;color:var(--text2)">Copy your unique referral link above</div>
         </div>
-
-        <div style="display:flex;align-items:flex-start;gap:10px">
-          <div style="width:26px;height:26px;border-radius:50%;background:var(--accent);color:#fff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px">2</div>
-          <div>
-            <div style="font-size:12px;font-weight:600;color:var(--text)">Dosto ke saath share karo</div>
-            <div style="font-size:11px;color:var(--text2);margin-top:2px">Link Telegram, WhatsApp ya kahin bhi share karo</div>
-          </div>
+        <div style="display:flex;align-items:center;gap:10px">
+          <div style="width:24px;height:24px;border-radius:50%;background:var(--accent);color:#fff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0">2</div>
+          <div style="font-size:12px;color:var(--text2)">Share it with your friends</div>
         </div>
-
-        <div style="display:flex;align-items:flex-start;gap:10px">
-          <div style="width:26px;height:26px;border-radius:50%;background:var(--accent);color:#fff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px">3</div>
-          <div>
-            <div style="font-size:12px;font-weight:600;color:var(--text)">Dost koi bhi ek video dekhe</div>
-            <div style="font-size:11px;color:var(--text2);margin-top:2px">Sirf bot join karne se point nahi milega — dost ko <strong style="color:#f59e0b">kam se kam 1 video dekhna hoga</strong> (bot ya app se)</div>
-          </div>
+        <div style="display:flex;align-items:center;gap:10px">
+          <div style="width:24px;height:24px;border-radius:50%;background:var(--accent);color:#fff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0">3</div>
+          <div style="font-size:12px;color:var(--text2)">When they open the bot using your link, you get <strong style="color:#f59e0b">5 points</strong></div>
         </div>
-
-        <div style="display:flex;align-items:flex-start;gap:10px">
-          <div style="width:26px;height:26px;border-radius:50%;background:linear-gradient(135deg,#f59e0b,#d97706);color:#fff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px">4</div>
-          <div>
-            <div style="font-size:12px;font-weight:600;color:#f59e0b">Tumhe +5 Points milenge! 🎉</div>
-            <div style="font-size:11px;color:var(--text2);margin-top:2px">Tumhare Telegram pe notification aayega jab points credit hon</div>
-          </div>
+        <div style="display:flex;align-items:center;gap:10px">
+          <div style="width:24px;height:24px;border-radius:50%;background:var(--accent);color:#fff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0">4</div>
+          <div style="font-size:12px;color:var(--text2)">Redeem your points for real perks below 🎁</div>
         </div>
-
-        <div style="display:flex;align-items:flex-start;gap:10px">
-          <div style="width:26px;height:26px;border-radius:50%;background:linear-gradient(135deg,#22c55e,#16a34a);color:#fff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px">5</div>
-          <div>
-            <div style="font-size:12px;font-weight:600;color:var(--text)">Points se rewards redeem karo</div>
-            <div style="font-size:11px;color:var(--text2);margin-top:2px">1 pt = 8h access &nbsp;·&nbsp; 10 pt = koi bhi batch 24h &nbsp;·&nbsp; 50 pt = koi bhi batch 7 din</div>
-          </div>
-        </div>
-
       </div>
     </div>
 
+  </div>
+</div>
+
+<!-- Earn Page -->
+<div class="page" id="page-earn">
+  <div class="page-header">
+    <div class="page-title"><i class="ti ti-disc" style="color:var(--accent2)"></i> Spin & Earn</div>
+  </div>
+  <div class="page-body">
+    <div style="padding:16px">
+
+      <div class="card" style="text-align:center;border:1px solid rgba(124,92,191,0.3)">
+        <div id="spinStatusBar" style="margin-bottom:14px">
+          <span class="spin-status-pill">🎯 <b id="spinsLeftText">–</b> spins left</span>
+          <span class="spin-status-pill">⭐ <b id="spinPointsText">–</b> points</span>
+        </div>
+
+        <div class="spin-wheel-outer">
+          <div class="spin-wheel-pointer">▼</div>
+          <div class="spin-wheel" id="spinWheel">
+            <div class="spin-wheel-label" style="transform:rotate(36deg) translateY(-90px) rotate(-36deg)">1</div>
+            <div class="spin-wheel-label" style="transform:rotate(108deg) translateY(-90px) rotate(-108deg)">2</div>
+            <div class="spin-wheel-label" style="transform:rotate(180deg) translateY(-90px) rotate(-180deg)">3</div>
+            <div class="spin-wheel-label" style="transform:rotate(252deg) translateY(-90px) rotate(-252deg)">4</div>
+            <div class="spin-wheel-label" style="transform:rotate(324deg) translateY(-90px) rotate(-324deg)">5</div>
+          </div>
+          <div class="spin-wheel-center"><i class="ti ti-gift"></i></div>
+        </div>
+
+        <button class="spin-btn" id="spinBtn" onclick="startSpin()">
+          <i class="ti ti-player-play"></i> Watch Ad & Spin
+        </button>
+
+        <div id="spinResultText" style="margin-top:12px;font-size:12px;color:var(--text2);min-height:18px"></div>
+      </div>
+
+      <div class="card" style="margin-top:14px">
+        <div style="font-size:13px;font-weight:600;margin-bottom:10px;color:var(--text)">ℹ️ How It Works</div>
+        <div style="display:flex;flex-direction:column;gap:8px">
+          <div style="display:flex;align-items:center;gap:10px">
+            <div style="width:24px;height:24px;border-radius:50%;background:var(--accent2);color:#fff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0">1</div>
+            <div style="font-size:12px;color:var(--text2)">Tap <strong style="color:var(--text)">Watch Ad & Spin</strong> and watch the full ad</div>
+          </div>
+          <div style="display:flex;align-items:center;gap:10px">
+            <div style="width:24px;height:24px;border-radius:50%;background:var(--accent2);color:#fff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0">2</div>
+            <div style="font-size:12px;color:var(--text2)">Wheel spins and lands on <strong style="color:#f59e0b">1 to 5 points</strong></div>
+          </div>
+          <div style="display:flex;align-items:center;gap:10px">
+            <div style="width:24px;height:24px;border-radius:50%;background:var(--accent2);color:#fff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0">3</div>
+            <div style="font-size:12px;color:var(--text2)">Skipping the ad = <strong style="color:var(--red)">no points, spin won't count</strong></div>
+          </div>
+          <div style="display:flex;align-items:center;gap:10px">
+            <div style="width:24px;height:24px;border-radius:50%;background:var(--accent2);color:#fff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0">4</div>
+            <div style="font-size:12px;color:var(--text2)"><strong style="color:var(--text)">5 free spins</strong> every day, resets at midnight</div>
+          </div>
+        </div>
+      </div>
+
+    </div>
   </div>
 </div>
 
@@ -1263,45 +1175,14 @@ function openChapter(bid, sid, cid) {
     // Direct lectures also shown in separate section
     if (c.lectures && c.lectures.length > 0) {
       html += `<div style="padding:14px 0 8px;font-size:11px;font-weight:600;color:var(--text2);letter-spacing:1.2px;text-transform:uppercase">OTHER LECTURES</div>`;
-      html += c.lectures.map((l,i) => {
-        _popupLectures[l._id] = l;
-        return `
-        <div class="lec-row">
-          ${_watchCheckHtml(l._id)}
-          <div class="lec-num">${i+1}</div>
-          <div class="lec-info">
-            <div class="lec-name">${l.name}</div>
-            ${l.comingSoon
-              ? '<div style="margin-top:6px"><span class="coming-soon-badge">🔜 Coming Soon</span></div>'
-              : `<div class="lec-mini-btns">
-                  ${l.isDemo ? '<span class="demo-badge" style="margin-right:4px">DEMO</span>' : ''}
-                  <button class="lec-mini-btn lec-mini-watch" data-lid="${l._id}" onclick="openLecLink(_popupLectures[this.dataset.lid].link,'lecture')"><i class="ti ti-player-play-filled"></i> Lecture</button>
-                  ${l.notes ? `<button class="lec-mini-btn lec-mini-notes" data-lid="${l._id}" onclick="openLink(_popupLectures[this.dataset.lid].notes,'notes')"><i class="ti ti-notes"></i> Notes</button>` : ''}
-                </div>`}
-          </div>
-        </div>`;
-      }).join('');
+      html += c.lectures.map((l,i) => _lecRowHtml(l, i)).join('');
     }
   } else {
     // No units — show lectures directly
     document.getElementById('unitPageSub').textContent = c.lectures.length + ' lectures';
     document.getElementById('unitSecLabel').textContent = 'LECTURES';
     html = !c.lectures.length ? '<div class="empty"><i class="ti ti-video"></i>No lectures yet</div>' :
-      c.lectures.map((l,i) => {
-        _popupLectures[l._id] = l;
-        return `
-        <div class="lec-row">
-          ${_watchCheckHtml(l._id)}
-          <div class="lec-num">${i+1}</div>
-          <div class="lec-info">
-            <div class="lec-name">${l.name}</div>
-            <div class="lec-mini-btns">
-              <button class="lec-mini-btn lec-mini-watch" data-lid="${l._id}" onclick="openLecLink(_popupLectures[this.dataset.lid].link,'lecture')"><i class="ti ti-player-play-filled"></i> Lecture</button>
-              ${l.notes ? `<button class="lec-mini-btn lec-mini-notes" data-lid="${l._id}" onclick="openLink(_popupLectures[this.dataset.lid].notes,'notes')"><i class="ti ti-notes"></i> Notes</button>` : ''}
-            </div>
-          </div>
-        </div>`;
-      }).join('');
+      c.lectures.map((l,i) => _lecRowHtml(l, i)).join('');
   }
   document.getElementById('unitList').innerHTML = html;
   goTo('units');
@@ -1319,24 +1200,7 @@ function openUnit(bid, sid, cid, uid) {
   document.getElementById('lecPageTitle').textContent = u.name;
   document.getElementById('lecPageSub').textContent = u.lectures.length + ' lectures';
   document.getElementById('lectureList').innerHTML = !u.lectures.length ? '<div class="empty"><i class="ti ti-video"></i>No lectures yet</div>' :
-    u.lectures.map((l,i) => {
-      _popupLectures[l._id] = l;
-      return `
-      <div class="lec-row">
-        ${_watchCheckHtml(l._id)}
-        <div class="lec-num">${i+1}</div>
-        <div class="lec-info">
-          <div class="lec-name">${l.name}</div>
-          ${l.comingSoon
-            ? '<div style="margin-top:6px"><span class="coming-soon-badge">🔜 Coming Soon</span></div>'
-            : `<div class="lec-mini-btns">
-                ${l.isDemo ? '<span class="demo-badge" style="margin-right:4px">DEMO</span>' : ''}
-                <button class="lec-mini-btn lec-mini-watch" data-lid="${l._id}" onclick="openLecLink(_popupLectures[this.dataset.lid].link,'lecture')"><i class="ti ti-player-play-filled"></i> Lecture</button>
-                ${l.notes ? `<button class="lec-mini-btn lec-mini-notes" data-lid="${l._id}" onclick="openLink(_popupLectures[this.dataset.lid].notes,'notes')"><i class="ti ti-notes"></i> Notes</button>` : ''}
-              </div>`}
-        </div>
-      </div>`;
-    }).join('');
+    u.lectures.map((l,i) => _lecRowHtml(l, i)).join('');
   goTo('lectures');
 }
 
@@ -1379,9 +1243,6 @@ async function load() {
       renderBatches(batches);
     }
   } catch(e) {}
-
-  // Fetch premium access map from server (expiry-aware) in parallel
-  loadPremiumAccessMap();
 
   // Fetch fresh data in background
   try {
@@ -1458,18 +1319,13 @@ function switchBatchTab(tab) {
   }
 }
 
-function _batchCard(b, isPremiumLocked, pointUnlocked) {
+function _batchCard(b, isPremiumLocked) {
   // isPremiumLocked = user does not have access to this premium batch
-  // pointUnlocked   = user redeemed this batch with points (show badge)
   var adminDraftBadge = (isAdmin && b.isPublic !== true)
     ? '<div style="position:absolute;top:6px;left:6px;background:rgba(0,0,0,0.7);border-radius:6px;padding:3px 7px;font-size:10px;font-weight:700;color:#aaa;display:flex;align-items:center;gap:4px"><i class="ti ti-lock" style="font-size:10px"></i>Private</div>'
     : '';
   var premiumBadge = b.isPremium
     ? '<div class="premium-badge"><i class="ti ti-crown" style="font-size:9px"></i>PREMIUM</div>'
-    : '';
-  // Point-unlock badge — shown on free batches user redeemed with points
-  var pointBadge = pointUnlocked
-    ? '<div style="position:absolute;top:6px;right:6px;background:rgba(34,197,94,0.9);border-radius:6px;padding:3px 7px;font-size:10px;font-weight:700;color:#fff;display:flex;align-items:center;gap:3px"><i class="ti ti-coin" style="font-size:10px"></i>Unlocked</div>'
     : '';
   var lockOverlay = isPremiumLocked
     ? '<div class="premium-lock-overlay"><i class="ti ti-lock" style="font-size:26px;color:#f59e0b"></i></div>' +
@@ -1477,7 +1333,6 @@ function _batchCard(b, isPremiumLocked, pointUnlocked) {
     : '';
   var cardStyle = (isAdmin && b.isPublic !== true) ? 'opacity:0.6;border-style:dashed;' : '';
   if (b.isPremium) cardStyle += 'border-color:rgba(245,158,11,0.35);';
-  if (pointUnlocked) cardStyle += 'border-color:rgba(34,197,94,0.4);';
   var buyBtn = isPremiumLocked
     ? '<button class="batch-buy-btn" data-bid="' + b._id + '" onclick="event.stopPropagation();buyBatch(this.dataset.bid)"><i class="ti ti-shopping-cart" style="font-size:12px"></i> Buy' + (b.price ? ' ₹' + b.price : '') + '</button>'
     : '';
@@ -1490,26 +1345,27 @@ function _batchCard(b, isPremiumLocked, pointUnlocked) {
   var actionBtns = (buyBtn || viewBtn)
     ? '<div style="display:flex;gap:6px;flex-wrap:wrap">' + viewBtn + buyBtn + '</div>'
     : '';
-  var metaExtra = isPremiumLocked ? ' · <span style="color:#f59e0b">🔒 Locked</span>'
-                : pointUnlocked   ? (function() {
-                    var exp = _premiumAccessMap[b._id];
-                    if (!exp) return ' · <span style="color:#22c55e">✅ Unlocked</span>';
-                    var diff = exp - Date.now();
-                    var hrs  = Math.floor(diff / 3600000);
-                    var mins = Math.floor((diff % 3600000) / 60000);
-                    var timeStr = hrs > 24 ? Math.floor(hrs/24) + 'd ' + (hrs%24) + 'h' : hrs + 'h ' + mins + 'm';
-                    return ' · <span style="color:#22c55e">✅ Expires in ' + timeStr + '</span>';
-                  })()
-                : '';
+
+  // Reward-granted (temporary) access gets its own badge, distinct from permanent
+  // ownership, so the user knows this specific batch will re-lock once the timer runs out.
+  var rewardMetaHtml = '';
+  if (!isPremiumLocked && b.isPremium && !isAdmin) {
+    var isPermanentOwner = b.premiumUsers && b.premiumUsers.includes(String(getUserId()));
+    if (!isPermanentOwner && hasBatchRewardAccess(b._id)) {
+      var rewardMsLeft = myActiveBatchRewards[b._id] - new Date();
+      rewardMetaHtml = ' · <span style="color:var(--accent2);font-weight:700">🎁 ' + fmtRewardDuration(rewardMsLeft) + '</span>';
+    }
+  }
+
   return `<div class="batch-card${b.isPremium ? ' batch-card-premium' : ''}" onclick="openBatch('${b._id}')" style="${cardStyle}">
     <div class="batch-img" style="position:relative;overflow:hidden">
       ${b.pic ? `<img src="${b.pic}">` : '🎓'}
-      ${adminDraftBadge}${premiumBadge}${pointBadge}${lockOverlay}
+      ${adminDraftBadge}${premiumBadge}${lockOverlay}
     </div>
     <div class="batch-body">
       <div class="batch-name">${b.name}</div>
       ${b.description ? `<div class="batch-desc">${b.description}</div>` : ''}
-      <div class="batch-meta">${b.subjects.length} subjects${metaExtra}${b.price ? ' · <span style="color:#22c55e;font-weight:700">₹' + b.price + '</span>' : ''}</div>
+      <div class="batch-meta">${b.subjects.length} subjects${isPremiumLocked ? ' · <span style="color:#f59e0b">🔒 Locked</span>' : ''}${b.price ? ' · <span style="color:#22c55e;font-weight:700">₹' + b.price + '</span>' : ''}${rewardMetaHtml}</div>
       ${actionBtns}
     </div>
   </div>`;
@@ -1539,14 +1395,7 @@ function renderBatches(list) {
   var freeEl = document.getElementById('freeBatchGrid');
   if (freeEl) {
     freeEl.innerHTML = free.length
-      ? free.map(function(b) {
-          // Show "Unlocked" badge if user redeemed this batch via points
-          var curUid = String(getUserId());
-          // Check _premiumAccessMap (expiry-aware) instead of premiumUsers array
-          var bExpiry = _premiumAccessMap[b._id];
-          var pointUnlocked = !isAdmin && bExpiry && Date.now() < bExpiry;
-          return _batchCard(b, false, pointUnlocked);
-        }).join('')
+      ? free.map(b => _batchCard(b, false)).join('')
       : '<div class="empty" style="grid-column:1/-1"><i class="ti ti-school"></i>No free batches yet</div>';
   }
 
@@ -1555,7 +1404,8 @@ function renderBatches(list) {
   if (premEl && premium.length) {
     var curUid = getUserId();
     premEl.innerHTML = premium.map(b => {
-      var locked = !isAdmin && !(b.premiumUsers && b.premiumUsers.includes(String(curUid)));
+      var isPermanentOwner = !!(b.premiumUsers && b.premiumUsers.includes(String(curUid)));
+      var locked = !isAdmin && !isPermanentOwner && !hasBatchRewardAccess(b._id);
       return _batchCard(b, locked);
     }).join('');
   } else if (premEl) {
@@ -1571,6 +1421,536 @@ function handleSearch(q) {
 function handleSearch(q) {
   q = q.toLowerCase().trim();
   renderBatches(!q ? batches : batches.filter(b => b.name.toLowerCase().includes(q)));
+}
+
+// ── Rewards System ────────────────────────────────────────────────────────────
+// Points are a SPENDABLE BALANCE (referrals earned - points spent), always
+// fetched fresh from the server — never computed or trusted purely on the client.
+// NOTE: this block lives here (inside the same script block as _batchCard/renderBatches/
+// init) rather than near loadReferStats(), because those functions live in a
+// LATER, separate script block — cross-script forward references would throw
+// ReferenceErrors the moment init() runs at page load.
+
+var rewardsSummary = null;          // full response from /api/rewards/summary/:userId
+var myActiveBatchRewards = {};      // batchId -> Date (expiry) — powers premium-card unlock checks
+var _rewardsCountdownTimer = null;  // ticks once/sec while the Refer tab is open
+var _rewardModalType = null;        // 'accessPass' | 'batch24h' | 'batch7d'
+var _rewardEligibleBatches = null;  // cached picker list for the open modal (null = not loaded yet)
+var _rewardSelectedBatchId = null;  // batch chosen in the picker (null = none picked yet)
+var _rewardRedeeming = false;       // in-flight guard so a double-tap can't fire two redeem requests
+
+// Adaptive duration formatter — handles seconds up to several days (unlike
+// formatCountdown(), which is HH:MM:SS-only and purpose-built for the ≤24h ad-access page).
+function fmtRewardDuration(ms) {
+  if (ms <= 0) return 'Expired';
+  var totalMin = Math.floor(ms / 60000);
+  var days = Math.floor(totalMin / 1440);
+  var hours = Math.floor((totalMin % 1440) / 60);
+  var mins = totalMin % 60;
+  if (days > 0) return days + 'd ' + hours + 'h left';
+  if (hours > 0) return hours + 'h ' + mins + 'm left';
+  if (mins > 0) return mins + 'm left';
+  return '<1m left';
+}
+
+function _rebuildActiveBatchRewardsMap() {
+  myActiveBatchRewards = {};
+  if (rewardsSummary && Array.isArray(rewardsSummary.activeBatchRewards)) {
+    rewardsSummary.activeBatchRewards.forEach(function(r) {
+      myActiveBatchRewards[r.batchId] = new Date(r.expiresAt);
+    });
+  }
+}
+
+// Does this user currently have LIVE reward-granted access to this specific batch?
+// (Independent of permanent premiumUsers access — checked alongside it wherever batches are gated.)
+function hasBatchRewardAccess(bid) {
+  var exp = myActiveBatchRewards[bid];
+  return !!exp && exp > new Date();
+}
+
+async function loadRewardsSummary() {
+  var uid = getUserId();
+  if (!uid) return;
+  try {
+    var r = await fetch('/api/rewards/summary/' + uid);
+    var data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Failed to load rewards');
+    rewardsSummary = data;
+    _rebuildActiveBatchRewardsMap();
+    renderRewardsCard();
+    // Reward access may have changed which premium batches show as unlocked —
+    // re-render the batch grid too, if it's already loaded (mirrors the same
+    // "instant render, then correct once fresh data arrives" pattern load() uses).
+    if (batches && batches.length) renderBatches(batches);
+  } catch(e) {
+    console.error('Rewards summary error:', e);
+    var body = document.getElementById('rewardsCardBody');
+    if (body) body.innerHTML = '<div class="empty" style="padding:16px"><i class="ti ti-alert-triangle" style="color:var(--red)"></i>Rewards load nahi hue: ' + (e.message || 'server error') + '<br><span style="font-size:11px">Server ko restart karke dobara try karo</span></div>';
+  }
+}
+
+function renderRewardsCard() {
+  var pill = document.getElementById('rewardBalancePill');
+  var body = document.getElementById('rewardsCardBody');
+  if (!body) return;
+
+  if (!rewardsSummary) {
+    body.innerHTML = '<div style="text-align:center;padding:16px;color:var(--text3);font-size:13px">Loading rewards...</div>';
+    return;
+  }
+
+  var s = rewardsSummary;
+  if (pill) pill.innerHTML = '⭐ ' + s.points + ' point' + (s.points === 1 ? '' : 's');
+
+  // ── Active perks banners ──────────────────────────────────────────────────
+  var activeHtml = '';
+  if (s.accessPass && s.accessPass.active) {
+    var passMsLeft = new Date(s.accessPass.expiresAt) - new Date();
+    activeHtml +=
+      '<div class="reward-active-banner">' +
+        '<span class="reward-active-icon">🔓</span>' +
+        '<div class="reward-active-info">' +
+          '<div class="reward-active-title">Site Access Active</div>' +
+          '<div class="reward-active-time" id="rewardAccessPassTime" data-expires="' + new Date(s.accessPass.expiresAt).getTime() + '">' + fmtRewardDuration(passMsLeft) + '</div>' +
+        '</div>' +
+      '</div>';
+  }
+  (s.activeBatchRewards || []).forEach(function(br) {
+    var brMsLeft = new Date(br.expiresAt) - new Date();
+    activeHtml +=
+      '<div class="reward-active-banner">' +
+        '<span class="reward-active-icon">🎓</span>' +
+        '<div class="reward-active-info">' +
+          '<div class="reward-active-title">' + br.batchName + '</div>' +
+          '<div class="reward-active-time" data-expires="' + new Date(br.expiresAt).getTime() + '" data-batch-timer="' + br.batchId + '">' + fmtRewardDuration(brMsLeft) + '</div>' +
+        '</div>' +
+      '</div>';
+  });
+
+  // ── Reward tiers ───────────────────────────────────────────────────────────
+  var catalog = s.catalog || {
+    accessPass: { cost: 5 }, batch24h: { cost: 10 }, batch7d: { cost: 50 },
+  };
+
+  function tierRow(type, icon, title, desc) {
+    var cost = catalog[type].cost;
+    var canAfford = s.points >= cost;
+    var need = cost - s.points;
+    var btnLabel = canAfford ? '<i class="ti ti-gift"></i> Redeem' : ('Need ' + need + ' more');
+    return '<div class="reward-tier">' +
+      '<div class="reward-tier-icon">' + icon + '</div>' +
+      '<div class="reward-tier-info">' +
+        '<div class="reward-tier-title">' + title + '</div>' +
+        '<div class="reward-tier-desc">' + desc + '</div>' +
+        '<div class="reward-tier-cost">⭐ ' + cost + ' points</div>' +
+      '</div>' +
+      '<button class="reward-redeem-btn" ' + (canAfford ? '' : 'disabled') + ' onclick="openRewardModal(\'' + type + '\')">' + btnLabel + '</button>' +
+    '</div>';
+  }
+
+  var tiersHtml =
+    tierRow('accessPass', '🔓', '24 Hour Site Access', 'Unlocks all free lectures site-wide for 24 hours') +
+    tierRow('batch24h', '🎓', '24 Hour Batch Access', 'Pick any 1 premium batch — full access for 24 hours') +
+    tierRow('batch7d', '👑', '7 Day Batch Access', 'Pick any 1 premium batch — full access for a full week');
+
+  body.innerHTML =
+    activeHtml +
+    tiersHtml +
+    '<button class="reward-view-history-btn" onclick="openRewardHistory()"><i class="ti ti-history"></i> View Redeem History</button>';
+}
+
+// ── Live countdown ticking (only while the Refer tab is visible) ─────────────
+function _tickRewardsCountdowns() {
+  if (currentTab !== 'refer') return;
+  var now = Date.now();
+  var expired = false;
+
+  var passEl = document.getElementById('rewardAccessPassTime');
+  if (passEl) {
+    var passLeft = parseInt(passEl.getAttribute('data-expires'), 10) - now;
+    if (passLeft <= 0) expired = true;
+    else passEl.textContent = fmtRewardDuration(passLeft);
+  }
+
+  document.querySelectorAll('[data-batch-timer]').forEach(function(el) {
+    var left = parseInt(el.getAttribute('data-expires'), 10) - now;
+    if (left <= 0) expired = true;
+    else el.textContent = fmtRewardDuration(left);
+  });
+
+  // Something expired — refresh from the server for fully accurate state
+  // (also flips any tiers back to their correct enabled/disabled look).
+  if (expired) loadRewardsSummary();
+}
+
+function startRewardsCountdown() {
+  if (_rewardsCountdownTimer) clearInterval(_rewardsCountdownTimer);
+  _rewardsCountdownTimer = setInterval(_tickRewardsCountdowns, 1000);
+}
+
+// ── Redeem Modal ───────────────────────────────────────────────────────────────
+var _rewardTierTitles = { accessPass: '24 Hour Site Access', batch24h: '24 Hour Batch Access', batch7d: '7 Day Batch Access' };
+
+async function openRewardModal(rewardType) {
+  if (!rewardsSummary) { toast('Please wait, loading rewards...', 'error'); return; }
+  _rewardModalType = rewardType;
+  _rewardSelectedBatchId = null;
+  _rewardEligibleBatches = null;
+
+  document.getElementById('rewardModalTitle').textContent = _rewardTierTitles[rewardType] || 'Redeem Reward';
+  document.getElementById('rewardModal').classList.add('show');
+  renderRewardModalBody();
+
+  if (rewardType === 'batch24h' || rewardType === 'batch7d') {
+    var uid = getUserId();
+    try {
+      var r = await fetch('/api/rewards/eligible-batches/' + uid);
+      var data = await r.json();
+      _rewardEligibleBatches = data.batches || [];
+    } catch(e) {
+      _rewardEligibleBatches = [];
+    }
+    // Guard against the user closing the modal (or switching to a different
+    // reward) before this fetch resolved — don't paint stale data over it.
+    if (_rewardModalType === rewardType) renderRewardModalBody();
+  }
+}
+
+function renderRewardModalBody() {
+  var body = document.getElementById('rewardModalBody');
+  if (!body || !_rewardModalType || !rewardsSummary) return;
+  var s = rewardsSummary;
+  var catalog = s.catalog || { accessPass: { cost: 5 }, batch24h: { cost: 10 }, batch7d: { cost: 50 } };
+  var cost = (catalog[_rewardModalType] || {}).cost || 0;
+
+  var header =
+    '<div style="text-align:center;margin-bottom:14px">' +
+      '<div style="font-size:11px;color:var(--text2)">Cost</div>' +
+      '<div style="font-size:24px;font-weight:800;color:var(--accent2)">⭐ ' + cost + ' points</div>' +
+      '<div style="font-size:11px;color:var(--text2);margin-top:2px">You have ' + s.points + ' points</div>' +
+    '</div>';
+
+  // ── accessPass: simple confirm, no batch picker needed ────────────────────
+  if (_rewardModalType === 'accessPass') {
+    body.innerHTML = header +
+      '<div style="background:var(--surface2);border-radius:var(--radius-sm);padding:12px;font-size:12px;color:var(--text2);line-height:1.5;margin-bottom:14px;text-align:center">' +
+        '🔓 Unlocks all free lectures site-wide for <strong style="color:var(--text)">24 hours</strong>.' +
+        (s.accessPass && s.accessPass.active ? '<br><span style="color:var(--green)">Extends your current active access!</span>' : '') +
+      '</div>' +
+      '<button class="reward-redeem-btn" style="width:100%;justify-content:center;padding:12px" onclick="confirmRedeem()">' +
+        '<i class="ti ti-gift"></i> Confirm Redeem' +
+      '</button>';
+    return;
+  }
+
+  // ── batch24h / batch7d: picker list ────────────────────────────────────────
+  if (_rewardEligibleBatches === null) {
+    body.innerHTML = header + '<div style="text-align:center;padding:16px;color:var(--text3);font-size:13px">Loading batches...</div>';
+    return;
+  }
+  if (!_rewardEligibleBatches.length) {
+    body.innerHTML = header +
+      '<div class="empty"><i class="ti ti-mood-empty"></i>No eligible premium batches right now.<br><span style="font-size:11px">You may already own all of them!</span></div>';
+    return;
+  }
+
+  var listHtml = _rewardEligibleBatches.map(function(b) {
+    var selected = _rewardSelectedBatchId === b._id;
+    var thumb = b.pic ? ('<img src="' + b.pic + '">') : '<div class="reward-pick-emoji">🎓</div>';
+    var sub = b.subjectCount + ' subject' + (b.subjectCount === 1 ? '' : 's') + (b.price ? ' · ₹' + b.price : '');
+    if (b.activeRewardExpiresAt) {
+      var pickMsLeft = new Date(b.activeRewardExpiresAt) - new Date();
+      sub += ' · <span style="color:var(--green)">' + fmtRewardDuration(pickMsLeft) + ' active — will extend</span>';
+    }
+    return '<div class="reward-pick-row' + (selected ? ' selected' : '') + '" onclick="selectRewardBatch(\'' + b._id + '\')">' +
+      thumb +
+      '<div class="reward-pick-info">' +
+        '<div class="reward-pick-name">' + b.name + '</div>' +
+        '<div class="reward-pick-sub">' + sub + '</div>' +
+      '</div>' +
+      '<div class="reward-pick-check">' + (selected ? '<i class="ti ti-check"></i>' : '') + '</div>' +
+    '</div>';
+  }).join('');
+
+  var selectedBatch = _rewardEligibleBatches.find(function(b){ return b._id === _rewardSelectedBatchId; });
+  var confirmLabel = selectedBatch ? ('Confirm Redeem for "' + selectedBatch.name + '"') : 'Select a batch above';
+
+  body.innerHTML = header +
+    '<div style="max-height:260px;overflow-y:auto;margin-bottom:12px">' + listHtml + '</div>' +
+    '<button class="reward-redeem-btn" style="width:100%;justify-content:center;padding:12px" ' + (selectedBatch ? '' : 'disabled') + ' onclick="confirmRedeem()">' +
+      '<i class="ti ti-gift"></i> ' + confirmLabel +
+    '</button>';
+}
+
+function selectRewardBatch(bid) {
+  _rewardSelectedBatchId = bid;
+  renderRewardModalBody();
+}
+
+async function confirmRedeem() {
+  if (_rewardRedeeming || !_rewardModalType) return;
+  if ((_rewardModalType === 'batch24h' || _rewardModalType === 'batch7d') && !_rewardSelectedBatchId) {
+    toast('Pehle ek batch select karo!', 'error');
+    return;
+  }
+
+  _rewardRedeeming = true;
+  var btn = document.querySelector('#rewardModalBody .reward-redeem-btn');
+  var originalHtml = btn ? btn.innerHTML : '';
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader-2" style="animation:spin 0.8s linear infinite;display:inline-block"></i> Redeeming...'; }
+
+  try {
+    var payload = { userId: getUserId(), rewardType: _rewardModalType };
+    if (_rewardSelectedBatchId) payload.batchId = _rewardSelectedBatchId;
+
+    // Raw fetch (not apiFetch) so we can parse the server's clean {error:"..."}
+    // JSON message ourselves — apiFetch's error path throws the raw response
+    // text instead, which would show ugly unparsed JSON in the toast.
+    var res = await fetch('/api/rewards/redeem', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    var result = await res.json();
+    if (!res.ok) throw new Error(result.error || 'Redeem failed. Please try again.');
+
+    toast('🎉 Redeemed! ' + (result.label || 'Reward unlocked') + (result.batchName ? ' — ' + result.batchName : ''), 'success');
+    closeRewardModal();
+
+    await loadRewardsSummary();
+    try {
+      var fresh = await apiFetch('/api/batches');
+      batches = fresh;
+      localStorage.setItem('edubot_batches', JSON.stringify(fresh));
+      renderBatches(batches);
+    } catch(e2) { /* non-fatal — reward already redeemed, batches will refresh on next visit */ }
+  } catch(e) {
+    toast(e.message || 'Redeem failed. Please try again.', 'error');
+    if (btn) { btn.disabled = false; btn.innerHTML = originalHtml; }
+  } finally {
+    _rewardRedeeming = false;
+  }
+}
+
+function closeRewardModal() {
+  document.getElementById('rewardModal').classList.remove('show');
+  _rewardModalType = null;
+  _rewardSelectedBatchId = null;
+  _rewardEligibleBatches = null;
+}
+function closeRewardModalOutside(e) { if (e.target.id === 'rewardModal') closeRewardModal(); }
+
+// ── Redeem History Modal ────────────────────────────────────────────────────
+async function openRewardHistory() {
+  document.getElementById('rewardHistoryModal').classList.add('show');
+  var body = document.getElementById('rewardHistoryBody');
+  body.innerHTML = '<div style="text-align:center;padding:16px;color:var(--text3);font-size:13px">Loading...</div>';
+  var uid = getUserId();
+  if (!uid) return;
+  try {
+    var r = await fetch('/api/rewards/history/' + uid);
+    var data = await r.json();
+    var history = data.history || [];
+    if (!history.length) {
+      body.innerHTML = '<div class="empty"><i class="ti ti-history"></i>No redemptions yet</div>';
+      return;
+    }
+    var icons = { accessPass: '🔓', batch24h: '🎓', batch7d: '👑' };
+    body.innerHTML = history.map(function(h) {
+      var d = new Date(h.redeemedAt);
+      var dateStr = d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+      var title = _rewardTierTitles[h.rewardType] || h.rewardType;
+      var sub = (h.batchName ? h.batchName + ' · ' : '') + dateStr;
+      return '<div class="reward-history-row">' +
+        '<span class="reward-history-icon">' + (icons[h.rewardType] || '🎁') + '</span>' +
+        '<div class="reward-history-info">' +
+          '<div class="reward-history-title">' + title + '</div>' +
+          '<div class="reward-history-sub">' + sub + '</div>' +
+        '</div>' +
+        '<div class="reward-history-cost">-' + h.pointsCost + '⭐</div>' +
+      '</div>';
+    }).join('');
+  } catch(e) {
+    body.innerHTML = '<div class="empty"><i class="ti ti-alert-circle"></i>Failed to load history</div>';
+  }
+}
+function closeRewardHistory() { document.getElementById('rewardHistoryModal').classList.remove('show'); }
+function closeRewardHistoryOutside(e) { if (e.target.id === 'rewardHistoryModal') closeRewardHistory(); }
+
+// ── Spin & Earn ────────────────────────────────────────────────────────────────
+var spinStatus = null;          // cached response from /api/spin/status/:userId
+var _spinToken = null;          // token from /api/spin/token, consumed by claim
+var _spinInProgress = false;    // guards the whole flow against double-taps
+var _spinCooldownTimer = null;  // ticks the "Next spin in Xs" button label
+var _wheelCurrentRotation = 0;  // accumulates across spins so the wheel always turns FORWARD, never snaps back
+
+async function loadSpinStatus() {
+  var uid = getUserId();
+  if (!uid) return;
+  try {
+    var r = await fetch('/api/spin/status/' + uid);
+    var data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Failed to load spin status');
+    spinStatus = data;
+    renderSpinStatusBar();
+  } catch (e) {
+    console.error('Spin status error:', e);
+  }
+}
+
+function renderSpinStatusBar() {
+  var leftEl = document.getElementById('spinsLeftText');
+  var ptsEl = document.getElementById('spinPointsText');
+  var btn = document.getElementById('spinBtn');
+  if (leftEl && spinStatus) leftEl.textContent = spinStatus.spinsLeft;
+  if (ptsEl && rewardsSummary) ptsEl.textContent = rewardsSummary.points;
+  if (!btn || !spinStatus || _spinInProgress) return;
+
+  if (spinStatus.spinsLeft <= 0) {
+    btn.disabled = true;
+    btn.innerHTML = '<i class="ti ti-clock"></i> Aaj ke spins khatam — kal aana!';
+    if (_spinCooldownTimer) { clearInterval(_spinCooldownTimer); _spinCooldownTimer = null; }
+  } else if (spinStatus.cooldownRemainingMs > 0) {
+    startSpinCooldownTicker();
+  } else {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="ti ti-player-play"></i> Watch Ad & Spin';
+    if (_spinCooldownTimer) { clearInterval(_spinCooldownTimer); _spinCooldownTimer = null; }
+  }
+}
+
+function startSpinCooldownTicker() {
+  if (_spinCooldownTimer) clearInterval(_spinCooldownTimer);
+  var btn = document.getElementById('spinBtn');
+  if (!btn || !spinStatus) return;
+  var remaining = spinStatus.cooldownRemainingMs;
+  btn.disabled = true;
+
+  function tick() {
+    if (remaining <= 0) {
+      clearInterval(_spinCooldownTimer);
+      _spinCooldownTimer = null;
+      if (spinStatus) spinStatus.cooldownRemainingMs = 0;
+      renderSpinStatusBar();
+      return;
+    }
+    btn.innerHTML = '<i class="ti ti-clock"></i> Next spin in ' + Math.ceil(remaining / 1000) + 's';
+    remaining -= 1000;
+  }
+  tick();
+  _spinCooldownTimer = setInterval(tick, 1000);
+}
+
+// Rotates the wheel so segment `number` (1-5) lands exactly under the fixed
+// pointer at the top. Always spins FORWARD from its current position (never
+// snaps backward between spins), plus a few extra full turns for excitement.
+// Math: segment N occupies [(N-1)*72, N*72) degrees clockwise from the pointer
+// (matching the conic-gradient definition), so its midpoint is at (N-1)*72+36.
+// To bring that midpoint to the pointer (0deg), the wheel's final orientation
+// (mod 360) must be (360 - midpoint) mod 360.
+function spinWheelTo(number) {
+  var wheel = document.getElementById('spinWheel');
+  if (!wheel) return;
+  var targetMod = (360 - 36 - (number - 1) * 72 + 360) % 360;
+  var currentMod = ((_wheelCurrentRotation % 360) + 360) % 360;
+  var deltaToTarget = (targetMod - currentMod + 360) % 360;
+  var fullSpins = 5;
+  _wheelCurrentRotation += fullSpins * 360 + deltaToTarget;
+  wheel.style.transform = 'rotate(' + _wheelCurrentRotation + 'deg)';
+}
+
+async function startSpin() {
+  if (_spinInProgress) return;
+  if (!spinStatus) { toast('Thoda ruko, loading...', 'error'); return; }
+  if (spinStatus.spinsLeft <= 0) { toast('Aaj ke saare 5 spins ho gaye! Kal wapas aao. 🕐', 'error'); return; }
+  if (spinStatus.cooldownRemainingMs > 0) { toast('Thoda ruko, ' + Math.ceil(spinStatus.cooldownRemainingMs / 1000) + 's baad try karo!', 'error'); return; }
+
+  var formats = ['rewarded', 'pop', 'interstitial'];
+  var format = formats[Math.floor(Math.random() * formats.length)];
+
+  _spinInProgress = true;
+  var btn = document.getElementById('spinBtn');
+  var resultEl = document.getElementById('spinResultText');
+  if (resultEl) resultEl.textContent = '';
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader-2" style="animation:spin 0.8s linear infinite;display:inline-block"></i> Loading Ad...'; }
+
+  var uid = getUserId();
+
+  // 1. Get a fresh spin token
+  try {
+    var r = await fetch('/api/spin/token/' + uid, { method: 'POST' });
+    var data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Could not start spin');
+    _spinToken = data.token;
+  } catch (e) {
+    toast(e.message || 'Server error. Please try again.', 'error');
+    _spinInProgress = false;
+    loadSpinStatus();
+    return;
+  }
+
+  if (typeof show_11011844 === 'undefined') {
+    _spinToken = null;
+    toast('Ad load nahi hua. Ad blocker band karo aur try karo.', 'error');
+    _spinInProgress = false;
+    renderSpinStatusBar();
+    return;
+  }
+
+  var tgUid = tg && tg.initDataUnsafe && tg.initDataUnsafe.user ? String(tg.initDataUnsafe.user.id) : 'unknown';
+  var adPromise;
+  if (format === 'pop') adPromise = show_11011844('pop');
+  else if (format === 'interstitial') adPromise = show_11011844();
+  else adPromise = show_11011844({ ymid: tgUid });
+
+  try {
+    await adPromise;
+  } catch (err) {
+    _spinToken = null;
+    _spinInProgress = false;
+    var msg = (err && err.message) || '';
+    if (msg.toLowerCase().indexOf('block') !== -1 || msg.toLowerCase().indexOf('load') !== -1) {
+      toast('Ad blocker detected! Band karo aur try karo.', 'error');
+    } else {
+      toast('Ad abhi available nahi. Thodi der baad try karo.', 'error');
+    }
+    renderSpinStatusBar();
+    return;
+  }
+
+  // 2. Ad watched fully — claim the spin (server verifies watch-time server-side too)
+  if (btn) btn.innerHTML = '<i class="ti ti-loader-2" style="animation:spin 0.8s linear infinite;display:inline-block"></i> Spinning...';
+
+  try {
+    var r2 = await fetch('/api/spin/claim/' + uid, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: _spinToken }),
+    });
+    var data2 = await r2.json();
+    if (!r2.ok) throw new Error(data2.error || 'Spin failed');
+
+    _spinToken = null;
+    spinStatus = data2; // includes updated spinsLeft, cooldownRemainingMs, canSpin
+
+    spinWheelTo(data2.pointsWon);
+
+    // Wait for the wheel's CSS animation (4s) to finish before revealing the result
+    setTimeout(function () {
+      var resultEl2 = document.getElementById('spinResultText');
+      if (resultEl2) resultEl2.textContent = '🎉 You won ' + data2.pointsWon + ' point' + (data2.pointsWon === 1 ? '' : 's') + '!';
+      toast('🎉 +' + data2.pointsWon + ' points!', 'success');
+      _spinInProgress = false;
+      loadRewardsSummary(); // refreshes points balance everywhere (Refer tab, this tab)
+      renderSpinStatusBar();
+    }, 4100);
+  } catch (e) {
+    _spinToken = null;
+    _spinInProgress = false;
+    toast(e.message || 'Spin failed. Please try again.', 'error');
+    loadSpinStatus();
+  }
 }
 
 // ── Toast ─────────────────────────────────────────────────────────────────────
@@ -1951,7 +2331,7 @@ function _renderManageLevel() {
         <span class="manage-item-icon">🎓</span>
         <div class="manage-item-info" style="cursor:pointer" onclick="_mDrill('subjects','${b._id}')">
           <div class="manage-item-name">${b.name}${premTag}</div>
-          <div class="manage-item-sub">${(b.subjects||[]).length} subjects · ${pub ? '🟢 Public' : '🔒 Private'}</div>
+          <div class="manage-item-sub">${b.subjects.length} subjects · ${pub ? '🟢 Public' : '🔒 Private'}</div>
         </div>
         <button class="${pubClass}" onclick="togglePublish('${b._id}')">${pubLabel}</button>
         ${manageUsersBtn}
@@ -1964,12 +2344,12 @@ function _renderManageLevel() {
     var b = batches.find(x => x._id === _mState.bid);
     if (!b) return;
     if (!b.subjects.length) { html = '<div style="text-align:center;padding:20px;color:var(--text2);font-size:13px">No subjects yet</div>'; }
-    (b.subjects||[]).forEach(s => {
+    b.subjects.forEach(s => {
       html += `<div class="manage-item">
         <span class="manage-item-icon">${s.icon}</span>
         <div class="manage-item-info" style="cursor:pointer" onclick="_mDrill('chapters','${b._id}','${s._id}')">
           <div class="manage-item-name">${s.name}</div>
-          <div class="manage-item-sub">${(s.chapters||[]).length} chapters</div>
+          <div class="manage-item-sub">${s.chapters.length} chapters</div>
         </div>
         <button class="edit-btn" onclick="openEdit('subject','${b._id}','${s._id}')"><i class="ti ti-pencil"></i></button>
         <button class="del-btn" onclick="delSubject('${b._id}','${s._id}')"><i class="ti ti-trash"></i></button>
@@ -1980,10 +2360,10 @@ function _renderManageLevel() {
     var b = batches.find(x => x._id === _mState.bid);
     var s = b && b.subjects.find(x => x._id === _mState.sid);
     if (!s) return;
-    if (!(s.chapters||[]).length) { html = '<div style="text-align:center;padding:20px;color:var(--text2);font-size:13px">No chapters yet</div>'; }
-    (s.chapters||[]).forEach(c => {
+    if (!s.chapters.length) { html = '<div style="text-align:center;padding:20px;color:var(--text2);font-size:13px">No chapters yet</div>'; }
+    s.chapters.forEach(c => {
       var cs = c.comingSoon ? '<span class="coming-soon-badge">🔜 Coming Soon</span>' : '';
-      var lecCount = (c.lectures||[]).length + (c.units||[]).reduce((a,u)=>a+(u.lectures||[]).length,0);
+      var lecCount = c.lectures.length + c.units.reduce((a,u)=>a+u.lectures.length,0);
       html += `<div class="manage-item">
         <span class="manage-item-icon">📂</span>
         <div class="manage-item-info" style="cursor:pointer" onclick="_mDrill('lectures','${b._id}','${s._id}','${c._id}')">
@@ -1998,7 +2378,7 @@ function _renderManageLevel() {
   } else if (_mState.level === 'lectures') {
     var b = batches.find(x => x._id === _mState.bid);
     var s = b && b.subjects.find(x => x._id === _mState.sid);
-    var ch = s && (s.chapters||[]).find(x => x._id === _mState.cid);
+    var ch = s && s.chapters.find(x => x._id === _mState.cid);
     if (!ch) return;
     // Show units with edit/delete buttons
     if (ch.units && ch.units.length) {
@@ -2046,7 +2426,7 @@ function _renderManageLevel() {
         </div>`;
       });
     }
-    if (!(ch.units||[]).length && !(ch.lectures||[]).length) {
+    if (!ch.units.length && !ch.lectures.length) {
       html = '<div style="text-align:center;padding:20px;color:var(--text2);font-size:13px">No lectures yet</div>';
     }
   }
@@ -2070,8 +2450,8 @@ function _renderBreadcrumb() {
   if (!el) return;
   if (_mState.level === 'batches') { el.innerHTML = ''; return; }
   var b = batches.find(x => x._id === _mState.bid);
-  var s = b && (b.subjects||[]).find(x => x._id === _mState.sid);
-  var ch = s && (s.chapters||[]).find(x => x._id === _mState.cid);
+  var s = b && batches.find(x=>x._id===_mState.bid).subjects.find(x => x._id === _mState.sid);
+  var ch = s && s.chapters.find(x => x._id === _mState.cid);
   var parts = [{ label: 'Batches', level: 'batches' }];
   if (b) parts.push({ label: b.name, level: 'subjects', bid: b._id });
   if (s) parts.push({ label: s.name, level: 'chapters', bid: b._id, sid: s._id });
@@ -2291,18 +2671,22 @@ function openDemoModal(bid) {
   if (!demos.length) {
     listEl.innerHTML = '<div class="empty"><i class="ti ti-video"></i>No demo lectures yet</div>';
   } else {
-    listEl.innerHTML = demos.map((l, i) => `
-      <div class="lec-row">
+    listEl.innerHTML = demos.map((l, i) => {
+      var watched = isLectureWatched(l._id);
+      return `
+      <div class="lec-row${watched ? ' lec-watched' : ''}">
         <div class="lec-num">${i+1}</div>
         <div class="lec-info">
           <div class="lec-name">${l.name} <span class="demo-badge" style="margin-left:4px">DEMO</span></div>
           <div class="lec-sub" style="font-size:10px;color:var(--text2);margin-top:2px">${l._subj} · ${l._chap}${l._unit ? ' · ' + l._unit : ''}</div>
           <div class="lec-mini-btns" style="margin-top:6px">
-            <button class="lec-mini-btn lec-mini-watch" onclick="openLecLink('${l.link}','lecture')"><i class="ti ti-player-play-filled"></i> Watch</button>
+            <button class="lec-mini-btn lec-mini-watch" data-lid="${l._id}" onclick="markLectureWatched('${l._id}');openLecLink('${l.link}','lecture')"><i class="ti ti-player-play-filled"></i> Watch</button>
             ${l.notes ? `<button class="lec-mini-btn lec-mini-notes" onclick="openLink('${l.notes}','notes')"><i class="ti ti-notes"></i> Notes</button>` : ''}
           </div>
         </div>
-      </div>`).join('');
+        <button class="lec-watched-check${watched ? ' watched' : ''}" data-lid="${l._id}" onclick="event.stopPropagation();toggleLectureWatched('${l._id}')" title="${watched ? 'Mark as unwatched' : 'Mark as watched'}"><i class="ti ti-check"></i></button>
+      </div>`;
+    }).join('');
   }
   modal.classList.add('show');
 }
@@ -2596,24 +2980,89 @@ var _adWatching = false; // prevent double-click while ad loads
 // ── Lecture link helper ───────────────────────────────────────────────────────
 // Handles both: plain code (e.g. "Abc123") and full links (legacy "https://t.me/bot?start=Abc123")
 // Bot username comes from config — so bot change = no manual DB update needed
+// ── Watched Lecture Tracking ─────────────────────────────────────────────────
+// Purely client-side (per-user via localStorage) — a personal "have I seen
+// this" marker, not a server-tracked progress system. Keyed by lecture _id.
+var _watchedLecturesKey = null;
+var _watchedLectures = {};
+
+function _loadWatchedLectures() {
+  _watchedLecturesKey = 'edubot_watched_' + getUserId();
+  try {
+    var raw = localStorage.getItem(_watchedLecturesKey);
+    _watchedLectures = raw ? JSON.parse(raw) : {};
+  } catch (e) { _watchedLectures = {}; }
+}
+
+function _saveWatchedLectures() {
+  try { localStorage.setItem(_watchedLecturesKey, JSON.stringify(_watchedLectures)); } catch (e) {}
+}
+
+function isLectureWatched(lid) {
+  return !!_watchedLectures[lid];
+}
+
+// Called automatically when the user taps the actual "Lecture" open button
+function markLectureWatched(lid) {
+  if (!lid || _watchedLectures[lid]) return; // already marked — no-op, avoids pointless re-render
+  if (!_watchedLecturesKey) _loadWatchedLectures();
+  _watchedLectures[lid] = Date.now();
+  _saveWatchedLectures();
+  _updateLectureRowUI(lid, true);
+}
+
+// Called when the user taps the corner checkmark badge directly — lets them
+// mark OR unmark manually, independent of actually opening the lecture.
+function toggleLectureWatched(lid) {
+  if (!lid) return;
+  if (!_watchedLecturesKey) _loadWatchedLectures();
+  if (_watchedLectures[lid]) {
+    delete _watchedLectures[lid];
+    _saveWatchedLectures();
+    _updateLectureRowUI(lid, false);
+  } else {
+    markLectureWatched(lid);
+  }
+}
+
+// Patches only the affected row(s) directly in the DOM instead of re-rendering
+// the whole list — keeps the toggle instant and never disturbs scroll position.
+function _updateLectureRowUI(lid, watched) {
+  document.querySelectorAll('.lec-watched-check[data-lid="' + lid + '"]').forEach(function (btn) {
+    btn.classList.toggle('watched', watched);
+    btn.title = watched ? 'Mark as unwatched' : 'Mark as watched';
+    var row = btn.closest('.lec-row');
+    if (row) row.classList.toggle('lec-watched', watched);
+  });
+}
+
+// Shared row-builder used by every lecture list (chapter-with-units "other
+// lectures", chapter-without-units, and unit lecture lists) — one place to
+// keep the watched-badge UI consistent everywhere instead of tripling the markup.
+function _lecRowHtml(l, i) {
+  _popupLectures[l._id] = l;
+  var watched = isLectureWatched(l._id);
+  var checkBtn = `<button class="lec-watched-check${watched ? ' watched' : ''}" data-lid="${l._id}" onclick="event.stopPropagation();toggleLectureWatched(this.dataset.lid)" title="${watched ? 'Mark as unwatched' : 'Mark as watched'}"><i class="ti ti-check"></i></button>`;
+  var body = l.comingSoon
+    ? '<div style="margin-top:6px"><span class="coming-soon-badge">🔜 Coming Soon</span></div>'
+    : `<div class="lec-mini-btns">
+        ${l.isDemo ? '<span class="demo-badge" style="margin-right:4px">DEMO</span>' : ''}
+        <button class="lec-mini-btn lec-mini-watch" data-lid="${l._id}" onclick="markLectureWatched(this.dataset.lid);openLecLink(_popupLectures[this.dataset.lid].link,'lecture')"><i class="ti ti-player-play-filled"></i> Lecture</button>
+        ${l.notes ? `<button class="lec-mini-btn lec-mini-notes" data-lid="${l._id}" onclick="openLink(_popupLectures[this.dataset.lid].notes,'notes')"><i class="ti ti-notes"></i> Notes</button>` : ''}
+      </div>`;
+  return `
+    <div class="lec-row${watched ? ' lec-watched' : ''}">
+      <div class="lec-num">${i + 1}</div>
+      <div class="lec-info">
+        <div class="lec-name">${l.name}</div>
+        ${body}
+      </div>
+      ${checkBtn}
+    </div>`;
+}
+
 function openLecLink(codeOrLink, type) {
   if (!codeOrLink) return openLink('', type || 'lecture');
-
-  // Web app se lecture open hone pe referral confirm karo (fire-and-forget, sirf lecture type pe)
-  if ((type || 'lecture') === 'lecture') {
-    var uid = getUserId();
-    if (uid && !String(uid).startsWith('guest_')) {
-      // Pass user's first name so backend can include it in referrer notification
-      var firstName = (tg && tg.initDataUnsafe && tg.initDataUnsafe.user && tg.initDataUnsafe.user.first_name)
-        ? tg.initDataUnsafe.user.first_name : 'Ek naye dost';
-      fetch('/api/refer/confirm-first-watch', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ referredId: String(uid), referredName: firstName })
-      }).catch(function(){});
-    }
-  }
-
   var url;
   if (codeOrLink.startsWith('http')) {
     // Legacy full link — extract code and rebuild with current bot username
@@ -2627,42 +3076,6 @@ function openLecLink(codeOrLink, type) {
     url = 'https://t.me/' + (window._botUsername || '') + '?start=' + codeOrLink;
   }
   openLink(url, type || 'lecture');
-}
-
-// ── Watched Lecture Tracking (localStorage, per-user) ──────────────────────────
-function _watchedLecStorageKey() {
-  return 'watched_lectures_' + getUserId();
-}
-function _getWatchedLecSet() {
-  try {
-    var raw = localStorage.getItem(_watchedLecStorageKey());
-    return raw ? JSON.parse(raw) : {};
-  } catch (e) { return {}; }
-}
-function isLectureWatched(lecId) {
-  if (!lecId) return false;
-  return !!_getWatchedLecSet()[lecId];
-}
-function toggleLectureWatched(lecId, btnEl, ev) {
-  if (ev) { ev.stopPropagation(); ev.preventDefault(); }
-  if (!lecId) return;
-  var watched = _getWatchedLecSet();
-  var nowWatched = !watched[lecId];
-  if (nowWatched) watched[lecId] = true; else delete watched[lecId];
-  try { localStorage.setItem(_watchedLecStorageKey(), JSON.stringify(watched)); } catch (e) {}
-  _applyWatchedUI(btnEl, nowWatched);
-  toast(nowWatched ? 'Marked as watched ✓' : 'Unmarked', 'success');
-}
-function _applyWatchedUI(btnEl, watched) {
-  if (!btnEl) return;
-  btnEl.classList.toggle('is-watched', watched);
-  var row = btnEl.closest('.lec-row');
-  if (row) row.classList.toggle('is-watched-row', watched);
-}
-function _watchCheckHtml(lecId) {
-  if (!lecId) return '';
-  var watched = isLectureWatched(lecId);
-  return `<div class="lec-watch-check${watched ? ' is-watched' : ''}" data-lid="${lecId}" onclick="toggleLectureWatched('${lecId}', this, event)"><i class="ti ti-check"></i></div>`;
 }
 
 function getUserId() {
@@ -2733,22 +3146,8 @@ function switchNavTab(tab) {
   currentTab = tab;
   document.getElementById('navHome').classList.toggle('active', tab === 'home');
   document.getElementById('navAccess').classList.toggle('active', tab === 'access');
-  document.getElementById('navEarn').classList.toggle('active', tab === 'earn');
   document.getElementById('navRefer').classList.toggle('active', tab === 'refer');
-
-  if (tab === 'earn') {
-    document.querySelectorAll('.page').forEach(function(p) {
-      p.style.transition = 'none';
-      p.style.transform = 'translateX(100%)';
-      p.classList.remove('active');
-    });
-    var earnEl = document.getElementById('page-earn');
-    earnEl.style.transform = '';
-    earnEl.classList.add('active');
-    if (tg) tg.BackButton.hide();
-    initEarnPage();
-    return;
-  }
+  document.getElementById('navEarn').classList.toggle('active', tab === 'earn');
 
   if (tab === 'refer') {
     document.querySelectorAll('.page').forEach(function(p) {
@@ -2761,6 +3160,23 @@ function switchNavTab(tab) {
     refEl.classList.add('active');
     if (tg) tg.BackButton.hide();
     loadReferStats();
+    loadRewardsSummary();
+    startRewardsCountdown();
+    return;
+  }
+
+  if (tab === 'earn') {
+    document.querySelectorAll('.page').forEach(function(p) {
+      p.style.transition = 'none';
+      p.style.transform = 'translateX(100%)';
+      p.classList.remove('active');
+    });
+    var earnEl = document.getElementById('page-earn');
+    earnEl.style.transform = '';
+    earnEl.classList.add('active');
+    if (tg) tg.BackButton.hide();
+    loadSpinStatus();
+    if (!rewardsSummary) loadRewardsSummary(); else renderSpinStatusBar();
     return;
   }
 
@@ -3070,34 +3486,18 @@ async function claimAccess() {
 var _origOpenBatch = openBatch;
 openBatch = function(bid) {
   var b = batches.find(x => x._id === bid);
-  var curUid = String(getUserId());
-
-  if (b && !isAdmin) {
-    // 1. Check point-redeemed access (_premiumAccessMap — expiry aware)
-    var expiresAt = _premiumAccessMap[bid];
-    if (expiresAt && Date.now() < expiresAt) {
-      _origOpenBatch(bid);
-      return;
-    } else if (expiresAt && Date.now() >= expiresAt) {
-      // Expired point access — clean up
-      delete _premiumAccessMap[bid];
-      if (b.premiumUsers) b.premiumUsers = b.premiumUsers.filter(function(u) { return u !== curUid; });
-    }
-
-    // 2. isPremium batch — check premiumUsers (admin-added OR payment purchased)
-    if (b.isPremium) {
-      var inPremiumUsers = b.premiumUsers && b.premiumUsers.includes(curUid);
-      if (!inPremiumUsers) {
-        toast('🔒 Yeh premium batch hai! Purchase karo ya admin se access maango.', 'error');
-        return;
-      }
-      // User is in premiumUsers (purchased/admin granted) — open directly
-      _origOpenBatch(bid);
+  // Premium batch — check permanent access OR active reward-granted access
+  if (b && b.isPremium && !isAdmin) {
+    var curUid = String(getUserId());
+    var hasP = (b.premiumUsers && b.premiumUsers.includes(curUid)) || hasBatchRewardAccess(bid);
+    if (!hasP) {
+      toast('🔒 Yeh premium batch hai! Points se redeem karo ya admin se access maango.', 'error');
       return;
     }
+    // Access granted (permanent or reward) — ads not required, open directly
+    _origOpenBatch(bid);
+    return;
   }
-
-  // Public batch — needs normal 24h ad-based access
   if (!hasAccess()) {
     toast('Watch an ad to unlock access!', 'error');
     switchNavTab('access');
@@ -3221,7 +3621,7 @@ async function verifyForceJoin() {
     if (data.allJoined) {
       _fjPassed = true;
       document.getElementById('forceJoinGate').classList.add('hidden');
-      await Promise.all([load(), loadAccess(), loadAnnouncements()]);
+      await Promise.all([load(), loadAccess(), loadAnnouncements(), loadRewardsSummary()]);
       var dot = document.getElementById('accessDot');
       if (dot) dot.style.background = hasAccess() ? 'var(--green)' : 'var(--red)';
       var banner = document.getElementById('accessBanner');
@@ -3248,6 +3648,7 @@ function _hideVS(cb){var el=document.getElementById('verifyingScreen');if(!el||e
 
 async function init() {
   initTheme();
+  _loadWatchedLectures();
   _animateVsBar();
   await checkAdminAccess();
 
@@ -3257,7 +3658,7 @@ async function init() {
     return;
   }
 
-  await Promise.all([load(), loadAccess(), loadAnnouncements()]);
+  await Promise.all([load(), loadAccess(), loadAnnouncements(), loadRewardsSummary()]);
   var dot = document.getElementById('accessDot');
   if (dot) dot.style.background = hasAccess() ? 'var(--green)' : 'var(--red)';
   var banner = document.getElementById('accessBanner');
@@ -3412,34 +3813,17 @@ body.light-mode .popup-lec-btn-notes{background:var(--surface2);color:var(--text
 .lec-row {
   background:var(--surface);border:1px solid var(--border);
   border-radius:var(--radius);display:flex;align-items:center;
-  padding:12px 14px;gap:12px;
+  padding:12px 14px;gap:12px;position:relative;
   transition:background 0.15s,border-color 0.15s;
   will-change:transform;
   backface-visibility:hidden;
   -webkit-backface-visibility:hidden;
   transform:translateZ(0);
-  position:relative;
 }
-.lec-watch-check{
-  position:absolute;top:8px;right:8px;
-  width:24px;height:24px;border-radius:50%;
-  border:1.5px solid var(--border);
-  background:var(--surface2);
-  display:flex;align-items:center;justify-content:center;
-  cursor:pointer;flex-shrink:0;
-  transition:background 0.18s,border-color 0.18s,transform 0.15s;
-  -webkit-tap-highlight-color:transparent;
-  z-index:2;
-}
-.lec-watch-check i{font-size:13px;color:transparent;transition:color 0.18s}
-.lec-watch-check:active{transform:scale(0.88)}
-.lec-watch-check.is-watched{
-  background:linear-gradient(135deg,#22c55e,#16a34a);
-  border-color:transparent;
-  box-shadow:0 2px 8px rgba(34,197,94,0.35);
-}
-.lec-watch-check.is-watched i{color:#fff}
-.lec-row.is-watched-row{border-color:rgba(34,197,94,0.35)}
+.lec-row.lec-watched{background:rgba(34,197,94,0.1);border-color:rgba(34,197,94,0.45)}
+.lec-watched-check{position:absolute;top:8px;right:8px;width:24px;height:24px;border-radius:50%;border:2px solid var(--border);background:var(--surface);display:flex;align-items:center;justify-content:center;font-size:12px;color:transparent;cursor:pointer;transition:all 0.15s;padding:0;z-index:2;-webkit-tap-highlight-color:transparent}
+.lec-watched-check.watched{background:var(--green);border-color:var(--green);color:#fff}
+.lec-watched-check:active{transform:scale(0.88)}
 .lec-num {
   width:36px;height:36px;border-radius:10px;
   background:linear-gradient(135deg,var(--accent),var(--accent2));
@@ -3636,6 +4020,31 @@ body.light-mode .lec-mini-notes{background:var(--surface2);color:var(--text)}
     </div>
   </div>
 </div>
+
+<!-- Reward Redeem Modal — handles both the simple accessPass confirm AND the batch picker flow -->
+<div class="modal-overlay" id="rewardModal" onclick="closeRewardModalOutside(event)">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <button class="modal-close" onclick="closeRewardModal()"><i class="ti ti-x"></i></button>
+    <div class="modal-title"><i class="ti ti-gift" style="color:var(--accent2)"></i><span id="rewardModalTitle">Redeem Reward</span></div>
+    <div id="rewardModalBody">
+      <div style="text-align:center;padding:16px;color:var(--text3);font-size:13px">Loading...</div>
+    </div>
+  </div>
+</div>
+
+<!-- Reward History Modal -->
+<div class="modal-overlay" id="rewardHistoryModal" onclick="closeRewardHistoryOutside(event)">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <button class="modal-close" onclick="closeRewardHistory()"><i class="ti ti-x"></i></button>
+    <div class="modal-title"><i class="ti ti-history" style="color:var(--accent2)"></i><span>Reward History</span></div>
+    <div id="rewardHistoryBody" style="display:flex;flex-direction:column;max-height:340px;overflow-y:auto">
+      <div style="text-align:center;padding:16px;color:var(--text3);font-size:13px">Loading...</div>
+    </div>
+  </div>
+</div>
+
 <div class="modal-overlay" id="editModal" onclick="closeEditOutside(event)">
   <div class="modal">
     <div class="modal-handle"></div>
@@ -3713,13 +4122,6 @@ function getReferLink() {
   return 'https://t.me/' + (window._botUsername || '') + '?start=ref_' + uid;
 }
 
-// Flag set to true after spin award — prevents loadReferStats from overwriting
-// fresh points until server confirms the new total
-var _spinJustAwarded = false;
-// Map of batchId -> expiresAt for point-redeemed premium access (fetched from server)
-var _premiumAccessMap = {};
-var _spinAwardedTotal = 0; // The server-confirmed total after spin
-
 async function loadReferStats() {
   var uid = getUserId();
   if (!uid) return;
@@ -3733,20 +4135,14 @@ async function loadReferStats() {
   try {
     var r = await fetch('/api/refer/stats/' + uid);
     var data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Failed to load stats');
     var countEl = document.getElementById('referCount');
     var pointsEl = document.getElementById('referPoints');
     if (countEl) countEl.textContent = data.referrals || 0;
-    // If spin was just awarded and server hasn't processed yet, use our local value
-    if (_spinJustAwarded) {
-      // Keep the higher of: server value vs our locally tracked total
-      var serverPts = parseInt(data.points) || 0;
-      var displayPts = Math.max(serverPts, _spinAwardedTotal);
-      if (pointsEl) pointsEl.textContent = displayPts;
-    } else {
-      if (pointsEl) pointsEl.textContent = data.points || 0;
-    }
+    if (pointsEl) pointsEl.textContent = data.points || 0;
   } catch(e) {
     console.error('Refer stats error:', e);
+    toast('⚠️ Stats load failed: ' + (e.message || 'server error'), 'error');
   }
 }
 
@@ -3775,158 +4171,6 @@ function shareReferLink() {
     tg.openLink(shareUrl, { try_instant_view: false });
   } else {
     window.open(shareUrl, '_blank');
-  }
-}
-
-// ── Reward Redemption ─────────────────────────────────────────────────────────
-var _rewardType = null;   // 'access_24h' | 'batch_24h' | 'batch_7d'
-var _rewardCost = 0;
-var _currentReferPoints = 0;
-
-// Called on refer page load — sync points display
-var _origLoadReferStats = loadReferStats;
-loadReferStats = async function() {
-  await _origLoadReferStats();
-  // sync points to reward bar display
-  var pe = document.getElementById('referPoints');
-  var rd = document.getElementById('rewardPointsDisplay');
-  if (pe && rd) rd.textContent = pe.textContent;
-  try { _currentReferPoints = parseInt(pe && pe.textContent) || 0; } catch(e){}
-};
-
-async function redeemReward(type, cost) {
-  var uid = getUserId();
-  if (!uid) return toast('Telegram se open karo!', 'error');
-
-  // Fetch latest points first
-  try {
-    var r = await fetch('/api/refer/stats/' + uid);
-    var data = await r.json();
-    _currentReferPoints = data.points || 0;
-    var pd = document.getElementById('rewardPointsDisplay');
-    if (pd) pd.textContent = _currentReferPoints;
-    var pe = document.getElementById('referPoints');
-    if (pe) pe.textContent = _currentReferPoints;
-  } catch(e) {}
-
-  if (_currentReferPoints < cost) {
-    return toast('Points kam hain! Aapke paas ' + _currentReferPoints + ' points hain, ' + cost + ' chahiye.', 'error');
-  }
-
-  if (type === 'access_24h') {
-    // Direct redeem — no batch selection needed
-    if (!confirm('1 point use karke 8h access lena chahte ho?')) return;
-    await _executeReward(type, cost, null);
-  } else {
-    // batch_24h or batch_7d — show batch picker
-    _rewardType = type;
-    _rewardCost = cost;
-    _openRewardBatchPicker(type, cost);
-  }
-}
-
-function _openRewardBatchPicker(type, cost) {
-  var overlay = document.getElementById('rewardBatchPickerOverlay');
-  var titleEl = document.getElementById('rewardBatchPickerTitle');
-  var descEl = document.getElementById('rewardBatchPickerDesc');
-  var listEl = document.getElementById('rewardBatchPickerList');
-  var iconEl = document.getElementById('rewardBatchPickerIcon');
-
-  if (type === 'batch_24h') {
-    titleEl.textContent = '24h Batch Access';
-    descEl.textContent = '10 points use hoenge. Kaun sa batch unlock karna chahte ho?';
-    iconEl.textContent = '📚';
-  } else {
-    titleEl.textContent = '7 Din Batch Access';
-    descEl.textContent = '50 points use hoenge. Kaun sa batch unlock karna chahte ho?';
-    iconEl.textContent = '🏆';
-  }
-
-  var allBatches = batches.filter(function(b) { return b.isPremium === true; });
-  if (!allBatches.length) {
-    listEl.innerHTML = '<div style="text-align:center;color:var(--text2);padding:20px;font-size:13px">Koi batch available nahi</div>';
-  } else {
-    listEl.innerHTML = allBatches.map(function(b) {
-      return '<div onclick="selectRewardBatch(\'' + b._id + '\')" style="display:flex;align-items:center;gap:12px;padding:12px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);cursor:pointer;transition:border-color 0.15s" onmouseenter="this.style.borderColor=\'var(--accent)\'" onmouseleave="this.style.borderColor=\'var(--border)\'">' +
-        '<div style="width:40px;height:40px;border-radius:10px;background:var(--surface3);display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0;overflow:hidden">' +
-          (b.pic ? '<img src="' + b.pic + '" style="width:100%;height:100%;object-fit:cover;border-radius:10px">' : '🎓') +
-        '</div>' +
-        '<div style="flex:1;min-width:0">' +
-          '<div style="font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + b.name + '</div>' +
-          '<div style="font-size:11px;color:var(--text2);margin-top:2px">' + b.subjects.length + ' subjects</div>' +
-        '</div>' +
-        '<i class="ti ti-chevron-right" style="color:var(--text3);font-size:16px;flex-shrink:0"></i>' +
-      '</div>';
-    }).join('');
-  }
-
-  overlay.style.display = 'flex';
-}
-
-function closeRewardBatchPicker() {
-  document.getElementById('rewardBatchPickerOverlay').style.display = 'none';
-  _rewardType = null;
-  _rewardCost = 0;
-}
-
-async function selectRewardBatch(batchId) {
-  // Save type and cost BEFORE closing picker (close resets _rewardType to null)
-  var savedType = _rewardType;
-  var savedCost = _rewardCost;
-  closeRewardBatchPicker();
-  var b = batches.find(function(x) { return x._id === batchId; });
-  var bName = b ? b.name : 'selected batch';
-  var duration = savedType === 'batch_24h' ? '24 ghante' : '7 din';
-  if (!confirm('"' + bName + '" ko ' + duration + ' ke liye unlock karna chahte ho? ' + savedCost + ' points use honge.')) return;
-  await _executeReward(savedType, savedCost, batchId);
-}
-
-async function _executeReward(type, cost, batchId) {
-  var uid = getUserId();
-  // Map frontend type → backend tier
-  var tierMap = { 'access_24h': 'access_24h', 'batch_24h': 'premium_1d', 'batch_7d': 'premium_7d' };
-  var tier = tierMap[type];
-  if (!tier) return toast('Invalid reward type', 'error');
-
-  try {
-    var payload = { userId: uid, tier: tier };
-    if (batchId) payload.batchId = batchId;
-
-    var r = await fetch('/api/refer/redeem', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    });
-    var data = await r.json();
-    if (data.error) return toast('❌ ' + data.error, 'error');
-
-    // Update points in UI — backend returns newPoints
-    _currentReferPoints = (data.newPoints != null) ? data.newPoints : Math.max(0, _currentReferPoints - cost);
-    var pe = document.getElementById('referPoints');
-    if (pe) pe.textContent = _currentReferPoints;
-    var pd = document.getElementById('rewardPointsDisplay');
-    if (pd) pd.textContent = _currentReferPoints;
-
-    if (type === 'access_24h' && data.expiresAt) {
-      accessExpiresAt = data.expiresAt;
-      localStorage.setItem('edubot_access_expires', data.expiresAt);
-      updateHomeTimer();
-      startCountdown();
-      var dot = document.getElementById('accessDot');
-      if (dot) dot.style.background = 'var(--green)';
-      toast('🎉 8h access mil gaya! Points bache: ' + _currentReferPoints, 'success');
-    } else if (type === 'batch_24h' || type === 'batch_7d') {
-      // Refresh both batches and premium access map so expiry is tracked correctly
-      var fresh = await apiFetch('/api/batches').catch(function(){return null;});
-      if (fresh) { batches = fresh; renderBatches(batches); }
-      loadPremiumAccessMap(); // Sync fresh expiry data from server
-      var dur = type === 'batch_24h' ? '24h' : '7 din';
-      toast('🎉 Batch ' + dur + ' ke liye unlock hua! Points bache: ' + _currentReferPoints, 'success');
-    } else {
-      toast('🎉 Reward redeem hua!', 'success');
-    }
-  } catch(e) {
-    toast('Redeem failed: ' + (e.message || 'Please try again'), 'error');
   }
 }
 
@@ -4150,429 +4394,6 @@ async function adminDeleteCoupon(id) {
     adminLoadCoupons();
   } catch(e) { toast('Error', 'error'); }
 }
-
-// ── Earn / Daily Spinner ──────────────────────────────────────────────────────
-
-// Spinner wheel segments: weighted — 1 most common, 5 very rare
-// 12 total segments: 1×4, 2×3, 3×2, 4×2, 5×1
-var SPIN_SEGMENTS = [1, 2, 3, 1, 4, 2, 1, 3, 2, 1, 4, 5];
-
-// Segment colors — one per segment
-var SPIN_COLORS = ['#4f8ef7','#f59e0b','#22c55e','#ef4444','#7c5cbf',
-                   '#06b6d4','#f97316','#ec4899','#10b981','#a855f7',
-                   '#e11d48','#0ea5e9'];
-
-var SPIN_MAX_PER_DAY = 5; // Daily spin limit
-
-// State
-var _spinAngle = 0;          // Current rotation angle of the wheel
-var _spinning = false;        // Whether animation is running
-var _spinPending = false;     // Spin happened, waiting for ad
-var _pendingPoints = 0;       // Points waiting to be awarded after ad
-var _spinResetTimer = null;   // Interval for countdown display
-var _spinCooldownEnd = 0;     // Timestamp when cooldown ends (30s after each spin)
-var _spinCooldownTimer = null; // Interval for cooldown countdown UI
-
-/**
- * Get today's date string (YYYY-MM-DD) based on user local time.
- * Resets happen at midnight 12:00 AM (local time).
- */
-function _spinTodayKey() {
-  var d = new Date();
-  return d.getFullYear() + '-' + (d.getMonth()+1) + '-' + d.getDate();
-}
-
-/** Load spin state from localStorage, auto-reset if it's a new day. */
-function _loadSpinState() {
-  var raw = localStorage.getItem('edubot_spin_state');
-  var state = { date: '', spinsUsed: 0, totalPoints: 0 };
-  try { if (raw) state = JSON.parse(raw); } catch(e) {}
-  // New day = reset spins used (but keep total points)
-  if (state.date !== _spinTodayKey()) {
-    state.date = _spinTodayKey();
-    state.spinsUsed = 0;
-    _saveSpinState(state);
-  }
-  return state;
-}
-
-/** Persist spin state to localStorage. */
-function _saveSpinState(state) {
-  localStorage.setItem('edubot_spin_state', JSON.stringify(state));
-}
-
-/** Draw the spinner wheel on canvas using current _spinAngle.
- *  Pointer is at BOTTOM. Winning segment = the one whose center lands at Math.PI/2 (bottom).
- */
-function _drawWheel() {
-  var canvas = document.getElementById('spinnerCanvas');
-  if (!canvas) return;
-  var ctx = canvas.getContext('2d');
-  var cx = canvas.width / 2;
-  var cy = canvas.height / 2;
-  var r = cx - 4;
-  var n = SPIN_SEGMENTS.length;
-  var arc = (2 * Math.PI) / n;
-
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-  for (var i = 0; i < n; i++) {
-    var startA = _spinAngle + i * arc;
-    var endA = startA + arc;
-    var midA = startA + arc / 2;
-
-    // Slice fill
-    ctx.beginPath();
-    ctx.moveTo(cx, cy);
-    ctx.arc(cx, cy, r, startA, endA);
-    ctx.closePath();
-    ctx.fillStyle = SPIN_COLORS[i % SPIN_COLORS.length];
-    ctx.fill();
-
-    // Divider lines
-    ctx.strokeStyle = 'rgba(0,0,0,0.25)';
-    ctx.lineWidth = 2;
-    ctx.stroke();
-
-    // Label: rotate to segment center, draw text outward
-    ctx.save();
-    ctx.translate(cx, cy);
-    ctx.rotate(midA);
-    ctx.textAlign = 'center';
-    ctx.fillStyle = '#ffffff';
-    ctx.font = 'bold 20px system-ui, sans-serif';
-    ctx.shadowColor = 'rgba(0,0,0,0.5)';
-    ctx.shadowBlur = 4;
-    ctx.fillText(String(SPIN_SEGMENTS[i]), r * 0.62, 7);
-    ctx.restore();
-  }
-
-  // Outer ring highlight
-  ctx.beginPath();
-  ctx.arc(cx, cy, r, 0, 2 * Math.PI);
-  ctx.strokeStyle = 'rgba(255,255,255,0.15)';
-  ctx.lineWidth = 3;
-  ctx.stroke();
-
-  // Center circle cover
-  ctx.beginPath();
-  ctx.arc(cx, cy, 28, 0, 2 * Math.PI);
-  ctx.fillStyle = '#1a1a2e';
-  ctx.fill();
-  ctx.strokeStyle = 'rgba(255,255,255,0.2)';
-  ctx.lineWidth = 2;
-  ctx.stroke();
-}
-
-/** Update the spins-left UI and spin button state. */
-function _updateSpinUI() {
-  var state = _loadSpinState();
-  var left = Math.max(0, SPIN_MAX_PER_DAY - state.spinsUsed);
-
-  var leftEl = document.getElementById('spinsLeft');
-  if (leftEl) leftEl.textContent = left;
-
-  var totalEl = document.getElementById('earnTotalPoints');
-  if (totalEl) totalEl.textContent = state.totalPoints;
-
-  var btn = document.getElementById('earnSpinBtn');
-  var cBtn = document.getElementById('spinCenterBtn');
-  var notice = document.getElementById('spinAdNotice');
-  var now = Date.now();
-  var inCooldown = _spinCooldownEnd > now;
-  var cooldownSec = inCooldown ? Math.ceil((_spinCooldownEnd - now) / 1000) : 0;
-
-  if (left === 0) {
-    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="ti ti-ban"></i> No Spins Left Today'; }
-    if (cBtn) { cBtn.disabled = true; cBtn.textContent = '0'; }
-  } else if (inCooldown) {
-    // Cooldown active — disable button and show countdown
-    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="ti ti-clock"></i> Wait ' + cooldownSec + 's...'; }
-    if (cBtn) { cBtn.disabled = true; cBtn.textContent = cooldownSec + 's'; }
-  } else {
-    if (btn) { btn.disabled = _spinning; btn.innerHTML = _spinning ? '<i class="ti ti-loader-2" style="animation:spin 0.8s linear infinite;display:inline-block"></i> Spinning...' : '<i class="ti ti-rotate-clockwise"></i> Spin Now'; }
-    if (cBtn) { cBtn.disabled = _spinning; cBtn.textContent = _spinning ? '⏳' : 'SPIN'; }
-  }
-
-  // Show ad notice after first load so user knows
-  if (notice) notice.style.display = 'block';
-}
-
-/** Countdown timer showing time until next midnight reset. */
-function _startSpinResetCountdown() {
-  if (_spinResetTimer) clearInterval(_spinResetTimer);
-  function _tick() {
-    var now = new Date();
-    var midnight = new Date(now);
-    midnight.setHours(24, 0, 0, 0); // Next midnight
-    var diff = midnight - now;
-    var h = Math.floor(diff / 3600000);
-    var m = Math.floor((diff % 3600000) / 60000);
-    var s = Math.floor((diff % 60000) / 1000);
-    var el = document.getElementById('spinResetTimer');
-    if (el) el.textContent = (h<10?'0'+h:h)+':'+(m<10?'0'+m:m)+':'+(s<10?'0'+s:s);
-  }
-  _tick();
-  _spinResetTimer = setInterval(_tick, 1000);
-}
-
-/** Initialize earn page — fetch spin count from server (survives redeploy/refresh). */
-// Fetch premium batch access map from server — called on app load and after redeem
-function loadPremiumAccessMap() {
-  var uid = getUserId ? getUserId() : null;
-  if (!uid) return;
-  fetch('/api/batch-access/' + uid)
-    .then(function(r) { return r.json(); })
-    .then(function(data) {
-      if (data && data.accessMap) {
-        _premiumAccessMap = data.accessMap;
-        // Re-render batch cards to show correct expiry state
-        if (typeof renderBatches === 'function') renderBatches();
-      }
-    })
-    .catch(function() {});
-}
-
-function initEarnPage() {
-  _drawWheel();
-  _updateSpinUI();
-  _startSpinResetCountdown();
-
-  // Fetch today's spin count from DB — overrides localStorage to survive redeployes
-  var uid = getUserId ? getUserId() : null;
-  if (!uid) return;
-  fetch('/api/spin-status/' + uid)
-    .then(function(r) { return r.json(); })
-    .then(function(data) {
-      if (data && typeof data.spinsToday === 'number') {
-        // Sync localStorage with server's authoritative count
-        var state = _loadSpinState();
-        // Only update if server count is higher (prevents going backward)
-        if (data.spinsToday > (state.spinsUsed || 0)) {
-          state.spinsUsed = data.spinsToday;
-          _saveSpinState(state);
-        }
-        _updateSpinUI();
-      }
-    })
-    .catch(function() { /* keep localStorage value on API fail */ });
-}
-
-/**
- * Called when user taps SPIN.
- * 1. Check spins remaining.
- * 2. Pick weighted random result.
- * 3. Animate wheel.
- * 4. After animation, show ad.
- * 5. Only award points if ad completes successfully.
- */
-function startSpin() {
-  if (_spinning) return;
-  var state = _loadSpinState();
-  var left = SPIN_MAX_PER_DAY - state.spinsUsed;
-
-  if (left <= 0) {
-    toast('Aaj ke 5 spins ho gaye! Kal wapas aao 🌙', 'error');
-    return;
-  }
-
-  // Cooldown check — 30 seconds between spins to prevent spam
-  if (_spinCooldownEnd > Date.now()) {
-    var remaining = Math.ceil((_spinCooldownEnd - Date.now()) / 1000);
-    toast('⏳ ' + remaining + ' seconds baad spin karo!', 'error');
-    return;
-  }
-
-  // Check Monetag SDK is available BEFORE doing anything
-  if (typeof show_11011844 === 'undefined') {
-    toast('Ad load nahi hua. Ad blocker band karo!', 'error');
-    return;
-  }
-
-  // NEW FLOW: Show ad FIRST — only spin + award if ad completes
-  // This way a failed ad does NOT consume a spin
-  _spinning = true;
-  _updateSpinUI();
-  toast('Ad dekho aur spin unlock karo... 📺', '');
-
-  // Pick result now (hidden from user until wheel stops)
-  var resultIdx = Math.floor(Math.random() * SPIN_SEGMENTS.length);
-  _pendingPoints = SPIN_SEGMENTS[resultIdx];
-
-  var uid = tg && tg.initDataUnsafe && tg.initDataUnsafe.user ? String(tg.initDataUnsafe.user.id) : 'unknown';
-
-  // Show ad — only proceed if successful
-  show_11011844({ ymid: uid })
-    .then(function() {
-      // Ad watched successfully — NOW consume spin and animate wheel
-      var st = _loadSpinState();
-      st.spinsUsed += 1;
-      _saveSpinState(st);
-
-      // Start 30s cooldown — prevents spam clicking after each spin
-      _spinCooldownEnd = Date.now() + 15000;
-      if (_spinCooldownTimer) clearInterval(_spinCooldownTimer);
-      _spinCooldownTimer = setInterval(function() {
-        if (Date.now() >= _spinCooldownEnd) {
-          clearInterval(_spinCooldownTimer);
-          _spinCooldownTimer = null;
-        }
-        _updateSpinUI();
-      }, 1000);
-
-      _spinPending = false;
-      _playWheelAnimation(resultIdx);
-    })
-    .catch(function(err) {
-      // Ad failed — spin NOT consumed, user can try again
-      _spinning = false;
-      _updateSpinUI();
-      var msg = (err && err.message) || '';
-      if (msg.toLowerCase().indexOf('block') !== -1 || msg.toLowerCase().indexOf('load') !== -1) {
-        toast('❌ Ad blocker detected! Blocker band karo aur try karo.', 'error');
-      } else {
-        toast('❌ Ad complete nahi hua. Spin waste nahi hua — try again!', 'error');
-      }
-    });
-}
-
-/** Animate the wheel to land on resultIdx segment, then award points. */
-function _playWheelAnimation(resultIdx) {
-  // Pointer is at TOP = -Math.PI/2 in canvas coords
-  // Target: winning segment center at top pointer
-  var n = SPIN_SEGMENTS.length;
-  var arc = (2 * Math.PI) / n;
-  var targetBase = -(Math.PI / 2) - (resultIdx * arc + arc / 2);
-
-  // Normalize angles
-  var currentNorm = ((_spinAngle % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
-  var targetNorm  = ((targetBase  % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
-
-  // Clockwise delta to reach target
-  var delta = (targetNorm - currentNorm + 2 * Math.PI) % (2 * Math.PI);
-  if (delta < 0.5) delta += 2 * Math.PI;
-
-  // 10–14 full rotations for visual effect
-  var extraSpins = (10 + Math.floor(Math.random() * 5)) * 2 * Math.PI;
-  var totalAngle  = _spinAngle + extraSpins + delta;
-
-  var start = null;
-  var duration = 4200;
-  var startAngle = _spinAngle;
-
-  // Ease-out cubic — fast start, smooth stop
-  function easeOut(t) { return 1 - Math.pow(1 - t, 3); }
-
-  function animate(ts) {
-    if (!start) start = ts;
-    var elapsed  = ts - start;
-    var progress = Math.min(elapsed / duration, 1);
-    _spinAngle = startAngle + (totalAngle - startAngle) * easeOut(progress);
-    _drawWheel();
-    if (progress < 1) {
-      requestAnimationFrame(animate);
-    } else {
-      _spinAngle = totalAngle;
-      _spinning  = false;
-      _updateSpinUI();
-      // Award points after wheel stops
-      _awardSpinPoints(_pendingPoints);
-    }
-  }
-  requestAnimationFrame(animate);
-}
-
-/** Award points to user — saves to localStorage + backend, then shows result popup. */
-function _awardSpinPoints(pts) {
-  // 1. Save to localStorage immediately so UI reflects change even if API fails
-  var state = _loadSpinState();
-  state.totalPoints = (state.totalPoints || 0) + pts;
-  _saveSpinState(state);
-  _spinPending = false;
-
-  var uid = getUserId ? getUserId() : null;
-  var initData = tg ? tg.initData : '';
-
-  // 2. Show popup immediately with earned points (don't wait for API)
-  _showSpinPopup(pts);
-  _updateSpinUI();
-
-  // 3. POST to backend — update DB + get fresh authoritative total
-  // Set flag so loadReferStats doesn't overwrite our fresh points
-  _spinJustAwarded = true;
-  var currentShown = parseInt((document.getElementById('referPoints') || {}).textContent) || 0;
-  _spinAwardedTotal = currentShown + pts; // Optimistic total until server confirms
-
-  // Update UI optimistically right now
-  var rpEl = document.getElementById('referPoints');
-  if (rpEl) rpEl.textContent = _spinAwardedTotal;
-  var rdEl = document.getElementById('rewardPointsDisplay');
-  if (rdEl) rdEl.textContent = _spinAwardedTotal;
-  var epEl = document.getElementById('earnTotalPoints');
-  if (epEl) epEl.textContent = _spinAwardedTotal;
-
-  if (uid && initData) {
-    fetch('/api/spin-reward', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-tg-init-data': initData
-      },
-      body: JSON.stringify({ userId: String(uid), points: pts })
-    })
-    .then(function(r) { return r.json(); })
-    .then(function(data) {
-      if (data && data.availablePoints !== undefined) {
-        // Server confirmed — set authoritative total and clear flag
-        _spinAwardedTotal = data.availablePoints;
-        // Sync server-side spin count back to localStorage
-        if (typeof data.spinsToday === 'number') {
-          var st = _loadSpinState();
-          st.spinsUsed = data.spinsToday;
-          _saveSpinState(st);
-          _updateSpinUI();
-        }
-        var rpEl2 = document.getElementById('referPoints');
-        if (rpEl2) rpEl2.textContent = data.availablePoints;
-        var rdEl2 = document.getElementById('rewardPointsDisplay');
-        if (rdEl2) rdEl2.textContent = data.availablePoints;
-        var epEl2 = document.getElementById('earnTotalPoints');
-        if (epEl2) epEl2.textContent = data.availablePoints;
-      }
-      // Clear flag after 10 seconds (enough time for any in-flight loadReferStats to settle)
-      setTimeout(function() { _spinJustAwarded = false; }, 10000);
-    })
-    .catch(function(err) {
-      console.warn('spin-reward API failed, keeping optimistic value:', err);
-      // Keep optimistic value — clear flag after delay
-      setTimeout(function() { _spinJustAwarded = false; }, 10000);
-    });
-  } else {
-    // No TG initData (browser testing) — optimistic value already set above
-    setTimeout(function() { _spinJustAwarded = false; }, 10000);
-  }
-}
-
-/** Show spin result popup with earned points. */
-function _showSpinPopup(pts) {
-  var emojis = { 1:'😊', 2:'🎉', 3:'🔥', 4:'💎', 5:'🏆' };
-  var el = document.getElementById('spinResultEmoji');
-  var title = document.getElementById('spinResultTitle');
-  var sub = document.getElementById('spinResultSub');
-  if (el) el.textContent = emojis[pts] || '🎉';
-  if (title) {
-    title.textContent = '+' + pts + ' Point' + (pts > 1 ? 's' : '') + '!';
-    title.style.color = pts >= 4 ? '#f59e0b' : 'var(--green)';
-  }
-  if (sub) sub.textContent = 'Points aapke account mein add ho gaye. Refer tab se redeem karo!';
-  document.getElementById('spinResultOverlay').classList.add('show');
-}
-
-/** Close result popup. */
-function closeSpinResult() {
-  document.getElementById('spinResultOverlay').classList.remove('show');
-}
-
 </script>
 
 </body>
