@@ -121,8 +121,13 @@ async function sendFile(bot, chatId, record) {
       default:           return await bot.sendDocument(chatId, record.file_id, { caption, filename: record.file_name, protect_content: protect });
     }
   } catch (err) {
+    // file_id can go bad (e.g. after switching to a new bot token, since a
+    // Telegram file_id is only valid for the bot that issued it). Fall back to
+    // copying the mirrored message from the storage channel — but force our own
+    // caption, otherwise Telegram keeps whatever caption was on that channel
+    // message originally (old filename / promo text) instead of record.file_name.
     if (STORAGE_CHANNEL_ID && record.channel_msg_id) {
-      try { return await bot.copyMessage(chatId, STORAGE_CHANNEL_ID, record.channel_msg_id, { protect_content: protect }); } catch (_) {}
+      try { return await bot.copyMessage(chatId, STORAGE_CHANNEL_ID, record.channel_msg_id, { caption, protect_content: protect }); } catch (_) {}
     }
     throw err;
   }
@@ -447,6 +452,88 @@ async function startBot() {
     if(rmWords.includes(wl)) return bot.sendMessage(chatId,`⚠️ Already in list.`);
     rmWords.push(wl);
     bot.sendMessage(chatId,`✅ Added <code>${esc(word)}</code>. Total: ${rmWords.length}`,{parse_mode:"HTML"});
+  });
+
+  // ── /migrate ──────────────────────────────────────────────────────────────
+  // Fixes files saved by an old bot token: a Telegram file_id only works for the
+  // bot that issued it, so after switching bots, sendFile()'s primary path fails
+  // and falls back to copyMessage from the storage channel — which shows the
+  // channel's original caption instead of the correct file_name. This command
+  // re-forwards every stored file from the storage channel (which the CURRENT
+  // bot can access), grabs a fresh valid file_id, and updates the DB in place.
+  // The original file_name already stored in the DB is preserved — only file_id
+  // is replaced — so nothing about naming needs to be re-typed.
+  const sleep = (ms) => new Promise((res) => setTimeout(res, ms));
+  let migrateRunning = false;
+
+  bot.onText(/\/migrate/, async (msg) => {
+    if (isGroupChat(msg) || !isOwner(msg.from?.id)) return;
+    const chatId = msg.chat.id;
+    if (!STORAGE_CHANNEL_ID) return bot.sendMessage(chatId, `⚠️ STORAGE_CHANNEL_ID not set — nothing to migrate from.`);
+    if (migrateRunning) return bot.sendMessage(chatId, `⚠️ A migration is already running.`);
+    migrateRunning = true;
+
+    try {
+      const singleFiles = db.fileRecord.findAllWithChannelMsg();
+      const batches = db.bulkBatch.findAll();
+      const batchJobs = [];
+      for (const b of batches) {
+        b.files.forEach((f, idx) => { if (f.channel_msg_id) batchJobs.push({ batch: b, idx }); });
+      }
+      const total = singleFiles.length + batchJobs.length;
+      if (!total) return bot.sendMessage(chatId, `Nothing to migrate — no files have a channel_msg_id.`);
+
+      const status = await bot.sendMessage(chatId, `🔄 Migrating 0/${total}...`);
+      let done = 0, fixed = 0, failed = 0;
+      const failedCodes = [];
+
+      const migrateOne = async (channelMsgId) => {
+        // Forward → new valid file_id for THIS bot, then clean up the forwarded copy.
+        const fwd = await bot.forwardMessage(chatId, STORAGE_CHANNEL_ID, channelMsgId);
+        const info = extractFileInfo(fwd);
+        bot.deleteMessage(chatId, fwd.message_id).catch(() => {});
+        if (!info) throw new Error("no file in forwarded message");
+        return info.file_id;
+      };
+
+      for (const rec of singleFiles) {
+        try {
+          const file_id = await migrateOne(rec.channel_msg_id);
+          db.fileRecord.updateFileId(rec.id, { file_id });
+          FileRecord.updateOne({ code: rec.code }, { file_id }).catch(() => {});
+          fixed++;
+        } catch (err) { failed++; failedCodes.push(rec.code); }
+        done++;
+        if (done % 20 === 0 || done === total) {
+          bot.editMessageText(`🔄 Migrating ${done}/${total}... (✅ ${fixed} 🚫 ${failed})`, { chat_id: chatId, message_id: status.message_id }).catch(() => {});
+        }
+        await sleep(300); // stay well under Telegram's flood limits
+      }
+
+      for (const { batch, idx } of batchJobs) {
+        try {
+          const file_id = await migrateOne(batch.files[idx].channel_msg_id);
+          batch.files[idx].file_id = file_id;
+          db.bulkBatch.updateFiles(batch.id, batch.files);
+          BulkBatch.updateOne({ batch_code: batch.batch_code }, { files: batch.files }).catch(() => {});
+          fixed++;
+        } catch (err) { failed++; failedCodes.push(batch.batch_code); }
+        done++;
+        if (done % 20 === 0 || done === total) {
+          bot.editMessageText(`🔄 Migrating ${done}/${total}... (✅ ${fixed} 🚫 ${failed})`, { chat_id: chatId, message_id: status.message_id }).catch(() => {});
+        }
+        await sleep(300);
+      }
+
+      let summary = `✅ <b>Migration done!</b>\n\n📦 Total: ${total}\n✅ Fixed: ${fixed}\n🚫 Failed: ${failed}`;
+      if (failedCodes.length) summary += `\n\n⚠️ Failed codes (message likely deleted from channel):\n${failedCodes.slice(0, 30).map(esc).join(", ")}${failedCodes.length > 30 ? "…" : ""}`;
+      await bot.sendMessage(chatId, summary, { parse_mode: "HTML" });
+    } catch (err) {
+      console.error("Migrate error:", err.message);
+      bot.sendMessage(chatId, `❌ Migration failed: ${esc(err.message)}`, { parse_mode: "HTML" });
+    } finally {
+      migrateRunning = false;
+    }
   });
 
   // ── Telegram link fetch ───────────────────────────────────────────────────
