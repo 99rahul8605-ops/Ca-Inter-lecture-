@@ -689,10 +689,58 @@ async function startBot() {
     const processing=await bot.sendMessage(chatId,"⏳ Fetching stats...");
     try {
       const s=await (await fetch(`http://localhost:${PORT}/api/stats`)).json();
-      const uptime=process.uptime(); const h=Math.floor(uptime/3600); const m=Math.floor((uptime%3600)/60);
-      const text=`📊 <b>Bot Stats</b>\n\n👤 <b>Users</b>\n• Total: ${s.users.totalUsers}\n• New This Week: ${s.users.recentUsers}\n\n📚 <b>Content</b>\n• Batches: ${s.content.totalBatches} (🟢 ${s.content.publicBatches} · 🔒 ${s.content.privateBatches})\n• Subjects: ${s.content.totalSubjects} | Chapters: ${s.content.totalChapters} | Lectures: ${s.content.totalLectures}\n\n📁 <b>File Store</b>\n• Files: ${db.fileRecord.count()} | Bulk: ${db.bulkBatch.count()}\n\n🔑 <b>Access</b>\n• Total: ${s.access.totalAccess} | Active: ${s.access.activeAccess}\n\n👥 <b>Referrals</b>\n• Total: ${s.referrals.totalReferrals} | Referrers: ${s.referrals.uniqueReferrers}\n\n⚙️ <b>Server</b>\n• Uptime: ${h}h ${m}m\n• MongoDB: ${mongoose.connection.readyState===1?"🟢 Connected":"🔴 Disconnected"}\n• SQLite: ✅ Active (all reads)`;
+      const uptime=process.uptime(); const d=Math.floor(uptime/86400); const h=Math.floor((uptime%86400)/3600); const m=Math.floor((uptime%3600)/60);
+      const uptimeStr = d>0 ? `${d}d ${h}h ${m}m` : `${h}h ${m}m`;
+      const mem = process.memoryUsage();
+      const memMB = (mem.rss/1024/1024).toFixed(0);
+
+      const fs = s.fileStore||{};
+      const fileHealthLine = (label, withBackup, noBackup) =>
+        noBackup > 0
+          ? `• ${label}: ${withBackup+noBackup} (🟢 ${withBackup} backed up · 🔴 ${noBackup} no backup)`
+          : `• ${label}: ${withBackup+noBackup} (🟢 all backed up)`;
+
+      const text = [
+        `📊 <b>Bot Stats</b>`,
+        ``,
+        `👤 <b>Users</b>`,
+        `• Total: ${s.users.totalUsers}`,
+        `• New Today: ${s.users.newToday} | This Week: ${s.users.recentUsers}`,
+        ``,
+        `📚 <b>Content</b>`,
+        `• Batches: ${s.content.totalBatches} (🟢 ${s.content.publicBatches} public · 🔒 ${s.content.privateBatches} private)`,
+        `• Subjects: ${s.content.totalSubjects} | Chapters: ${s.content.totalChapters} | Lectures: ${s.content.totalLectures}`,
+        `• Premium Unlocks (paid): ${s.content.totalPremiumUnlocks}`,
+        ``,
+        `📁 <b>File Store Health</b>`,
+        fileHealthLine('Single Files', fs.singleFilesWithBackup||0, fs.singleFilesNoBackup||0),
+        fileHealthLine('Bulk Files', fs.bulkFilesWithBackup||0, fs.bulkFilesNoBackup||0),
+        `• Bulk Batches: ${fs.bulkBatches||0}`,
+        (fs.singleFilesNoBackup>0||fs.bulkFilesNoBackup>0) ? `⚠️ Files with no backup can't be auto-recovered via /migrate if their file_id ever breaks — re-upload recommended.` : `✅ Every file has a channel backup — safe against bot-token changes.`,
+        ``,
+        `🔑 <b>Access</b>`,
+        `• Ad-Watch Access: ${s.access.totalAccess} total | ${s.access.activeAccess} active`,
+        `• Active Reward Unlocks: ${s.rewards.activeBatchUnlocks}`,
+        `• Total Reward Redemptions: ${s.rewards.totalRedemptions}`,
+        ``,
+        `👥 <b>Referrals</b>`,
+        `• Total: ${s.referrals.totalReferrals} | Unique Referrers: ${s.referrals.uniqueReferrers}`,
+        ``,
+        `🎟️ <b>Coupons</b>`,
+        `• Total: ${s.coupons.total} | Active: ${s.coupons.active}`,
+        ``,
+        `🗑️ <b>Scheduled Auto-Deletes</b>`,
+        `• Pending: ${s.pendingDeletes}`,
+        ``,
+        `⚙️ <b>Server</b>`,
+        `• Uptime: ${uptimeStr}`,
+        `• Memory: ${memMB} MB`,
+        `• MongoDB: ${mongoose.connection.readyState===1?"🟢 Connected":"🔴 Disconnected"}`,
+        `• SQLite: ✅ Active (all reads)`,
+      ].join("\n");
+
       await bot.editMessageText(text,{chat_id:chatId,message_id:processing.message_id,parse_mode:"HTML"});
-    } catch(err){bot.editMessageText("❌ Could not fetch stats.",{chat_id:chatId,message_id:processing.message_id});}
+    } catch(err){ console.error("Stats error:", err.message); bot.editMessageText("❌ Could not fetch stats.",{chat_id:chatId,message_id:processing.message_id}); }
   });
 
   bot.on("polling_error",(err)=>console.error("Polling error:",err.message));
