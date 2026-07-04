@@ -1,3 +1,13 @@
+// Load .env directly — makes the app self-sufficient regardless of whether the
+// launch script (start.sh) exports variables into the shell before running
+// `node server.js`. Wrapped in try/catch so a missing `dotenv` package doesn't
+// crash the app either — it just falls back to whatever the shell already exported.
+try {
+  require("dotenv").config();
+} catch (e) {
+  console.warn("dotenv not installed — relying on shell-exported environment variables. Run `npm install dotenv` to load .env automatically.");
+}
+
 const TelegramBot = require("node-telegram-bot-api");
 const mongoose = require("mongoose");
 const express = require("express");
