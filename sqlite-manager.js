@@ -771,6 +771,19 @@ const fileRecord = {
   deleteByCode(code, uploadedBy) {
     return getDb().prepare(`DELETE FROM file_records WHERE code=? COLLATE NOCASE AND uploaded_by=?`).run(code, uploadedBy).changes > 0;
   },
+  // All records that were mirrored into the storage channel — used by /migrate to
+  // re-fetch a fresh, current-bot-valid file_id for every stored file.
+  findAllWithChannelMsg() {
+    return getDb().prepare(`SELECT * FROM file_records WHERE channel_msg_id IS NOT NULL`).all().map(_fileRow);
+  },
+  // Re-point a record at a fresh file_id (optionally correcting the stored name too).
+  updateFileId(id, { file_id, file_name }) {
+    if (file_name !== undefined) {
+      getDb().prepare(`UPDATE file_records SET file_id=?, file_name=? WHERE id=?`).run(file_id, file_name, id);
+    } else {
+      getDb().prepare(`UPDATE file_records SET file_id=? WHERE id=?`).run(file_id, id);
+    }
+  },
 };
 
 function _fileRow(r) {
@@ -805,6 +818,14 @@ const bulkBatch = {
   },
   deleteByCode(code, userId) {
     return getDb().prepare(`DELETE FROM bulk_batches WHERE batch_code=? COLLATE NOCASE AND user_id=?`).run(code, userId).changes > 0;
+  },
+  // All bulk batches — used by /migrate to walk every file inside every batch.
+  findAll() {
+    return getDb().prepare(`SELECT * FROM bulk_batches`).all().map(_bulkRow);
+  },
+  // Overwrite a batch's files array (e.g. after re-pointing file_ids during /migrate).
+  updateFiles(id, files) {
+    getDb().prepare(`UPDATE bulk_batches SET files=? WHERE id=?`).run(JSON.stringify(files||[]), id);
   },
 };
 
