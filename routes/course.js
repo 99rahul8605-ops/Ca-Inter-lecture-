@@ -1149,8 +1149,18 @@ router.get('/stats', (req, res) => {
         recentUsers: db.user.countSince(now - 7*24*60*60*1000),
         newToday: db.user.countSince(now - 24*60*60*1000),
       },
-      access: { totalAccess: db.access.count(), activeAccess: db.access.countActive() },
+      access: {
+        totalAccess: db.access.count(),
+        activeAccess: db.access.countActive(),
+        grantedToday: db.access.countClaimedOnDay(new Date().toISOString().slice(0, 10)),
+      },
       referrals: { totalReferrals: db.referral.count(), uniqueReferrers: db.referral.distinctReferrers() },
+      spinWheel: {
+        spinsToday: db.spinHistory.countSinceGlobal(now - 24*60*60*1000),
+        totalSpinners: db.spinHistory.distinctSpinners(),
+        totalPtsEarned: db.spinHistory.totalEarnedGlobal(),
+        totalPtsRedeemed: db.rewardRedemption.totalSpentGlobal(),
+      },
       fileStore: {
         singleFiles: singleTotal,
         singleFilesWithBackup: singleWithBackup,
