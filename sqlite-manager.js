@@ -668,6 +668,13 @@ const referral = {
   distinctReferrers() {
     return getDb().prepare(`SELECT COUNT(DISTINCT referrerId) as c FROM referrals`).get().c;
   },
+  countSince(sinceMs) {
+    return getDb().prepare(`SELECT COUNT(*) as c FROM referrals WHERE createdAt>=?`).get(sinceMs).c;
+  },
+  // Top N referrers by referral count — powers the dashboard leaderboard line.
+  topReferrers(limit) {
+    return getDb().prepare(`SELECT referrerId, COUNT(*) as c FROM referrals GROUP BY referrerId ORDER BY c DESC LIMIT ?`).all(limit || 1);
+  },
 };
 
 // ── COUPON Operations ─────────────────────────────────────────────────────────

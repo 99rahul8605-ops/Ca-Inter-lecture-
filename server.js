@@ -721,7 +721,17 @@ async function startBot() {
         ``,
         `👫 REFERRALS`,
         `┣ Total Referrals: ${nf(s.referrals.totalReferrals)}`,
-        `┗ Unique Referrers: ${nf(s.referrals.uniqueReferrers)}`,
+        `┣ Today: +${nf(s.referrals.referralsToday)}  |  This Week: +${nf(s.referrals.referralsThisWeek)}`,
+        `┣ Unique Referrers: ${nf(s.referrals.uniqueReferrers)}  |  Avg: ${s.referrals.avgPerReferrer}/referrer`,
+        `┣ Points Earned (total): ${nf(s.referrals.totalPointsEarned)}`,
+        `┣ Top Referrers:`,
+        ...(s.referrals.topReferrers && s.referrals.topReferrers.length
+          ? s.referrals.topReferrers.map((r, i) => {
+              const medal = ["🥇","🥈","🥉"][i] || `${i+1}.`;
+              const isLast = i === s.referrals.topReferrers.length - 1;
+              return `${isLast ? "┗" : "┃"}  ${medal} ${r.name} — ${nf(r.count)} refs`;
+            })
+          : [`┗  —`]),
         ``,
         `🎰 SPIN WHEEL`,
         `┣ Spins Today: ${nf(s.spinWheel.spinsToday)}`,
