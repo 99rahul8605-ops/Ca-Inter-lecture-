@@ -161,13 +161,14 @@ function _setupTables(db) {
       delete_at  INTEGER NOT NULL
     );
 
-    -- Pending "delivered_to" cleanups: mirrors pending_deletes but for clearing the
-    -- delivered-flag on a file_record so the user can re-request it after the 6h
-    -- cooldown. Without this being persisted, a bot restart mid-cooldown left users
-    -- permanently stuck on "already delivered" even after Telegram deleted the video.
-    CREATE TABLE IF NOT EXISTS pending_undeliver (
+    -- Pending "un-deliver" markers: removes a chatId from a file's delivered_to
+    -- list once its 6h re-request cooldown expires. Persisted (not just an
+    -- in-memory setTimeout) so a bot restart doesn't leave the chatId stuck in
+    -- delivered_to forever, permanently blocking re-requests.
+    CREATE TABLE IF NOT EXISTS pending_undelivers (
       id            TEXT PRIMARY KEY,
-      record_id     TEXT NOT NULL,
+      file_record_id TEXT NOT NULL,
+      code          TEXT NOT NULL,
       chat_id       INTEGER NOT NULL,
       undeliver_at  INTEGER NOT NULL
     );
@@ -408,20 +409,32 @@ async function syncFromMongo(mongoose) {
     if (FileRecord) {
       const files = await FileRecord.find({}).lean();
       const upsertFile = db.prepare(`INSERT INTO file_records(id,code,file_id,file_type,file_name,uploaded_by,expires_at,delivered_to,created_at,channel_msg_id)
-        VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET
-        file_id=excluded.file_id,delivered_to=excluded.delivered_to,channel_msg_id=excluded.channel_msg_id`);
+        VALUES(?,?,?,?,?,?,?,?,?,?)
+        ON CONFLICT(id) DO UPDATE SET
+          code=excluded.code,file_id=excluded.file_id,delivered_to=excluded.delivered_to,channel_msg_id=excluded.channel_msg_id
+        ON CONFLICT(code) DO UPDATE SET
+          id=excluded.id,file_id=excluded.file_id,delivered_to=excluded.delivered_to,channel_msg_id=excluded.channel_msg_id`);
+      let fileOk = 0, fileFail = 0;
       const fileTx = db.transaction(() => {
-        for (const f of files) upsertFile.run(
-          String(f._id), f.code, f.file_id, f.file_type, f.file_name||'file',
-          f.uploaded_by||null,
-          f.expires_at ? new Date(f.expires_at).getTime() : null,
-          JSON.stringify(f.delivered_to||[]),
-          new Date(f.created_at||0).getTime(),
-          f.channel_msg_id||null
-        );
+        for (const f of files) {
+          try {
+            upsertFile.run(
+              String(f._id), f.code, f.file_id, f.file_type, f.file_name||'file',
+              f.uploaded_by||null,
+              f.expires_at ? new Date(f.expires_at).getTime() : null,
+              JSON.stringify(f.delivered_to||[]),
+              new Date(f.created_at||0).getTime(),
+              f.channel_msg_id||null
+            );
+            fileOk++;
+          } catch (rowErr) {
+            fileFail++;
+            console.error(`    ⚠️ FileRecord skipped (id=${f._id}, code=${f.code}): ${rowErr.message}`);
+          }
+        }
       });
       fileTx();
-      console.log(`  ✅ FileRecords: ${files.length}`);
+      console.log(`  ✅ FileRecords: ${fileOk}${fileFail ? ` (⚠️ ${fileFail} skipped)` : ''}`);
     }
   } catch (e) { console.error('  ❌ FileRecords sync error:', e.message); }
 
@@ -431,16 +444,29 @@ async function syncFromMongo(mongoose) {
     if (BulkBatch) {
       const bulks = await BulkBatch.find({}).lean();
       const upsertBulk = db.prepare(`INSERT INTO bulk_batches(id,batch_code,user_id,files,created_at)
-        VALUES(?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET files=excluded.files`);
+        VALUES(?,?,?,?,?)
+        ON CONFLICT(id) DO UPDATE SET
+          batch_code=excluded.batch_code,files=excluded.files
+        ON CONFLICT(batch_code) DO UPDATE SET
+          id=excluded.id,files=excluded.files`);
+      let bulkOk = 0, bulkFail = 0;
       const bulkTx = db.transaction(() => {
-        for (const b of bulks) upsertBulk.run(
-          String(b._id), b.batch_code, b.user_id,
-          JSON.stringify(b.files||[]),
-          new Date(b.created_at||0).getTime()
-        );
+        for (const b of bulks) {
+          try {
+            upsertBulk.run(
+              String(b._id), b.batch_code, b.user_id,
+              JSON.stringify(b.files||[]),
+              new Date(b.created_at||0).getTime()
+            );
+            bulkOk++;
+          } catch (rowErr) {
+            bulkFail++;
+            console.error(`    ⚠️ BulkBatch skipped (id=${b._id}, batch_code=${b.batch_code}): ${rowErr.message}`);
+          }
+        }
       });
       bulkTx();
-      console.log(`  ✅ BulkBatches: ${bulks.length}`);
+      console.log(`  ✅ BulkBatches: ${bulkOk}${bulkFail ? ` (⚠️ ${bulkFail} skipped)` : ''}`);
     }
   } catch (e) { console.error('  ❌ BulkBatches sync error:', e.message); }
 
@@ -461,6 +487,24 @@ async function syncFromMongo(mongoose) {
       console.log(`  ✅ PendingDeletes: ${pds.length}`);
     }
   } catch (e) { console.error('  ❌ PendingDeletes sync error:', e.message); }
+
+  try {
+    // 10b. PendingUndelivers
+    const PendingUndeliver = mongoose.models.PendingUndeliver;
+    if (PendingUndeliver) {
+      const pus = await PendingUndeliver.find({}).lean();
+      const upsertPU = db.prepare(`INSERT INTO pending_undelivers(id,file_record_id,code,chat_id,undeliver_at)
+        VALUES(?,?,?,?,?) ON CONFLICT(id) DO NOTHING`);
+      const puTx = db.transaction(() => {
+        for (const p of pus) upsertPU.run(
+          String(p._id), String(p.file_record_id), p.code, p.chat_id,
+          new Date(p.undeliver_at).getTime()
+        );
+      });
+      puTx();
+      console.log(`  ✅ PendingUndelivers: ${pus.length}`);
+    }
+  } catch (e) { console.error('  ❌ PendingUndelivers sync error:', e.message); }
 
   try {
     // 11. DailyVideoLimits
@@ -791,11 +835,6 @@ const fileRecord = {
     const arr = JSON.parse(r.delivered_to||'[]').filter(x => x !== chatId);
     getDb().prepare(`UPDATE file_records SET delivered_to=? WHERE id=?`).run(JSON.stringify(arr), id);
   },
-  // Records that currently have at least one chatId marked as delivered —
-  // used to sweep out entries orphaned by pre-fix bot restarts (see cleanup at startup).
-  findAllWithDelivered() {
-    return getDb().prepare(`SELECT * FROM file_records WHERE delivered_to != '[]'`).all().map(_fileRow);
-  },
   deleteByCode(code, uploadedBy) {
     return getDb().prepare(`DELETE FROM file_records WHERE code=? COLLATE NOCASE AND uploaded_by=?`).run(code, uploadedBy).changes > 0;
   },
@@ -881,19 +920,23 @@ const pendingDelete = {
 };
 
 // ── PENDING UNDELIVER Operations ──────────────────────────────────────────────
-// Persists the "clear delivered_to after 6h" timer so it survives bot restarts.
+// Persists the "remove chatId from delivered_to after 6h" job, mirroring
+// pendingDelete above, so it survives bot restarts (see recoverPendingUndelivers).
 
 const pendingUndeliver = {
-  create({ id, record_id, chat_id, undeliver_at }) {
-    getDb().prepare(`INSERT INTO pending_undeliver(id,record_id,chat_id,undeliver_at) VALUES(?,?,?,?)`)
-      .run(id, record_id, chat_id, new Date(undeliver_at).getTime());
+  create({ id, file_record_id, code, chat_id, undeliver_at }) {
+    getDb().prepare(`INSERT INTO pending_undelivers(id,file_record_id,code,chat_id,undeliver_at) VALUES(?,?,?,?,?)`)
+      .run(id, file_record_id, code, chat_id, new Date(undeliver_at).getTime());
   },
   getAll() {
-    return getDb().prepare(`SELECT * FROM pending_undeliver`).all()
+    return getDb().prepare(`SELECT * FROM pending_undelivers`).all()
       .map(r => ({ ...r, _id: r.id, undeliver_at: new Date(r.undeliver_at) }));
   },
   deleteById(id) {
-    getDb().prepare(`DELETE FROM pending_undeliver WHERE id=?`).run(id);
+    getDb().prepare(`DELETE FROM pending_undelivers WHERE id=?`).run(id);
+  },
+  deleteByFileChat(file_record_id, chat_id) {
+    getDb().prepare(`DELETE FROM pending_undelivers WHERE file_record_id=? AND chat_id=?`).run(file_record_id, chat_id);
   },
 };
 
