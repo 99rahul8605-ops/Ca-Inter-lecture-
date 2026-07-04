@@ -683,6 +683,13 @@ async function startBot() {
   });
 
   // ── /stats ────────────────────────────────────────────────────────────────
+  function formatIST(d) {
+    const parts = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Kolkata', day: 'numeric', month: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true }).formatToParts(d);
+    const get = (t) => parts.find((p) => p.type === t).value;
+    return `${get('day')}/${get('month')}/${get('year')}, ${get('hour')}:${get('minute')}:${get('second')} ${get('dayPeriod').toLowerCase()}`;
+  }
+  const nf = (n) => Number(n || 0).toLocaleString('en-IN');
+
   bot.onText(/\/stats/, async (msg) => {
     if(isGroupChat(msg)||!isOwner(msg.from?.id)) return;
     const chatId=msg.chat.id;
@@ -691,55 +698,50 @@ async function startBot() {
       const s=await (await fetch(`http://localhost:${PORT}/api/stats`)).json();
       const uptime=process.uptime(); const d=Math.floor(uptime/86400); const h=Math.floor((uptime%86400)/3600); const m=Math.floor((uptime%3600)/60);
       const uptimeStr = d>0 ? `${d}d ${h}h ${m}m` : `${h}h ${m}m`;
-      const mem = process.memoryUsage();
-      const memMB = (mem.rss/1024/1024).toFixed(0);
-
-      const fs = s.fileStore||{};
-      const fileHealthLine = (label, withBackup, noBackup) =>
-        noBackup > 0
-          ? `• ${label}: ${withBackup+noBackup} (🟢 ${withBackup} backed up · 🔴 ${noBackup} no backup)`
-          : `• ${label}: ${withBackup+noBackup} (🟢 all backed up)`;
 
       const text = [
-        `📊 <b>Bot Stats</b>`,
+        `╔═══════════════════════╗`,
+        `      📊 BOT DASHBOARD`,
+        `╚═══════════════════════╝`,
         ``,
-        `👤 <b>Users</b>`,
-        `• Total: ${s.users.totalUsers}`,
-        `• New Today: ${s.users.newToday} | This Week: ${s.users.recentUsers}`,
+        `👥 USERS`,
+        `┣ Total Users: ${nf(s.users.totalUsers)}`,
+        `┣ New Today: +${nf(s.users.newToday)}`,
+        `┗ This Week: +${nf(s.users.recentUsers)}`,
         ``,
-        `📚 <b>Content</b>`,
-        `• Batches: ${s.content.totalBatches} (🟢 ${s.content.publicBatches} public · 🔒 ${s.content.privateBatches} private)`,
-        `• Subjects: ${s.content.totalSubjects} | Chapters: ${s.content.totalChapters} | Lectures: ${s.content.totalLectures}`,
-        `• Premium Unlocks (paid): ${s.content.totalPremiumUnlocks}`,
+        `📚 CONTENT`,
+        `┣ Batches: ${s.content.totalBatches} (🟢 ${s.content.publicBatches} Public · 🔒 ${s.content.privateBatches} Private)`,
+        `┣ Subjects: ${s.content.totalSubjects}  |  Chapters: ${s.content.totalChapters}`,
+        `┗ Lectures: ${nf(s.content.totalLectures)}`,
         ``,
-        `📁 <b>File Store Health</b>`,
-        fileHealthLine('Single Files', fs.singleFilesWithBackup||0, fs.singleFilesNoBackup||0),
-        fileHealthLine('Bulk Files', fs.bulkFilesWithBackup||0, fs.bulkFilesNoBackup||0),
-        `• Bulk Batches: ${fs.bulkBatches||0}`,
-        (fs.singleFilesNoBackup>0||fs.bulkFilesNoBackup>0) ? `⚠️ Files with no backup can't be auto-recovered via /migrate if their file_id ever breaks — re-upload recommended.` : `✅ Every file has a channel backup — safe against bot-token changes.`,
+        `🔑 ACCESS`,
+        `┣ Total Granted: ${nf(s.access.totalAccess)}`,
+        `┣ Granted Today: +${nf(s.access.grantedToday)}`,
+        `┗ Currently Active: ${nf(s.access.activeAccess)}`,
         ``,
-        `🔑 <b>Access</b>`,
-        `• Ad-Watch Access: ${s.access.totalAccess} total | ${s.access.activeAccess} active`,
-        `• Active Reward Unlocks: ${s.rewards.activeBatchUnlocks}`,
-        `• Total Reward Redemptions: ${s.rewards.totalRedemptions}`,
+        `👫 REFERRALS`,
+        `┣ Total Referrals: ${nf(s.referrals.totalReferrals)}`,
+        `┗ Unique Referrers: ${nf(s.referrals.uniqueReferrers)}`,
         ``,
-        `👥 <b>Referrals</b>`,
-        `• Total: ${s.referrals.totalReferrals} | Unique Referrers: ${s.referrals.uniqueReferrers}`,
+        `🎰 SPIN WHEEL`,
+        `┣ Spins Today: ${nf(s.spinWheel.spinsToday)}`,
+        `┣ Total Spinners: ${nf(s.spinWheel.totalSpinners)}`,
+        `┣ Total Pts Earned: ${nf(s.spinWheel.totalPtsEarned)}`,
+        `┗ Total Pts Redeemed: ${nf(s.spinWheel.totalPtsRedeemed)}`,
         ``,
-        `🎟️ <b>Coupons</b>`,
-        `• Total: ${s.coupons.total} | Active: ${s.coupons.active}`,
+        `📁 FILE STORE`,
+        `┣ Files: ${nf(s.fileStore.singleFiles)}`,
+        `┗ Bulk Batches: ${nf(s.fileStore.bulkBatches)}`,
         ``,
-        `🗑️ <b>Scheduled Auto-Deletes</b>`,
-        `• Pending: ${s.pendingDeletes}`,
+        `⚙️ SERVER`,
+        `┣ Uptime: ${uptimeStr}`,
+        `┣ MongoDB: ${mongoose.connection.readyState===1?"🟢 Online":"🔴 Offline"}`,
+        `┗ SQLite: ✅ Active`,
         ``,
-        `⚙️ <b>Server</b>`,
-        `• Uptime: ${uptimeStr}`,
-        `• Memory: ${memMB} MB`,
-        `• MongoDB: ${mongoose.connection.readyState===1?"🟢 Connected":"🔴 Disconnected"}`,
-        `• SQLite: ✅ Active (all reads)`,
+        `🕐 ${formatIST(new Date())}`,
       ].join("\n");
 
-      await bot.editMessageText(text,{chat_id:chatId,message_id:processing.message_id,parse_mode:"HTML"});
+      await bot.editMessageText(text,{chat_id:chatId,message_id:processing.message_id});
     } catch(err){ console.error("Stats error:", err.message); bot.editMessageText("❌ Could not fetch stats.",{chat_id:chatId,message_id:processing.message_id}); }
   });
 

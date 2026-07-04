@@ -622,6 +622,11 @@ const access = {
   countActive() {
     return getDb().prepare(`SELECT COUNT(*) as c FROM access WHERE expiresAt > ?`).get(Date.now()).c;
   },
+  // Users who claimed at least one ad-watch access grant on a given day (claimDay is
+  // the 'YYYY-MM-DD' string the claim counter resets against — see checkAndClaim logic).
+  countClaimedOnDay(dayStr) {
+    return getDb().prepare(`SELECT COUNT(*) as c FROM access WHERE claimDay=? AND claimsToday>0`).get(dayStr).c;
+  },
 };
 
 // ── AD TOKEN Operations ───────────────────────────────────────────────────────
@@ -890,6 +895,10 @@ const rewardRedemption = {
   count() {
     return getDb().prepare(`SELECT COUNT(*) as c FROM reward_redemptions`).get().c;
   },
+  // Total points redeemed across ALL users — dashboard metric (vs totalSpent which is per-user)
+  totalSpentGlobal() {
+    return getDb().prepare(`SELECT COALESCE(SUM(pointsCost),0) as total FROM reward_redemptions`).get().total;
+  },
 };
 
 // ── BATCH REWARD ACCESS Operations (live, time-limited premium access via points) ──
@@ -963,6 +972,16 @@ const spinHistory = {
   lastSpinAt(userId) {
     const r = getDb().prepare(`SELECT MAX(spunAt) as t FROM spin_history WHERE userId=?`).get(userId);
     return (r && r.t) ? new Date(r.t) : null;
+  },
+  // ── Global (all-users) aggregates for the admin dashboard ──
+  countSinceGlobal(sinceMs) {
+    return getDb().prepare(`SELECT COUNT(*) as c FROM spin_history WHERE spunAt>=?`).get(sinceMs).c;
+  },
+  distinctSpinners() {
+    return getDb().prepare(`SELECT COUNT(DISTINCT userId) as c FROM spin_history`).get().c;
+  },
+  totalEarnedGlobal() {
+    return getDb().prepare(`SELECT COALESCE(SUM(pointsWon),0) as total FROM spin_history`).get().total;
   },
 };
 
