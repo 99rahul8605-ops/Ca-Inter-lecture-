@@ -1116,8 +1116,9 @@ router.get('/stats', (req, res) => {
     const batches = db.batch.getAll();
     const totalBatches = batches.length;
     const publicBatches = batches.filter(b => b.isPublic).length;
-    let totalSubjects=0, totalChapters=0, totalLectures=0;
+    let totalSubjects=0, totalChapters=0, totalLectures=0, totalPremiumUnlocks=0;
     batches.forEach(b => {
+      totalPremiumUnlocks += (b.premiumUsers||[]).length;
       totalSubjects += (b.subjects||[]).length;
       (b.subjects||[]).forEach(s => {
         totalChapters += (s.chapters||[]).length;
@@ -1127,14 +1128,48 @@ router.get('/stats', (req, res) => {
         });
       });
     });
+
+    // File store health: how many stored files have a channel backup (can survive
+    // a bot-token switch via /migrate) vs ones that don't (would need re-upload
+    // if their file_id ever goes bad).
+    const singleTotal = db.fileRecord.count();
+    const singleWithBackup = db.fileRecord.findAllWithChannelMsg().length;
+    const allBulkBatches = db.bulkBatch.findAll();
+    let bulkFileTotal=0, bulkFileWithBackup=0;
+    allBulkBatches.forEach(b => { (b.files||[]).forEach(f => { bulkFileTotal++; if (f.channel_msg_id) bulkFileWithBackup++; }); });
+
+    const coupons = db.coupon.getAll();
+    const activeCoupons = coupons.filter(c => c.isActive && c.expiresAt.getTime() > Date.now()).length;
+
+    const now = Date.now();
     res.json({
-      content: { totalBatches, publicBatches, privateBatches: totalBatches - publicBatches, totalSubjects, totalChapters, totalLectures },
-      users: { totalUsers: db.user.count(), recentUsers: db.user.countSince(Date.now() - 7*24*60*60*1000) },
+      content: { totalBatches, publicBatches, privateBatches: totalBatches - publicBatches, totalSubjects, totalChapters, totalLectures, totalPremiumUnlocks },
+      users: {
+        totalUsers: db.user.count(),
+        recentUsers: db.user.countSince(now - 7*24*60*60*1000),
+        newToday: db.user.countSince(now - 24*60*60*1000),
+      },
       access: { totalAccess: db.access.count(), activeAccess: db.access.countActive() },
       referrals: { totalReferrals: db.referral.count(), uniqueReferrers: db.referral.distinctReferrers() },
+      fileStore: {
+        singleFiles: singleTotal,
+        singleFilesWithBackup: singleWithBackup,
+        singleFilesNoBackup: singleTotal - singleWithBackup,
+        bulkBatches: allBulkBatches.length,
+        bulkFiles: bulkFileTotal,
+        bulkFilesWithBackup: bulkFileWithBackup,
+        bulkFilesNoBackup: bulkFileTotal - bulkFileWithBackup,
+      },
+      rewards: {
+        totalRedemptions: db.rewardRedemption.count(),
+        activeBatchUnlocks: db.batchRewardAccess.countActive(),
+      },
+      coupons: { total: coupons.length, active: activeCoupons },
+      pendingDeletes: db.pendingDelete.getAll().length,
     });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
+
 
 // ── Coupons ───────────────────────────────────────────────────────────────────
 
