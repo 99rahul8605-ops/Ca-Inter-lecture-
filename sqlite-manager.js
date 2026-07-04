@@ -44,6 +44,7 @@ function _setupTables(db) {
   _resetTableIfIncompatible(db, 'batch_reward_access', ['userId', 'batchId', 'batchName', 'expiresAt', 'grantedAt']);
   _resetTableIfIncompatible(db, 'spin_tokens', ['id', 'userId', 'token', 'issuedAt', 'expiresAt']);
   _resetTableIfIncompatible(db, 'spin_history', ['id', 'userId', 'pointsWon', 'spunAt']);
+  _resetTableIfIncompatible(db, 'watched_lectures', ['userId', 'lectureId', 'watchedAt']);
 
   db.exec(`
     -- Batches (full document stored as JSON blob for simplicity)
@@ -216,6 +217,17 @@ function _setupTables(db) {
       spunAt    INTEGER DEFAULT 0
     );
     CREATE INDEX IF NOT EXISTS idx_spin_history_user ON spin_history(userId);
+
+    -- Watched Lectures (server-side, keyed by the stable Telegram userId — NOT
+    -- browser localStorage. This survives redeploys, tunnel URL changes, cache
+    -- clears, and switching devices, none of which affect a userId-keyed row.)
+    CREATE TABLE IF NOT EXISTS watched_lectures (
+      userId    TEXT NOT NULL,
+      lectureId TEXT NOT NULL,
+      watchedAt INTEGER DEFAULT 0,
+      PRIMARY KEY (userId, lectureId)
+    );
+    CREATE INDEX IF NOT EXISTS idx_watched_lectures_user ON watched_lectures(userId);
   `);
 }
 
@@ -505,6 +517,21 @@ async function syncFromMongo(mongoose) {
       console.log(`  ✅ Spin History: ${rows.length}`);
     }
   } catch (e) { console.error('  ❌ Spin History sync error:', e.message); }
+
+  try {
+    // 15. Watched Lectures
+    const WatchedLecture = mongoose.models.WatchedLecture;
+    if (WatchedLecture) {
+      const rows = await WatchedLecture.find({}).lean();
+      const upsertWL = db.prepare(`INSERT INTO watched_lectures(userId,lectureId,watchedAt)
+        VALUES(?,?,?) ON CONFLICT(userId,lectureId) DO NOTHING`);
+      const wlTx = db.transaction(() => {
+        for (const r of rows) upsertWL.run(r.userId, r.lectureId, new Date(r.watchedAt || 0).getTime());
+      });
+      wlTx();
+      console.log(`  ✅ Watched Lectures: ${rows.length}`);
+    }
+  } catch (e) { console.error('  ❌ Watched Lectures sync error:', e.message); }
 
   console.log('✅ SQLite sync complete');
 }
@@ -918,6 +945,23 @@ const spinHistory = {
   },
 };
 
+// ── WATCHED LECTURE Operations (server-side "have I seen this" marker) ────────
+
+const watchedLecture = {
+  // All lecture IDs this user has marked watched — returned as a plain array of strings
+  listByUser(userId) {
+    return getDb().prepare(`SELECT lectureId FROM watched_lectures WHERE userId=?`).all(userId).map(r => r.lectureId);
+  },
+  mark(userId, lectureId) {
+    getDb().prepare(`INSERT INTO watched_lectures(userId,lectureId,watchedAt) VALUES(?,?,?)
+      ON CONFLICT(userId,lectureId) DO NOTHING`)
+      .run(userId, lectureId, Date.now());
+  },
+  unmark(userId, lectureId) {
+    getDb().prepare(`DELETE FROM watched_lectures WHERE userId=? AND lectureId=?`).run(userId, lectureId);
+  },
+};
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function generateId() {
@@ -943,5 +987,6 @@ module.exports = {
   batchRewardAccess,
   spinToken,
   spinHistory,
+  watchedLecture,
   generateId,
 };
