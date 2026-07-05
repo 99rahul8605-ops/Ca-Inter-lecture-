@@ -70,11 +70,22 @@ mongoose.connect(MONGO_URI).then(async () => {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function getTodayIST() { const now = new Date(); return new Date(now.getTime() + 5.5*60*60*1000).toISOString().slice(0,10); }
 
-function checkAndIncrementVideoLimit(userId) {
+function peekVideoLimit(userId) {
   const today = getTodayIST();
   let rec = db.dailyVideoLimit.find(userId);
   if (!rec || rec.resetDate !== today) { db.dailyVideoLimit.upsert({ userId, count: 0, resetDate: today }); rec = { count: 0 }; }
   if (rec.count >= DAILY_VIDEO_LIMIT) return { allowed: false, used: rec.count, remaining: 0 };
+  return { allowed: true, used: rec.count, remaining: DAILY_VIDEO_LIMIT - rec.count };
+}
+
+// Call only AFTER the file has actually been delivered successfully — never
+// before sendFile(). Incrementing before delivery meant a failed send (dead
+// file_id, Telegram error, etc.) still burned one of the user's 10 daily
+// slots even though they received nothing, with no rollback on error.
+function commitVideoLimitIncrement(userId) {
+  const today = getTodayIST();
+  let rec = db.dailyVideoLimit.find(userId);
+  if (!rec || rec.resetDate !== today) rec = { count: 0 };
   const newCount = rec.count + 1;
   db.dailyVideoLimit.upsert({ userId, count: newCount, resetDate: today });
   DailyVideoLimit.findOneAndUpdate({ userId }, { userId, count: newCount, resetDate: today }, { upsert: true }).catch(() => {});
@@ -357,9 +368,10 @@ async function startBot() {
         const isVideo = record.file_type==="video"||record.file_type==="video_note";
         if (isVideo && db.fileRecord.isDeliveryActive(record.id, chatId, 24*60*60*1000)) return bot.sendMessage(chatId, `⚠️ This video was already delivered. You can request it again after 24 hours.`);
         if (isVideo && !isOwner(userId)) {
-          const lim = checkAndIncrementVideoLimit(userId);
-          if (!lim.allowed) return bot.sendMessage(chatId, `🚫 <b>Daily limit reached!</b>\n\nYou've watched <b>${DAILY_VIDEO_LIMIT} videos</b> today.\n📅 Resets at midnight.`, { parse_mode:"HTML" });
+          const limCheck = peekVideoLimit(userId);
+          if (!limCheck.allowed) return bot.sendMessage(chatId, `🚫 <b>Daily limit reached!</b>\n\nYou've watched <b>${DAILY_VIDEO_LIMIT} videos</b> today.\n📅 Resets at midnight.`, { parse_mode:"HTML" });
           const sentMsg = await sendFile(bot, chatId, record);
+          const lim = commitVideoLimitIncrement(userId);
           await scheduleDelete(bot,chatId,sentMsg.message_id,new Date(Date.now()+6*60*60*1000));
           db.fileRecord.addDeliveredTo(record.id,chatId);
           FileRecord.updateOne({ code:record.code },{ $addToSet:{ delivered_to:chatId } }).catch(() => {});
