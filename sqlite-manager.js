@@ -46,6 +46,16 @@ function _setupTables(db) {
   _resetTableIfIncompatible(db, 'spin_history', ['id', 'userId', 'pointsWon', 'spunAt']);
   _resetTableIfIncompatible(db, 'watched_lectures', ['userId', 'lectureId', 'watchedAt']);
 
+  // file_records holds real user data (unlike the ledger tables above), so we
+  // never drop it on schema mismatch — just add the new column if it's
+  // missing, for any deployment where the SQLite file survives a restart.
+  try {
+    const frCols = db.prepare(`PRAGMA table_info(file_records)`).all().map(c => c.name);
+    if (frCols.length && !frCols.includes('delivered_at')) {
+      db.exec(`ALTER TABLE file_records ADD COLUMN delivered_at TEXT DEFAULT '{}'`);
+    }
+  } catch (e) { /* table doesn't exist yet — CREATE TABLE below will make it fresh */ }
+
   db.exec(`
     -- Batches (full document stored as JSON blob for simplicity)
     CREATE TABLE IF NOT EXISTS batches (
@@ -136,6 +146,7 @@ function _setupTables(db) {
       uploaded_by    INTEGER,
       expires_at     INTEGER DEFAULT NULL,
       delivered_to   TEXT DEFAULT '[]',
+      delivered_at   TEXT DEFAULT '{}',
       created_at     INTEGER DEFAULT 0,
       channel_msg_id INTEGER DEFAULT NULL
     );
@@ -168,7 +179,7 @@ function _setupTables(db) {
     CREATE TABLE IF NOT EXISTS pending_undelivers (
       id            TEXT PRIMARY KEY,
       file_record_id TEXT NOT NULL,
-      code          TEXT NOT NULL,
+      code          TEXT,
       chat_id       INTEGER NOT NULL,
       undeliver_at  INTEGER NOT NULL
     );
@@ -408,12 +419,12 @@ async function syncFromMongo(mongoose) {
     const FileRecord = mongoose.models.FileRecord;
     if (FileRecord) {
       const files = await FileRecord.find({}).lean();
-      const upsertFile = db.prepare(`INSERT INTO file_records(id,code,file_id,file_type,file_name,uploaded_by,expires_at,delivered_to,created_at,channel_msg_id)
-        VALUES(?,?,?,?,?,?,?,?,?,?)
+      const upsertFile = db.prepare(`INSERT INTO file_records(id,code,file_id,file_type,file_name,uploaded_by,expires_at,delivered_to,delivered_at,created_at,channel_msg_id)
+        VALUES(?,?,?,?,?,?,?,?,?,?,?)
         ON CONFLICT(id) DO UPDATE SET
-          code=excluded.code,file_id=excluded.file_id,delivered_to=excluded.delivered_to,channel_msg_id=excluded.channel_msg_id
+          code=excluded.code,file_id=excluded.file_id,delivered_to=excluded.delivered_to,delivered_at=excluded.delivered_at,channel_msg_id=excluded.channel_msg_id
         ON CONFLICT(code) DO UPDATE SET
-          id=excluded.id,file_id=excluded.file_id,delivered_to=excluded.delivered_to,channel_msg_id=excluded.channel_msg_id`);
+          id=excluded.id,file_id=excluded.file_id,delivered_to=excluded.delivered_to,delivered_at=excluded.delivered_at,channel_msg_id=excluded.channel_msg_id`);
       let fileOk = 0, fileFail = 0;
       const fileTx = db.transaction(() => {
         for (const f of files) {
@@ -423,6 +434,7 @@ async function syncFromMongo(mongoose) {
               f.uploaded_by||null,
               f.expires_at ? new Date(f.expires_at).getTime() : null,
               JSON.stringify(f.delivered_to||[]),
+              f.delivered_at || '{}',
               new Date(f.created_at||0).getTime(),
               f.channel_msg_id||null
             );
@@ -495,14 +507,23 @@ async function syncFromMongo(mongoose) {
       const pus = await PendingUndeliver.find({}).lean();
       const upsertPU = db.prepare(`INSERT INTO pending_undelivers(id,file_record_id,code,chat_id,undeliver_at)
         VALUES(?,?,?,?,?) ON CONFLICT(id) DO NOTHING`);
+      let puOk = 0, puFail = 0;
       const puTx = db.transaction(() => {
-        for (const p of pus) upsertPU.run(
-          String(p._id), String(p.file_record_id), p.code, p.chat_id,
-          new Date(p.undeliver_at).getTime()
-        );
+        for (const p of pus) {
+          try {
+            upsertPU.run(
+              String(p._id), String(p.file_record_id), p.code || null, p.chat_id,
+              new Date(p.undeliver_at).getTime()
+            );
+            puOk++;
+          } catch (rowErr) {
+            puFail++;
+            console.error(`    ⚠️ PendingUndeliver skipped (id=${p._id}): ${rowErr.message}`);
+          }
+        }
       });
       puTx();
-      console.log(`  ✅ PendingUndelivers: ${pus.length}`);
+      console.log(`  ✅ PendingUndelivers: ${puOk}${puFail ? ` (⚠️ ${puFail} skipped)` : ''}`);
     }
   } catch (e) { console.error('  ❌ PendingUndelivers sync error:', e.message); }
 
@@ -824,16 +845,43 @@ const fileRecord = {
     return getDb().prepare(`SELECT COUNT(*) as c FROM file_records`).get().c;
   },
   addDeliveredTo(id, chatId) {
-    const r = getDb().prepare(`SELECT delivered_to FROM file_records WHERE id=?`).get(id);
+    const r = getDb().prepare(`SELECT delivered_to, delivered_at FROM file_records WHERE id=?`).get(id);
     if (!r) return;
     const arr = JSON.parse(r.delivered_to||'[]');
-    if (!arr.includes(chatId)) { arr.push(chatId); getDb().prepare(`UPDATE file_records SET delivered_to=? WHERE id=?`).run(JSON.stringify(arr), id); }
+    const at = JSON.parse(r.delivered_at||'{}');
+    at[chatId] = Date.now();
+    if (!arr.includes(chatId)) arr.push(chatId);
+    getDb().prepare(`UPDATE file_records SET delivered_to=?, delivered_at=? WHERE id=?`).run(JSON.stringify(arr), JSON.stringify(at), id);
   },
   removeDeliveredTo(id, chatId) {
-    const r = getDb().prepare(`SELECT delivered_to FROM file_records WHERE id=?`).get(id);
+    const r = getDb().prepare(`SELECT delivered_to, delivered_at FROM file_records WHERE id=?`).get(id);
     if (!r) return;
     const arr = JSON.parse(r.delivered_to||'[]').filter(x => x !== chatId);
-    getDb().prepare(`UPDATE file_records SET delivered_to=? WHERE id=?`).run(JSON.stringify(arr), id);
+    const at = JSON.parse(r.delivered_at||'{}');
+    delete at[chatId];
+    getDb().prepare(`UPDATE file_records SET delivered_to=?, delivered_at=? WHERE id=?`).run(JSON.stringify(arr), JSON.stringify(at), id);
+  },
+  // Read-time guard for the 6h re-request cooldown. This is the correctness
+  // backstop: even if the scheduled cleanup job (scheduleUndeliver) never
+  // fires — lost timer, failed sync, missing timestamp from an older row,
+  // whatever — this check self-heals by clearing the stale entry the moment
+  // someone requests the file again after the window has passed, instead of
+  // leaving them permanently blocked.
+  isDeliveryActive(id, chatId, windowMs) {
+    const r = getDb().prepare(`SELECT delivered_to, delivered_at FROM file_records WHERE id=?`).get(id);
+    if (!r) return false;
+    const arr = JSON.parse(r.delivered_to||'[]');
+    if (!arr.includes(chatId)) return false;
+    const at = JSON.parse(r.delivered_at||'{}');
+    const deliveredAt = at[chatId];
+    // No timestamp on record (e.g. row synced in from before this fix, or from
+    // a Mongo copy that never carried one) — can't prove it's still within the
+    // window, so don't block: self-heal and allow the re-request.
+    if (!deliveredAt || (Date.now() - deliveredAt) >= windowMs) {
+      fileRecord.removeDeliveredTo(id, chatId);
+      return false;
+    }
+    return true;
   },
   deleteByCode(code, uploadedBy) {
     return getDb().prepare(`DELETE FROM file_records WHERE code=? COLLATE NOCASE AND uploaded_by=?`).run(code, uploadedBy).changes > 0;
@@ -858,6 +906,7 @@ function _fileRow(r) {
     ...r,
     _id: r.id,
     delivered_to: JSON.parse(r.delivered_to||'[]'),
+    delivered_at: JSON.parse(r.delivered_at||'{}'),
     created_at: new Date(r.created_at),
     expires_at: r.expires_at ? new Date(r.expires_at) : null,
   };

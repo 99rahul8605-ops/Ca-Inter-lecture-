@@ -35,7 +35,7 @@ function isOwner(userId) { return userId === OWNER_ID; }
 function isGroupChat(msg) { return msg.chat && (msg.chat.type === "group" || msg.chat.type === "supergroup"); }
 
 // ── MongoDB Schemas (for backup writes only) ──────────────────────────────────
-const fileSchema = new mongoose.Schema({ code: { type: String, required: true, unique: true }, file_id: { type: String, required: true }, file_type: { type: String, required: true }, file_name: { type: String, default: "file" }, uploaded_by: Number, expires_at: { type: Date, default: null }, delivered_to: [Number], created_at: { type: Date, default: Date.now }, channel_msg_id: { type: Number, default: null } });
+const fileSchema = new mongoose.Schema({ code: { type: String, required: true, unique: true }, file_id: { type: String, required: true }, file_type: { type: String, required: true }, file_name: { type: String, default: "file" }, uploaded_by: Number, expires_at: { type: Date, default: null }, delivered_to: [Number], delivered_at: { type: String, default: '{}' }, created_at: { type: Date, default: Date.now }, channel_msg_id: { type: Number, default: null } });
 const FileRecord = mongoose.model("FileRecord", fileSchema);
 
 const bulkBatchSchema = new mongoose.Schema({ batch_code: { type: String, required: true, unique: true }, user_id: Number, files: [{ file_id: String, file_type: String, file_name: { type: String, default: "file" } }], created_at: { type: Date, default: Date.now } });
@@ -175,17 +175,35 @@ async function recoverPendingDeletes(bot) {
   }
 }
 
+// delivered_at is stored as a JSON string (chatId -> timestamp) to mirror the
+// SQLite column exactly; Mongo has no atomic op for "set one key inside a
+// JSON string field", so this is a small best-effort read-modify-write,
+// consistent with the existing fire-and-forget .catch(()=>{}) pattern here.
+async function stampMongoDeliveredAt(fileRecordId, chatId, value) {
+  try {
+    const doc = await FileRecord.findById(fileRecordId).select('delivered_at').lean();
+    if (!doc) return;
+    const at = JSON.parse(doc.delivered_at || '{}');
+    if (value === null) delete at[chatId]; else at[chatId] = value;
+    await FileRecord.updateOne({ _id: fileRecordId }, { $set: { delivered_at: JSON.stringify(at) } });
+  } catch (_) {}
+}
+
 // Persists the "un-deliver" job (like scheduleDelete persists the message-delete
 // job) so a bot restart doesn't lose the timer and leave the chatId stuck in
 // delivered_to forever — which was blocking re-requests after 6 hours.
 async function scheduleUndeliver(fileRecordId, code, chatId, undeliverAt) {
   const id = db.generateId();
   db.pendingUndeliver.create({ id, file_record_id: fileRecordId, code, chat_id: chatId, undeliver_at: undeliverAt });
-  PendingUndeliver.create({ file_record_id: fileRecordId, code, chat_id: chatId, undeliver_at: undeliverAt }).catch(() => {});
+  PendingUndeliver.create({ file_record_id: fileRecordId, code, chat_id: chatId, undeliver_at: undeliverAt })
+    .catch(err => console.error('PendingUndeliver mongo create error:', err.message));
   const delay = Math.max(0, new Date(undeliverAt) - Date.now());
   setTimeout(() => {
     db.fileRecord.removeDeliveredTo(fileRecordId, chatId);
-    FileRecord.updateOne({ code }, { $pull: { delivered_to: chatId } }).catch(() => {});
+    // Match by _id (=fileRecordId), not by code — code is only kept for
+    // debugging and must never be a hard requirement for clearing delivered_to.
+    FileRecord.updateOne({ _id: fileRecordId }, { $pull: { delivered_to: chatId } }).catch(() => {});
+    stampMongoDeliveredAt(fileRecordId, chatId, null);
     db.pendingUndeliver.deleteById(id);
     PendingUndeliver.deleteOne({ file_record_id: fileRecordId, chat_id: chatId }).catch(() => {});
   }, delay);
@@ -198,7 +216,8 @@ async function recoverPendingUndelivers() {
     const delay = Math.max(0, new Date(p.undeliver_at) - Date.now());
     setTimeout(() => {
       db.fileRecord.removeDeliveredTo(p.file_record_id, p.chat_id);
-      FileRecord.updateOne({ code: p.code }, { $pull: { delivered_to: p.chat_id } }).catch(() => {});
+      FileRecord.updateOne({ _id: p.file_record_id }, { $pull: { delivered_to: p.chat_id } }).catch(() => {});
+      stampMongoDeliveredAt(p.file_record_id, p.chat_id, null);
       db.pendingUndeliver.deleteById(p._id);
       PendingUndeliver.deleteOne({ _id: p._id }).catch(() => {});
     }, delay);
@@ -336,7 +355,7 @@ async function startBot() {
         const record = db.fileRecord.findByCode(param);
         if (!record) return bot.sendMessage(chatId, `File not found. Link may be invalid.`);
         const isVideo = record.file_type==="video"||record.file_type==="video_note";
-        if (isVideo && record.delivered_to.includes(chatId)) return bot.sendMessage(chatId, `⚠️ This video was already delivered. It auto-deletes within 6 hours.`);
+        if (isVideo && db.fileRecord.isDeliveryActive(record.id, chatId, 6*60*60*1000)) return bot.sendMessage(chatId, `⚠️ This video was already delivered. It auto-deletes within 6 hours.`);
         if (isVideo && !isOwner(userId)) {
           const lim = checkAndIncrementVideoLimit(userId);
           if (!lim.allowed) return bot.sendMessage(chatId, `🚫 <b>Daily limit reached!</b>\n\nYou've watched <b>${DAILY_VIDEO_LIMIT} videos</b> today.\n📅 Resets at midnight.`, { parse_mode:"HTML" });
@@ -344,6 +363,7 @@ async function startBot() {
           await scheduleDelete(bot,chatId,sentMsg.message_id,new Date(Date.now()+6*60*60*1000));
           db.fileRecord.addDeliveredTo(record.id,chatId);
           FileRecord.updateOne({ code:record.code },{ $addToSet:{ delivered_to:chatId } }).catch(() => {});
+          stampMongoDeliveredAt(record.id, chatId, Date.now());
           await scheduleUndeliver(record.id, record.code, chatId, new Date(Date.now()+6*60*60*1000));
           const lines=[`⚠️ This video auto-deletes in 6 hours.`,``,`📊 <b>Today:</b> ${lim.used}/${DAILY_VIDEO_LIMIT} videos`];
           if(lim.remaining===0) lines.push(`🚫 Limit reached for today!`);
@@ -356,6 +376,7 @@ async function startBot() {
           await scheduleDelete(bot,chatId,sentMsg.message_id,new Date(Date.now()+6*60*60*1000));
           db.fileRecord.addDeliveredTo(record.id,chatId);
           FileRecord.updateOne({ code:record.code },{ $addToSet:{ delivered_to:chatId } }).catch(() => {});
+          stampMongoDeliveredAt(record.id, chatId, Date.now());
           await scheduleUndeliver(record.id, record.code, chatId, new Date(Date.now()+6*60*60*1000));
           await bot.sendMessage(chatId, `⚠️ This video auto-deletes in 6 hours.`);
         }
