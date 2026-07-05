@@ -519,6 +519,23 @@ async function startBot() {
     } catch(_){bot.sendMessage(chatId,`Deletion failed.`);}
   });
 
+  // ── /resetlimit <userId> ─────────────────────────────────────────────────
+  // Owner-only: manually clears a user's daily video-watch count back to 0
+  // for today, e.g. to compensate a user hit by a failed delivery, or as a
+  // one-off courtesy reset — without waiting for the midnight IST rollover.
+  bot.onText(/\/resetlimit (.+)/, async (msg,match) => {
+    if(isGroupChat(msg)||!isOwner(msg.from?.id)) return;
+    const chatId=msg.chat.id;
+    const targetId=parseInt(match[1].trim(),10);
+    if(!targetId||isNaN(targetId)) return bot.sendMessage(chatId,`Usage: /resetlimit <userId>`);
+    try {
+      const today=getTodayIST();
+      db.dailyVideoLimit.upsert({ userId: targetId, count: 0, resetDate: today });
+      DailyVideoLimit.findOneAndUpdate({ userId: targetId }, { userId: targetId, count: 0, resetDate: today }, { upsert: true }).catch(()=>{});
+      bot.sendMessage(chatId,`✅ Daily video limit reset for user <code>${targetId}</code>.`, { parse_mode:"HTML" });
+    } catch(_){ bot.sendMessage(chatId,`Reset failed.`); }
+  });
+
   // ── /rmword ───────────────────────────────────────────────────────────────
   bot.onText(/\/rmword(.*)/, async (msg,match) => {
     if(isGroupChat(msg)||!isOwner(msg.from?.id)) return;
