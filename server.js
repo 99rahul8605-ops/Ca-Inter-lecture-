@@ -366,7 +366,7 @@ async function startBot() {
         const record = db.fileRecord.findByCode(param);
         if (!record) return bot.sendMessage(chatId, `File not found. Link may be invalid.`);
         const isVideo = record.file_type==="video"||record.file_type==="video_note";
-        if (isVideo && db.fileRecord.isDeliveryActive(record.id, chatId, 24*60*60*1000)) return bot.sendMessage(chatId, `⚠️ This video was already delivered. You can request it again after 24 hours.`);
+        if (isVideo && db.fileRecord.isDeliveryActive(record.id, chatId, 6*60*60*1000)) return bot.sendMessage(chatId, `⚠️ This video was already delivered. You can request it again after 6 hours.`);
         if (isVideo && !isOwner(userId)) {
           const limCheck = peekVideoLimit(userId);
           if (!limCheck.allowed) return bot.sendMessage(chatId, `🚫 <b>Daily limit reached!</b>\n\nYou've watched <b>${DAILY_VIDEO_LIMIT} videos</b> today.\n📅 Resets at midnight.`, { parse_mode:"HTML" });
@@ -376,7 +376,7 @@ async function startBot() {
           db.fileRecord.addDeliveredTo(record.id,chatId);
           FileRecord.updateOne({ code:record.code },{ $addToSet:{ delivered_to:chatId } }).catch(() => {});
           stampMongoDeliveredAt(record.id, chatId, Date.now());
-          await scheduleUndeliver(record.id, record.code, chatId, new Date(Date.now()+24*60*60*1000));
+          await scheduleUndeliver(record.id, record.code, chatId, new Date(Date.now()+6*60*60*1000));
           const lines=[`⚠️ This video auto-deletes in 6 hours.`,``,`📊 <b>Today:</b> ${lim.used}/${DAILY_VIDEO_LIMIT} videos`];
           if(lim.remaining===0) lines.push(`🚫 Limit reached for today!`);
           else if(lim.remaining<=3) lines.push(`⚠️ Only <b>${lim.remaining}</b> left today!`);
@@ -389,7 +389,7 @@ async function startBot() {
           db.fileRecord.addDeliveredTo(record.id,chatId);
           FileRecord.updateOne({ code:record.code },{ $addToSet:{ delivered_to:chatId } }).catch(() => {});
           stampMongoDeliveredAt(record.id, chatId, Date.now());
-          await scheduleUndeliver(record.id, record.code, chatId, new Date(Date.now()+24*60*60*1000));
+          await scheduleUndeliver(record.id, record.code, chatId, new Date(Date.now()+6*60*60*1000));
           await bot.sendMessage(chatId, `⚠️ This video auto-deletes in 6 hours.`);
         }
       } catch (err) { console.error("Deep link error:", err.message); bot.sendMessage(chatId, `Error occurred. Please try again.`); }
