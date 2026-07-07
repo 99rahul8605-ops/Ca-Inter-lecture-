@@ -119,6 +119,8 @@ body.ready{transition:none}
 .admin-btn.visible{display:flex}
 
 .page-body{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch}
+.page-header{display:flex;align-items:center;gap:10px;padding:calc(16px + var(--tg-safe-top,0px)) 16px 12px;background:var(--topbar);border-bottom:1px solid var(--border);flex-shrink:0}
+.page-title{font-size:16px;font-weight:700;display:flex;align-items:center;gap:8px}
 
 .search-wrap{padding:10px 16px;background:var(--topbar);border-bottom:1px solid var(--border);flex-shrink:0}
 .search-inner{position:relative}
@@ -3961,7 +3963,7 @@ body.light-mode .lec-mini-notes{background:var(--surface2);color:var(--text)}
 .ann-admin-title{font-size:12px;font-weight:600;color:var(--text2);margin-bottom:10px;display:flex;align-items:center;gap:5px}
 
 /* ── Contact Button ───────────────────────────── */
-#contactBtn{position:fixed;bottom:80px;right:16px;z-index:300;cursor:pointer;user-select:none}
+#contactBtn{position:fixed;bottom:calc(80px + var(--tg-safe-bottom,0px));right:16px;z-index:300;cursor:pointer;user-select:none}
 #contactInner{
   display:flex;align-items:center;gap:0;
   background:linear-gradient(135deg,var(--accent),var(--accent2));
