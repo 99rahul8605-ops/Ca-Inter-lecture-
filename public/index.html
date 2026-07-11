@@ -293,7 +293,7 @@ body.ready{transition:none}
 .nav-tab .access-dot{width:7px;height:7px;border-radius:50%;background:var(--green);position:absolute;top:8px;right:calc(50% - 14px)}
 .nav-tab .access-dot.locked{background:var(--red)}
 /* Add bottom padding to all pages */
-.page-body{padding-bottom:70px}
+.page-body{padding-bottom:calc(70px + var(--tg-safe-bottom,0px))}
 
 /* Access Page */
 .access-page-wrap{padding:16px}
