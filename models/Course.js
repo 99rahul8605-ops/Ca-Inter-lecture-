@@ -40,6 +40,7 @@ const batchSchema = new mongoose.Schema({
   isPremium: { type: Boolean, default: false }, // premium batch — locked for non-allowed users
   premiumUsers: { type: [String], default: [] }, // Telegram user IDs allowed to access this batch
   price: { type: Number, default: 0 }, // price in INR
+  rewardEligible: { type: Boolean, default: true }, // false = excluded from the points-based Redeem Reward picker (still purchasable/assignable normally)
   subjects: [subjectSchema],
 });
 
