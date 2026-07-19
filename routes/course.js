@@ -200,7 +200,7 @@ router.post("/batches", verifyAdmin, async (req, res) => {
   try {
     const count = db.batch.count();
     // Write to MongoDB first (gets real _id)
-    const batch = await Batch.create({ name: req.body.name, pic: req.body.pic||"", description: req.body.description||"", order: count, isPublic: false, isPremium: req.body.isPremium===true, premiumUsers: [], price: req.body.price ? Number(req.body.price) : 0 });
+    const batch = await Batch.create({ name: req.body.name, pic: req.body.pic||"", description: req.body.description||"", order: count, isPublic: false, isPremium: req.body.isPremium===true, premiumUsers: [], price: req.body.price ? Number(req.body.price) : 0, rewardEligible: req.body.rewardEligible !== false });
     db.batch.upsert(batch.toObject());
     res.json(batch);
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -232,6 +232,7 @@ router.patch("/batches/:bid/edit", verifyAdmin, async (req, res) => {
     if (req.body.name) batch.name = req.body.name;
     if (req.body.description !== undefined) batch.description = req.body.description;
     if (req.body.isPremium !== undefined) batch.isPremium = req.body.isPremium;
+    if (req.body.rewardEligible !== undefined) batch.rewardEligible = req.body.rewardEligible !== false;
     if (req.body.price !== undefined) batch.price = Number(req.body.price)||0;
     if (req.body.pic !== undefined) batch.pic = req.body.pic;
     await batch.save();
@@ -760,6 +761,7 @@ router.get('/rewards/eligible-batches/:userId', (req, res) => {
     const all = db.batch.getAll();
     const eligible = all
       .filter(b => b.isPremium === true && b.isPublic === true)
+      .filter(b => b.rewardEligible !== false) // admin has excluded this batch from the points-redeem picker
       .filter(b => !((b.premiumUsers || []).includes(userId))) // already owned permanently — skip
       .map(b => {
         const active = db.batchRewardAccess.findOne(userId, String(b._id));
@@ -790,6 +792,7 @@ router.post('/rewards/redeem', async (req, res) => {
       batchDoc = db.batch.getOne(batchId);
       if (!batchDoc || batchDoc.isPublic !== true) return res.status(404).json({ error: 'Batch not found' });
       if (batchDoc.isPremium !== true) return res.status(400).json({ error: 'This batch is not a premium batch' });
+      if (batchDoc.rewardEligible === false) return res.status(400).json({ error: 'Yeh batch points se redeem nahi ho sakta.' });
       if ((batchDoc.premiumUsers || []).includes(userId)) {
         return res.status(400).json({ error: 'Aapke paas already is batch ka full access hai!' });
       }
