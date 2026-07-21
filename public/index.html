@@ -166,6 +166,10 @@ body.ready{transition:none}
 .pay-upi-row{display:flex;align-items:center;gap:8px;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:8px 12px;width:100%}
 .pay-upi-id{font-size:13px;font-weight:600;font-family:monospace;color:var(--text);flex:1}
 .pay-copy-btn{background:var(--accent);border:none;color:#fff;border-radius:6px;padding:4px 10px;font-size:11px;font-weight:700;cursor:pointer}
+.pay-now-btn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;padding:12px;border-radius:12px;background:linear-gradient(135deg,#22c55e,#16a34a);color:#fff;font-size:14px;font-weight:700;text-decoration:none;margin-top:2px;box-shadow:0 4px 14px rgba(34,197,94,0.3);transition:opacity 0.15s;border:none;cursor:pointer;font-family:inherit}
+.pay-now-btn:active{opacity:0.85}
+.pay-now-btn.disabled{pointer-events:none;opacity:0.5;background:var(--surface2);color:var(--text2);box-shadow:none}
+.pay-now-hint{font-size:10px;color:var(--text2);text-align:center;margin-top:-4px;margin-bottom:2px}
 .pay-steps{font-size:11px;color:var(--text2);line-height:1.8;margin-bottom:14px;padding:10px 12px;background:var(--surface2);border-radius:10px}
 .pay-steps b{color:var(--text)}
 .pay-ss-box{border:2px dashed var(--border);border-radius:12px;padding:16px;text-align:center;cursor:pointer;margin-bottom:12px;transition:border-color 0.2s}
@@ -2034,6 +2038,7 @@ async function checkAdminAccess() {
     var ownerId = config.ownerId;
     if (config.botUsername) window._botUsername = config.botUsername;
     if (config.upiId) window._upiId = config.upiId;
+    if (config.upiName) window._upiName = config.upiName;
     if (config.contactLink) window._contactLink = config.contactLink;
     // Store force-join requirement
     _fjRequired = !!config.forceJoinRequired;
@@ -2764,14 +2769,21 @@ function buyBatch(bid) {
   var upi = window._upiId || '';
   document.getElementById('payUpiId').textContent = upi || 'Not configured';
 
-  // Generate QR using api.qrserver.com
+  // Generate QR via our own server (/api/payment-qr) — it builds the UPI link itself
+  // (using the server's UPI_ID/UPI_NAME) and overlays public/logo.png in the center.
+  var payNowBtn = document.getElementById('payNowBtn');
   if (upi && b.price) {
-    var upiStr = 'upi://pay?pa=' + encodeURIComponent(upi) + '&am=' + b.price + '&cu=INR&tn=' + encodeURIComponent(b.name);
-    document.getElementById('payQrImg').src = 'https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=' + encodeURIComponent(upiStr);
+    document.getElementById('payQrImg').src = _paymentQrUrl(b.price, b.name);
+    payNowBtn.disabled = false;
+    payNowBtn.classList.remove('disabled');
   } else if (upi) {
-    document.getElementById('payQrImg').src = 'https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=' + encodeURIComponent(upi);
+    document.getElementById('payQrImg').src = _paymentQrUrl(null, b.name);
+    payNowBtn.disabled = false;
+    payNowBtn.classList.remove('disabled');
   } else {
     document.getElementById('payQrImg').src = '';
+    payNowBtn.disabled = true;
+    payNowBtn.classList.add('disabled');
   }
 
   // Reset coupon
@@ -2867,14 +2879,100 @@ async function applyCoupon() {
   btn.disabled = false; if (btn.textContent === '...') btn.textContent = 'Apply';
 }
 
+// Builds the URL for our own /api/payment-qr endpoint (server builds the UPI link and
+// overlays public/logo.png). amount can be a number or null/0 (no am= param, generic QR).
+function _paymentQrUrl(amount, batchName) {
+  var params = 'note=' + encodeURIComponent((batchName || 'batch').slice(0, 40));
+  if (amount) params += '&amount=' + Number(amount).toFixed(2);
+  return location.origin + '/api/payment-qr?' + params + '&_t=' + Date.now();
+}
+
 function _updatePayQr(amount) {
   var upi = window._upiId || '';
   var b = batches.find(x => x._id === _payBatchId);
   if (upi && amount) {
-    var upiStr = 'upi://pay?pa=' + encodeURIComponent(upi) + '&am=' + amount + '&cu=INR&tn=' + encodeURIComponent(b ? b.name : '');
-    document.getElementById('payQrImg').src = 'https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=' + encodeURIComponent(upiStr);
+    document.getElementById('payQrImg').src = _paymentQrUrl(amount, b ? b.name : '');
+    var payNowBtn = document.getElementById('payNowBtn');
+    payNowBtn.disabled = false;
+    payNowBtn.classList.remove('disabled');
   }
 }
+
+// Notifies the user. Inside the Telegram Mini App, tg.showPopup/showAlert render as a native
+// Telegram dialog, which stays visible correctly even in fullscreen mode — our custom CSS toast
+// can get clipped/hidden there. Falls back to the normal in-page toast outside Telegram.
+function _notify(msg, type) {
+  if (tg && typeof tg.showPopup === 'function') {
+    try { tg.showPopup({ message: msg }); return; } catch (e) {}
+  }
+  if (tg && typeof tg.showAlert === 'function') {
+    try { tg.showAlert(msg); return; } catch (e) {}
+  }
+  toast(msg, type);
+}
+
+// Saves the currently shown payment QR.
+// Priority 1: Telegram's native downloadFile() (Bot API 8.0+) — this goes through Telegram's
+// own OS-level save flow (with a permission prompt), so it actually lands in the phone's
+// Gallery/Downloads correctly even inside the fullscreen Mini App, unlike browser JS APIs.
+// Priority 2: Web Share API (works in regular mobile browsers, e.g. if opened outside Telegram).
+// Priority 3: plain blob <a download> (desktop / last resort) — goes to Downloads, not Gallery.
+async function downloadPayQr() {
+  var img = document.getElementById('payQrImg');
+  var src = img && img.src;
+  var btn = document.getElementById('payNowBtn');
+  if (!src) return _notify('QR not available for this batch','error');
+  var b = batches.find(x => x._id === _payBatchId);
+  var fileName = 'PaymentQR_' + (b ? b.name.replace(/[^a-z0-9]+/gi,'_') : 'batch') + '.png';
+  var originalText = btn.innerHTML;
+  btn.innerHTML = 'Preparing…';
+  btn.disabled = true;
+
+  try {
+    // Priority 1: Telegram native download (works reliably inside the Mini App / fullscreen)
+    if (tg && typeof tg.downloadFile === 'function') {
+      tg.downloadFile({ url: src, file_name: fileName }, function (accepted) {
+        btn.innerHTML = originalText;
+        btn.disabled = false;
+        if (accepted) _notify('QR saved! Open your Gallery/Files app, then scan it with any UPI app.', 'success');
+        else _notify('Save was cancelled. Tap the button again and allow the save prompt to keep the QR.', 'error');
+      });
+      return;
+    }
+
+    var res = await fetch(src);
+    var blob = await res.blob();
+    var file = new File([blob], fileName, { type: blob.type || 'image/png' });
+
+    // Priority 2: native share sheet with "Save Image"/"Save to Photos" — lands in Gallery
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      await navigator.share({ files: [file], title: 'Payment QR Code' });
+      _notify('Choose "Save Image" in the share sheet to add it to your Gallery.', 'success');
+      return;
+    }
+
+    // Priority 3: plain blob download — goes to Downloads folder, not Gallery
+    var blobUrl = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = blobUrl;
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 3000);
+    _notify('QR saved to your Downloads folder (not Gallery) — open it from there to scan.', 'success');
+  } catch (e) {
+    if (e && e.name === 'AbortError') { btn.innerHTML = originalText; btn.disabled = false; return; } // user cancelled share sheet
+    window.open(src, '_blank');
+    _notify('Could not auto-save — opened QR in a new tab, long-press it and choose "Save to Photos".', 'error');
+  } finally {
+    if (!(tg && typeof tg.downloadFile === 'function')) {
+      btn.innerHTML = originalText;
+      btn.disabled = false;
+    }
+  }
+}
+
 
 async function submitPayment() {
   var txnId = document.getElementById('payTxnId').value.trim();
@@ -4025,6 +4123,8 @@ body.light-mode .lec-mini-notes{background:var(--surface2);color:var(--text)}
           <span class="pay-upi-id" id="payUpiId">—</span>
           <button class="pay-copy-btn" onclick="copyUpi()">Copy</button>
         </div>
+        <button class="pay-now-btn" id="payNowBtn" onclick="downloadPayQr()">⬇️ Download QR Code</button>
+        <div class="pay-now-hint">Save the QR, then scan it in your UPI app to pay</div>
       </div>
       <!-- Steps -->
       <div class="pay-steps">
