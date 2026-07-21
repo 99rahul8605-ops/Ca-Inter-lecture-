@@ -141,7 +141,10 @@ async function saveToStorageChannel(bot, fileInfo) {
 
 async function sendFile(bot, chatId, record) {
   const caption = `📎 ${record.file_name}`;
-  const protect = !isOwner(chatId);
+  // Forward-restriction (protect_content) should only apply to videos — other file types
+  // (photo, audio, voice, document) must stay freely forwardable even for non-owners.
+  const isVideoType = record.file_type === "video" || record.file_type === "video_note";
+  const protect = isVideoType && !isOwner(chatId);
   try {
     switch(record.file_type) {
       case "photo":      return await bot.sendPhoto(chatId, record.file_id, { caption, protect_content: protect });
