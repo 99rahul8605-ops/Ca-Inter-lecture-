@@ -12,8 +12,20 @@ const TelegramBot = require("node-telegram-bot-api");
 const mongoose = require("mongoose");
 const express = require("express");
 const path = require("path");
+const fs = require("fs");
 const crypto = require("crypto");
 const db = require("./sqlite-manager");
+
+// QR-with-logo generation. Wrapped in try/catch so the app still boots (with plain QR
+// generation disabled) if these haven't been installed yet — run:
+//   npm install qrcode jimp --save
+let QRCode = null, JimpLib = null;
+try {
+  QRCode = require("qrcode");
+  JimpLib = require("jimp").Jimp;
+} catch (e) {
+  console.warn("qrcode/jimp not installed — payment QR endpoint will be unavailable. Run `npm install qrcode jimp --save`.");
+}
 
 const TOKEN = process.env.BOT_TOKEN;
 const MONGO_URI = process.env.MONGO_URI;
@@ -22,6 +34,7 @@ const PORT = process.env.PORT || 3000;
 const OWNER_ID = parseInt(process.env.OWNER_ID || "0");
 const STORAGE_CHANNEL_ID = process.env.STORAGE_CHANNEL_ID ? parseInt(process.env.STORAGE_CHANNEL_ID) : null;
 const UPI_ID = process.env.UPI_ID || "";
+const UPI_NAME = process.env.UPI_NAME || ""; // payee name shown in the UPI app (pn= param) — set this in env, else falls back to a generic name
 const PAYMENT_GROUP_ID = process.env.PAYMENT_GROUP_ID ? parseInt(process.env.PAYMENT_GROUP_ID) : null;
 const CONTACT_LINK = process.env.CONTACT_LINK || "";
 
@@ -246,7 +259,53 @@ app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 app.get("/health", (req, res) => res.json({ status: "ok", uptime: process.uptime(), mongo: mongoose.connection.readyState===1?"connected":"disconnected", sqlite: "active" }));
 app.get("/api/config", (req, res) => {
   const fj = (process.env.FORCE_JOIN_CHANNELS||"").split(",").map(s=>s.trim()).filter(Boolean);
-  res.json({ ownerId: OWNER_ID, botUsername: BOT_USERNAME||"", forceJoinRequired: fj.length>0, upiId: UPI_ID||"", contactLink: CONTACT_LINK||`https://t.me/${BOT_USERNAME}` });
+  res.json({ ownerId: OWNER_ID, botUsername: BOT_USERNAME||"", forceJoinRequired: fj.length>0, upiId: UPI_ID||"", upiName: UPI_NAME||"", contactLink: CONTACT_LINK||`https://t.me/${BOT_USERNAME}` });
+});
+
+// Generates the payment UPI QR server-side (so it's a real, shareable/downloadable HTTPS
+// URL — required for Telegram's native tg.downloadFile) and overlays public/logo.png in
+// the center. errorCorrectionLevel "H" (30% redundancy) keeps the code scannable even with
+// ~22% of the middle covered by the logo. If public/logo.png doesn't exist yet, falls back
+// to a plain QR with no logo — drop your logo file in at public/logo.png to enable this.
+app.get("/api/payment-qr", async (req, res) => {
+  try {
+    if (!QRCode || !JimpLib) return res.status(503).send("QR generator not installed on server. Run: npm install qrcode jimp --save");
+    if (!UPI_ID) return res.status(404).send("UPI_ID not configured");
+    const amount = req.query.amount ? Number(req.query.amount) : null;
+    const note = (req.query.note || "Payment").toString().slice(0, 40);
+
+    let upiStr = `upi://pay?pa=${encodeURIComponent(UPI_ID)}&pn=${encodeURIComponent(UPI_NAME || "Payment")}`;
+    if (amount && amount > 0) upiStr += `&am=${amount.toFixed(2)}`;
+    upiStr += `&cu=INR&tn=${encodeURIComponent("Payment for " + note)}`;
+
+    const qrBuffer = await QRCode.toBuffer(upiStr, { errorCorrectionLevel: "H", width: 500, margin: 1 });
+    const qrImg = await JimpLib.read(qrBuffer);
+
+    const logoPath = path.join(__dirname, "public", "logo.png");
+    if (fs.existsSync(logoPath)) {
+      const logoImg = await JimpLib.read(logoPath);
+      const qrSize = qrImg.bitmap.width;
+      const logoSize = Math.floor(qrSize * 0.22);
+      logoImg.resize({ w: logoSize, h: logoSize });
+
+      const pad = Math.floor(logoSize * 0.12);
+      const backdropSize = logoSize + pad * 2;
+      const backdrop = new JimpLib({ width: backdropSize, height: backdropSize, color: 0xffffffff });
+      const bx = Math.floor((qrSize - backdropSize) / 2), by = Math.floor((qrSize - backdropSize) / 2);
+      qrImg.composite(backdrop, bx, by);
+
+      const lx = Math.floor((qrSize - logoSize) / 2), ly = Math.floor((qrSize - logoSize) / 2);
+      qrImg.composite(logoImg, lx, ly);
+    }
+
+    const outBuffer = await qrImg.getBuffer("image/png");
+    res.set("Content-Type", "image/png");
+    res.set("Cache-Control", "no-store");
+    res.send(outBuffer);
+  } catch (e) {
+    console.error("payment-qr error:", e);
+    res.status(500).send("QR generation failed");
+  }
 });
 
 const courseRoutes = require("./routes/course");
