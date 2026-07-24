@@ -612,6 +612,290 @@ async function syncFromMongo(mongoose) {
   console.log('✅ SQLite sync complete');
 }
 
+// Pushes the CURRENT SQLite state up into MongoDB. SQLite is the live source of
+// truth (every write lands here first, synchronously); Mongo is normally kept in
+// step by a fire-and-forget backup write alongside each SQLite write. This
+// function exists as a manual "catch up" tool for the rare case one of those
+// fire-and-forget Mongo writes silently failed (network blip, Mongo hiccup,
+// etc. — they're wrapped in .catch(()=>{}) by design so a Mongo outage never
+// blocks the user-facing action) — running it forces every row to be re-pushed.
+//
+// Matching keys are chosen per-table to avoid creating duplicates in Mongo:
+// where the SQLite row's id is the actual Mongo _id (batches, announcements,
+// coupons) we match on _id; everywhere else we match on whatever natural/unique
+// key the app already uses for that entity (userId, code, batch_code, etc.) —
+// mirroring the same matching strategy syncFromMongo already uses in reverse.
+//
+// Skips: spin_tokens (short-lived ad-watch proofs) and pending_deletes /
+// pending_undelivers (transient scheduled-job markers) — none of these are
+// data worth backing up, same reasoning the app already applies to spin_tokens
+// elsewhere.
+async function syncToMongo(mongoose) {
+  const db = getDb();
+  const summary = {};
+  console.log('🔄 Syncing from SQLite to MongoDB...');
+
+  try {
+    // 1. Batches (SQLite id === Mongo _id already)
+    const Batch = mongoose.model('Batch');
+    const rows = db.prepare(`SELECT data FROM batches`).all().map(r => JSON.parse(r.data));
+    let ok = 0;
+    for (const b of rows) {
+      try { await Batch.findByIdAndUpdate(b._id, b, { upsert: true }); ok++; } catch (e) {}
+    }
+    summary.batches = ok;
+    console.log(`  ✅ Batches: ${ok}/${rows.length}`);
+  } catch (e) { console.error('  ❌ Batches sync error:', e.message); summary.batches = 'error'; }
+
+  try {
+    // 2. Users (matched by userId)
+    const User = mongoose.models.User;
+    if (User) {
+      const rows = db.prepare(`SELECT * FROM users`).all();
+      const ops = rows.map(u => ({
+        updateOne: {
+          filter: { userId: u.userId },
+          update: { $set: { userId: u.userId, firstName: u.firstName||'', lastName: u.lastName||'', username: u.username||'', firstSeen: new Date(u.firstSeen||0), lastSeen: new Date(u.lastSeen||0) } },
+          upsert: true,
+        },
+      }));
+      if (ops.length) await User.bulkWrite(ops, { ordered: false });
+      summary.users = rows.length;
+      console.log(`  ✅ Users: ${rows.length}`);
+    }
+  } catch (e) { console.error('  ❌ Users sync error:', e.message); summary.users = 'error'; }
+
+  try {
+    // 3. Announcements (SQLite id === Mongo _id)
+    const Announcement = mongoose.models.Announcement;
+    if (Announcement) {
+      const rows = db.prepare(`SELECT * FROM announcements`).all();
+      let ok = 0;
+      for (const a of rows) {
+        try {
+          await Announcement.findByIdAndUpdate(a.id, { emoji: a.emoji||'📢', heading: a.heading, body: a.body, createdAt: new Date(a.createdAt||0) }, { upsert: true });
+          ok++;
+        } catch (e) {}
+      }
+      summary.announcements = ok;
+      console.log(`  ✅ Announcements: ${ok}/${rows.length}`);
+    }
+  } catch (e) { console.error('  ❌ Announcements sync error:', e.message); summary.announcements = 'error'; }
+
+  try {
+    // 4. Access (matched by userId)
+    const Access = mongoose.models.Access;
+    if (Access) {
+      const rows = db.prepare(`SELECT * FROM access`).all();
+      const ops = rows.map(r => ({
+        updateOne: {
+          filter: { userId: r.userId },
+          update: { $set: { userId: r.userId, expiresAt: new Date(r.expiresAt||0), claimsToday: r.claimsToday||0, claimDay: r.claimDay||'' } },
+          upsert: true,
+        },
+      }));
+      if (ops.length) await Access.bulkWrite(ops, { ordered: false });
+      summary.access = rows.length;
+      console.log(`  ✅ Access: ${rows.length}`);
+    }
+  } catch (e) { console.error('  ❌ Access sync error:', e.message); summary.access = 'error'; }
+
+  try {
+    // 5. Referrals (matched by referredId — unique per referral by design)
+    const Referral = mongoose.models.Referral;
+    if (Referral) {
+      const rows = db.prepare(`SELECT * FROM referrals`).all();
+      const ops = rows.map(r => ({
+        updateOne: {
+          filter: { referredId: r.referredId },
+          update: { $setOnInsert: { referrerId: r.referrerId, referredId: r.referredId, createdAt: new Date(r.createdAt||0) } },
+          upsert: true,
+        },
+      }));
+      if (ops.length) await Referral.bulkWrite(ops, { ordered: false });
+      summary.referrals = rows.length;
+      console.log(`  ✅ Referrals: ${rows.length}`);
+    }
+  } catch (e) { console.error('  ❌ Referrals sync error:', e.message); summary.referrals = 'error'; }
+
+  try {
+    // 6. Coupons (SQLite id === Mongo _id)
+    const Coupon = mongoose.models.Coupon;
+    if (Coupon) {
+      const rows = db.prepare(`SELECT * FROM coupons`).all();
+      let ok = 0;
+      for (const c of rows) {
+        try {
+          await Coupon.findByIdAndUpdate(c.id, {
+            code: c.code, discountPct: c.discountPct, expiresAt: new Date(c.expiresAt||0),
+            isActive: c.isActive === 1, usageCount: c.usageCount||0,
+            batchIds: JSON.parse(c.batchIds||'[]'), createdAt: new Date(c.createdAt||0),
+          }, { upsert: true });
+          ok++;
+        } catch (e) {}
+      }
+      summary.coupons = ok;
+      console.log(`  ✅ Coupons: ${ok}/${rows.length}`);
+    }
+  } catch (e) { console.error('  ❌ Coupons sync error:', e.message); summary.coupons = 'error'; }
+
+  try {
+    // 7. AutoLecSession (singleton)
+    const AutoLecSession = mongoose.models.AutoLecSession;
+    if (AutoLecSession) {
+      const s = db.prepare(`SELECT * FROM auto_lec_session WHERE id='singleton'`).get();
+      if (s) {
+        await AutoLecSession.findByIdAndUpdate('singleton', {
+          active: s.active === 1, batchId: s.batchId, subjectId: s.subjectId, chapterId: s.chapterId,
+          unitId: s.unitId, lectureCount: s.lectureCount||0, batchName: s.batchName||'',
+          subjectName: s.subjectName||'', chapterName: s.chapterName||'', unitName: s.unitName||'',
+        }, { upsert: true });
+        summary.autoLecSession = 1;
+        console.log(`  ✅ AutoLecSession synced`);
+      }
+    }
+  } catch (e) { console.error('  ❌ AutoLecSession sync error:', e.message); summary.autoLecSession = 'error'; }
+
+  try {
+    // 8. FileRecords (matched by code — unique)
+    const FileRecord = mongoose.models.FileRecord;
+    if (FileRecord) {
+      const rows = db.prepare(`SELECT * FROM file_records`).all();
+      const ops = rows.map(f => ({
+        updateOne: {
+          filter: { code: f.code },
+          update: { $set: {
+            code: f.code, file_id: f.file_id, file_type: f.file_type, file_name: f.file_name||'file',
+            uploaded_by: f.uploaded_by||null, expires_at: f.expires_at ? new Date(f.expires_at) : null,
+            delivered_to: JSON.parse(f.delivered_to||'[]'), created_at: new Date(f.created_at||0),
+            channel_msg_id: f.channel_msg_id||null,
+          } },
+          upsert: true,
+        },
+      }));
+      if (ops.length) await FileRecord.bulkWrite(ops, { ordered: false });
+      summary.fileRecords = rows.length;
+      console.log(`  ✅ FileRecords: ${rows.length}`);
+    }
+  } catch (e) { console.error('  ❌ FileRecords sync error:', e.message); summary.fileRecords = 'error'; }
+
+  try {
+    // 9. BulkBatches (matched by batch_code — unique)
+    const BulkBatch = mongoose.models.BulkBatch;
+    if (BulkBatch) {
+      const rows = db.prepare(`SELECT * FROM bulk_batches`).all();
+      const ops = rows.map(b => ({
+        updateOne: {
+          filter: { batch_code: b.batch_code },
+          update: { $set: { batch_code: b.batch_code, user_id: b.user_id, files: JSON.parse(b.files||'[]'), created_at: new Date(b.created_at||0) } },
+          upsert: true,
+        },
+      }));
+      if (ops.length) await BulkBatch.bulkWrite(ops, { ordered: false });
+      summary.bulkBatches = rows.length;
+      console.log(`  ✅ BulkBatches: ${rows.length}`);
+    }
+  } catch (e) { console.error('  ❌ BulkBatches sync error:', e.message); summary.bulkBatches = 'error'; }
+
+  try {
+    // 10. DailyVideoLimits (matched by userId)
+    const DailyVideoLimit = mongoose.models.DailyVideoLimit;
+    if (DailyVideoLimit) {
+      const rows = db.prepare(`SELECT * FROM daily_video_limits`).all();
+      const ops = rows.map(l => ({
+        updateOne: {
+          filter: { userId: l.userId },
+          update: { $set: { userId: l.userId, count: l.count||0, resetDate: l.resetDate||'' } },
+          upsert: true,
+        },
+      }));
+      if (ops.length) await DailyVideoLimit.bulkWrite(ops, { ordered: false });
+      summary.dailyVideoLimits = rows.length;
+      console.log(`  ✅ DailyVideoLimits: ${rows.length}`);
+    }
+  } catch (e) { console.error('  ❌ DailyVideoLimits sync error:', e.message); summary.dailyVideoLimits = 'error'; }
+
+  try {
+    // 11. Reward Redemptions (ledger — best-effort match on userId+pointsCost+redeemedAt,
+    // same shared Date instance used on both writes at insert time, see course.js redeem route)
+    const RewardRedemption = mongoose.models.RewardRedemption;
+    if (RewardRedemption) {
+      const rows = db.prepare(`SELECT * FROM reward_redemptions`).all();
+      const ops = rows.map(r => ({
+        updateOne: {
+          filter: { userId: r.userId, pointsCost: r.pointsCost, redeemedAt: new Date(r.redeemedAt||0) },
+          update: { $setOnInsert: {
+            userId: r.userId, rewardType: r.rewardType, batchId: r.batchId||null, batchName: r.batchName||'',
+            pointsCost: r.pointsCost, redeemedAt: new Date(r.redeemedAt||0), expiresAt: new Date(r.expiresAt||0),
+          } },
+          upsert: true,
+        },
+      }));
+      if (ops.length) await RewardRedemption.bulkWrite(ops, { ordered: false });
+      summary.rewardRedemptions = rows.length;
+      console.log(`  ✅ Reward Redemptions: ${rows.length}`);
+    }
+  } catch (e) { console.error('  ❌ Reward Redemptions sync error:', e.message); summary.rewardRedemptions = 'error'; }
+
+  try {
+    // 12. Batch Reward Access (matched by userId+batchId — compound PK in SQLite too)
+    const BatchRewardAccess = mongoose.models.BatchRewardAccess;
+    if (BatchRewardAccess) {
+      const rows = db.prepare(`SELECT * FROM batch_reward_access`).all();
+      const ops = rows.map(r => ({
+        updateOne: {
+          filter: { userId: r.userId, batchId: r.batchId },
+          update: { $set: { userId: r.userId, batchId: r.batchId, batchName: r.batchName||'', expiresAt: new Date(r.expiresAt||0), grantedAt: new Date(r.grantedAt||0) } },
+          upsert: true,
+        },
+      }));
+      if (ops.length) await BatchRewardAccess.bulkWrite(ops, { ordered: false });
+      summary.batchRewardAccess = rows.length;
+      console.log(`  ✅ Batch Reward Access: ${rows.length}`);
+    }
+  } catch (e) { console.error('  ❌ Batch Reward Access sync error:', e.message); summary.batchRewardAccess = 'error'; }
+
+  try {
+    // 13. Spin History (ledger — best-effort match on userId+pointsWon+spunAt, same
+    // shared Date instance used on both writes at insert time)
+    const SpinHistory = mongoose.models.SpinHistory;
+    if (SpinHistory) {
+      const rows = db.prepare(`SELECT * FROM spin_history`).all();
+      const ops = rows.map(r => ({
+        updateOne: {
+          filter: { userId: r.userId, pointsWon: r.pointsWon, spunAt: new Date(r.spunAt||0) },
+          update: { $setOnInsert: { userId: r.userId, pointsWon: r.pointsWon, spunAt: new Date(r.spunAt||0) } },
+          upsert: true,
+        },
+      }));
+      if (ops.length) await SpinHistory.bulkWrite(ops, { ordered: false });
+      summary.spinHistory = rows.length;
+      console.log(`  ✅ Spin History: ${rows.length}`);
+    }
+  } catch (e) { console.error('  ❌ Spin History sync error:', e.message); summary.spinHistory = 'error'; }
+
+  try {
+    // 14. Watched Lectures (matched by userId+lectureId — compound PK in SQLite too)
+    const WatchedLecture = mongoose.models.WatchedLecture;
+    if (WatchedLecture) {
+      const rows = db.prepare(`SELECT * FROM watched_lectures`).all();
+      const ops = rows.map(r => ({
+        updateOne: {
+          filter: { userId: r.userId, lectureId: r.lectureId },
+          update: { $set: { userId: r.userId, lectureId: r.lectureId, watchedAt: new Date(r.watchedAt||0) } },
+          upsert: true,
+        },
+      }));
+      if (ops.length) await WatchedLecture.bulkWrite(ops, { ordered: false });
+      summary.watchedLectures = rows.length;
+      console.log(`  ✅ Watched Lectures: ${rows.length}`);
+    }
+  } catch (e) { console.error('  ❌ Watched Lectures sync error:', e.message); summary.watchedLectures = 'error'; }
+
+  console.log('✅ SQLite → MongoDB sync complete');
+  return summary;
+}
+
 // ── BATCH Operations ──────────────────────────────────────────────────────────
 
 const batch = {
@@ -1143,6 +1427,7 @@ function generateId() {
 module.exports = {
   getDb,
   syncFromMongo,
+  syncToMongo,
   batch,
   user,
   announcement,

@@ -703,7 +703,41 @@ async function startBot() {
     }
   });
 
-  // ── Telegram link fetch ───────────────────────────────────────────────────
+  let syncRunning = false;
+  bot.onText(/\/sync/, async (msg) => {
+    if (isGroupChat(msg) || !isOwner(msg.from?.id)) return;
+    const chatId = msg.chat.id;
+    if (syncRunning) return bot.sendMessage(chatId, `⚠️ A sync is already running.`);
+    syncRunning = true;
+    const status = await bot.sendMessage(chatId, `🔄 Syncing SQLite → MongoDB…`);
+    try {
+      const summary = await db.syncToMongo(mongoose);
+      const labels = {
+        batches: '📚 Batches', users: '👤 Users', announcements: '📢 Announcements',
+        access: '🔓 Access grants', referrals: '🔗 Referrals', coupons: '🎟️ Coupons',
+        autoLecSession: '⚙️ Auto-lecture session', fileRecords: '📎 File records',
+        bulkBatches: '📦 Bulk batches', dailyVideoLimits: '📺 Daily video limits',
+        rewardRedemptions: '🎁 Reward redemptions', batchRewardAccess: '⏳ Batch reward access',
+        spinHistory: '🎡 Spin history', watchedLectures: '👁️ Watched lectures',
+      };
+      let text = `✅ <b>Sync complete</b>\n\n`;
+      let hadError = false;
+      for (const key of Object.keys(labels)) {
+        const val = summary[key];
+        if (val === undefined) continue;
+        if (val === 'error') { text += `${labels[key]}: ⚠️ failed (check server logs)\n`; hadError = true; }
+        else text += `${labels[key]}: ${val}\n`;
+      }
+      text += `\n<i>Skipped: pending deletes/undelivers and spin tokens — these are short-lived job markers, not data worth backing up.</i>`;
+      if (hadError) text += `\n\n⚠️ Some tables had errors — check server logs for details.`;
+      await bot.editMessageText(text, { chat_id: chatId, message_id: status.message_id, parse_mode: "HTML" });
+    } catch (err) {
+      console.error("Sync error:", err.message);
+      bot.editMessageText(`❌ Sync failed: ${esc(err.message)}`, { chat_id: chatId, message_id: status.message_id, parse_mode: "HTML" }).catch(() => {});
+    } finally {
+      syncRunning = false;
+    }
+  });
   const TG_LINK_RE=/https?:\/\/t\.me\/(c\/(\d+)|([a-zA-Z][a-zA-Z0-9_]{3,}))\/(\d+)/;
   const fileQueues=new Map();
   function enqueueFile(userId,task){const prev=fileQueues.get(userId)||Promise.resolve();const next=prev.then(task).catch(()=>{});fileQueues.set(userId,next);next.finally(()=>{if(fileQueues.get(userId)===next)fileQueues.delete(userId);});}
