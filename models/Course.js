@@ -41,6 +41,8 @@ const batchSchema = new mongoose.Schema({
   premiumUsers: { type: [String], default: [] }, // Telegram user IDs allowed to access this batch
   price: { type: Number, default: 0 }, // price in INR
   rewardEligible: { type: Boolean, default: true }, // false = excluded from the points-based Redeem Reward picker (still purchasable/assignable normally)
+  redeemCost24h: { type: Number, default: null }, // null = use the site-wide REWARD_CATALOG.batch24h.cost default
+  redeemCost7d: { type: Number, default: null },  // null = use the site-wide REWARD_CATALOG.batch7d.cost default
   subjects: [subjectSchema],
 });
 
