@@ -38,6 +38,14 @@ const UPI_NAME = process.env.UPI_NAME || ""; // payee name shown in the UPI app 
 const PAYMENT_GROUP_ID = process.env.PAYMENT_GROUP_ID ? parseInt(process.env.PAYMENT_GROUP_ID) : null;
 const CONTACT_LINK = process.env.CONTACT_LINK || "";
 
+// Ilambit DevPort — used to auto-verify payments before they hit the admin
+// approval queue. Get a key from https://devport.ilambit.in/dashboard and
+// set your Paytm MID under Services → Paytm. If DEVPORT_API_KEY is left
+// unset, auto-verification is simply skipped and every payment falls back
+// to the existing manual Approve/Reject flow — nothing breaks.
+const DEVPORT_API_KEY = process.env.DEVPORT_API_KEY || "";
+const DEVPORT_BASE_URL = process.env.DEVPORT_BASE_URL || "https://devport.ilambit.in/api/v1";
+
 let BOT_USERNAME = "";
 let bot = null;
 
@@ -64,7 +72,26 @@ const PendingDelete = mongoose.model("PendingDelete", pendingDeleteSchema);
 const pendingUndeliverSchema = new mongoose.Schema({ file_record_id: String, code: String, chat_id: Number, undeliver_at: Date });
 const PendingUndeliver = mongoose.model("PendingUndeliver", pendingUndeliverSchema);
 
-const userSchema = new mongoose.Schema({ userId: { type: String, required: true, unique: true }, firstName: { type: String, default: "" }, lastName: { type: String, default: "" }, username: { type: String, default: "" }, firstSeen: { type: Date, default: Date.now }, lastSeen: { type: Date, default: Date.now } });
+const userSchema = new mongoose.Schema({
+  userId: { type: String, required: true, unique: true },
+  firstName: { type: String, default: "" },
+  lastName: { type: String, default: "" },
+  username: { type: String, default: "" },
+  firstSeen: { type: Date, default: Date.now },
+  lastSeen: { type: Date, default: Date.now },
+  // Read-only points snapshot — written ONLY by the /sync command (db.syncToMongo).
+  // The app itself never reads points from here; it always recomputes live from
+  // SQLite via getPointsBreakdown(). This just makes the balance visible when
+  // browsing the Mongo collection directly, e.g. in Compass or Atlas.
+  points: { type: Number, default: 0 },
+  pointsBreakdown: {
+    referrals: { type: Number, default: 0 },
+    spinEarned: { type: Number, default: 0 },
+    adjustment: { type: Number, default: 0 },
+    spent: { type: Number, default: 0 },
+  },
+  pointsSyncedAt: { type: Date, default: null },
+});
 const User = mongoose.model("User", userSchema);
 
 const dailyLimitSchema = new mongoose.Schema({ userId: { type: Number, required: true, unique: true }, count: { type: Number, default: 0 }, resetDate: { type: String, required: true } });
@@ -254,6 +281,62 @@ async function recoverPendingUndelivers() {
 const esc = (s) => String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
 async function wait(ms) { return new Promise(r => setTimeout(r, ms)); }
 
+// ── Paytm payment verification via Ilambit DevPort ─────────────────────────
+// Docs: https://devport.ilambit.in/docs#paytm
+// Looks up a payment by orderId against Paytm's own records via DevPort's
+// gateway proxy. Returns { ok:true, transaction } only when Paytm confirms
+// the txn as a genuine success; otherwise { ok:false, reason, message } with
+// a reason drawn from DevPort's response so admins/logs know *why* it
+// didn't auto-verify (not_found, not_verified, an upstream error code, etc).
+// Never throws — network/API failures just mean "couldn't auto-verify",
+// so callers always have a safe manual-review fallback.
+async function verifyPaytmPayment(orderId) {
+  if (!DEVPORT_API_KEY) return { ok: false, reason: "not_configured", message: "DEVPORT_API_KEY not set" };
+  if (!orderId) return { ok: false, reason: "missing_order_id", message: "No order ID provided" };
+  try {
+    const r = await fetch(`${DEVPORT_BASE_URL}/paytm/status/${encodeURIComponent(orderId)}`, {
+      headers: { "X-API-Key": DEVPORT_API_KEY },
+      signal: AbortSignal.timeout(10000),
+    });
+    const j = await r.json();
+    if (!j.success) return { ok: false, reason: j.error?.code || "api_error", message: j.error?.message || "DevPort API error" };
+    const d = j.data || {};
+    if (!d.found) return { ok: false, reason: "not_found", message: d.message || "Order not found on Paytm" };
+    if (!d.verified || d.transaction?.status !== "TXN_SUCCESS") return { ok: false, reason: "not_verified", message: d.message || "Payment not verified" };
+    return { ok: true, transaction: d.transaction };
+  } catch (e) {
+    console.error("Paytm verify error:", e.message);
+    return { ok: false, reason: "request_failed", message: e.message };
+  }
+}
+
+// Grants a user premium access to a batch — shared by the auto-verify path
+// (pay-request) and the manual owner Approve button (callback_query), so
+// both stay in sync instead of duplicating the Mongo+SQLite write.
+async function grantBatchAccess(batchId, targetUserId) {
+  const Batch = require("./models/Course");
+  const batch = await Batch.findById(batchId);
+  if (batch) {
+    if (!batch.premiumUsers) batch.premiumUsers = [];
+    if (!batch.premiumUsers.includes(String(targetUserId))) { batch.premiumUsers.push(String(targetUserId)); await batch.save(); }
+    db.batch.upsert(batch.toObject());
+  }
+  return batch;
+}
+
+// Reverses grantBatchAccess — used both by manual Reject-after-approval
+// ("Revoke") and could be reused elsewhere if needed.
+async function revokeBatchAccess(batchId, targetUserId) {
+  const Batch = require("./models/Course");
+  const batch = await Batch.findById(batchId);
+  if (batch && batch.premiumUsers) {
+    batch.premiumUsers = batch.premiumUsers.filter(u => u !== String(targetUserId));
+    await batch.save();
+    db.batch.upsert(batch.toObject());
+  }
+  return batch;
+}
+
 // ── Express ───────────────────────────────────────────────────────────────────
 const app = express();
 app.use(express.json({ limit: "10mb" }));
@@ -270,16 +353,26 @@ app.get("/api/config", (req, res) => {
 // the center. errorCorrectionLevel "H" (30% redundancy) keeps the code scannable even with
 // ~22% of the middle covered by the logo. If public/logo.png doesn't exist yet, falls back
 // to a plain QR with no logo — drop your logo file in at public/logo.png to enable this.
+//
+// `tr` (transaction reference) is the key piece for auto-verification: it's generated
+// per payment attempt (by the frontend, see _genTxnRef in index.html) and embedded in the
+// UPI intent. Paytm records this same value as the order reference when the payment is
+// made, so /api/pay-request can later look it up via DevPort's Paytm status API using
+// this exact value as orderId. If the caller doesn't pass one, we generate a fallback here
+// so the QR still works — but the frontend must use the SAME value it sends back at
+// submission time, so generating it client-side (once per modal-open) is what makes that possible.
 app.get("/api/payment-qr", async (req, res) => {
   try {
     if (!QRCode || !JimpLib) return res.status(503).send("QR generator not installed on server. Run: npm install qrcode jimp --save");
     if (!UPI_ID) return res.status(404).send("UPI_ID not configured");
     const amount = req.query.amount ? Number(req.query.amount) : null;
     const note = (req.query.note || "Payment").toString().slice(0, 40);
+    const txnRef = (req.query.tr || `PM${Date.now().toString(36)}${crypto.randomBytes(3).toString("hex")}`).toString().slice(0, 35).toUpperCase();
 
-    let upiStr = `upi://pay?pa=${encodeURIComponent(UPI_ID)}&pn=${encodeURIComponent(UPI_NAME || "Payment")}`;
-    if (amount && amount > 0) upiStr += `&am=${amount.toFixed(2)}`;
-    upiStr += `&cu=INR&tn=${encodeURIComponent("Payment for " + note)}`;
+    const amtStr = amount && amount > 0 ? amount.toFixed(2) : "";
+    let upiStr = `upi://pay?cu=INR&pa=${encodeURIComponent(UPI_ID)}&pn=${encodeURIComponent(UPI_NAME || "Payment")}`;
+    if (amtStr) upiStr += `&am=${amtStr}&mam=${amtStr}`;
+    upiStr += `&tr=${encodeURIComponent(txnRef)}&tn=${encodeURIComponent("Payment for " + note)}`;
 
     const qrBuffer = await QRCode.toBuffer(upiStr, { errorCorrectionLevel: "H", width: 500, margin: 1 });
     const qrImg = await JimpLib.read(qrBuffer);
@@ -304,6 +397,7 @@ app.get("/api/payment-qr", async (req, res) => {
     const outBuffer = await qrImg.getBuffer("image/png");
     res.set("Content-Type", "image/png");
     res.set("Cache-Control", "no-store");
+    res.set("X-Txn-Ref", txnRef); // exposed in case a caller wants to confirm what ref got embedded
     res.send(outBuffer);
   } catch (e) {
     console.error("payment-qr error:", e);
@@ -318,19 +412,51 @@ const autoAddLecture = courseRoutes.autoAddLecture;
 
 app.post("/api/pay-request", async (req, res) => {
   try {
-    const { batchId, userId, firstName, lastName, username, txnId, screenshotBase64, couponCode, discountPct, finalAmount } = req.body;
+    const { batchId, userId, firstName, lastName, username, txnId, orderRef, screenshotBase64, couponCode, discountPct, finalAmount } = req.body;
     if (!batchId || !txnId) return res.status(400).json({ error: "Missing fields" });
     const batchData = db.batch.getOne(batchId);
     const batchName = batchData ? batchData.name : batchId;
     const origPrice = batchData?.price ? `₹${batchData.price}` : "N/A";
     let priceLine = `💰 Amount: <b>${esc(origPrice)}</b>`;
     if (couponCode && discountPct && finalAmount!=null) priceLine = `💰 Original: <b>${esc(origPrice)}</b>\n🎟 Coupon: <code>${esc(couponCode)}</code> (${esc(String(discountPct))}% off)\n✅ Final: <b>₹${esc(String(finalAmount))}</b>`;
-    const caption = `💸 <b>New Payment Request!</b>\n\n👤 <b>${esc(firstName)}${lastName?" "+esc(lastName):""}</b>\n🆔 UID: <code>${esc(userId)}</code>\n📱 @${username||"N/A"}\n\n📚 Batch: <b>${esc(batchName)}</b>\n${priceLine}\n🔖 UTR: <code>${esc(txnId)}</code>`;
     if (!PAYMENT_GROUP_ID) return res.status(500).json({ error: "PAYMENT_GROUP_ID not configured" });
+
+    // Verify against Paytm via DevPort using orderRef — the `tr` value the
+    // frontend generated and embedded in the UPI QR (see _genTxnRef in
+    // index.html), NOT the manually-typed UTR. This is what makes lookup
+    // actually work: `tr` is a merchant-controlled order reference that
+    // Paytm records against the transaction, so it's a genuine order ID —
+    // the user-entered UTR never was. Safe no-op (falls through to manual
+    // review) if DEVPORT_API_KEY isn't set or orderRef is missing/unmatched.
+    const verification = await verifyPaytmPayment(orderRef);
+
+    const baseInfo = `👤 <b>${esc(firstName)}${lastName?" "+esc(lastName):""}</b>\n🆔 UID: <code>${esc(userId)}</code>\n📱 @${username||"N/A"}\n\n📚 Batch: <b>${esc(batchName)}</b>\n${priceLine}\n🔖 UTR: <code>${esc(txnId)}</code>${orderRef?`\n🧾 Order Ref: <code>${esc(orderRef)}</code>`:""}`;
+
+    if (verification.ok) {
+      // ── Auto-approved: Paytm confirmed the transaction ─────────────────────
+      const t = verification.transaction;
+      await grantBatchAccess(batchId, userId);
+      bot.sendMessage(parseInt(userId), `✅ <b>Payment Verified & Approved!</b>\n\nAccess to <b>${esc(batchName)}</b> unlocked! 🚀`, { parse_mode:"HTML", reply_markup:{ inline_keyboard:[[{ text:"📚 Open App", web_app:{ url:WEB_URL } }]] } }).catch(()=>{});
+
+      const caption = `💸 <b>Payment Request — ✅ AUTO-VERIFIED (Paytm)</b>\n\n${baseInfo}\n\n💳 Paytm Amount: <b>₹${esc(t.txnAmount)}</b> · Mode: ${esc(t.paymentMode)}\n🏦 Gateway: ${esc(t.gatewayName)} · Paytm Txn: <code>${esc(t.txnId)}</code>`;
+      const kb = { inline_keyboard: [[{ text: "↩️ Revoke Access", callback_data: `pay_revoke_${batchId}_${userId}` }]] };
+      if (screenshotBase64) { const buf = Buffer.from(screenshotBase64.replace(/^data:image\/\w+;base64,/,""),"base64"); await bot.sendPhoto(PAYMENT_GROUP_ID, buf, { caption, parse_mode:"HTML", filename:`payment_${userId}.jpg`, reply_markup: kb }); }
+      else await bot.sendMessage(PAYMENT_GROUP_ID, caption, { parse_mode:"HTML", reply_markup: kb });
+
+      return res.json({ success: true, autoVerified: true });
+    }
+
+    // ── Not auto-verified: fall back to the existing manual Approve/Reject flow ──
+    // reason is included so the admin can see at a glance why it wasn't auto-approved
+    // (not_found = order ref unrecognized by Paytm, not_verified = found but not a
+    // success, missing_order_id = orderRef wasn't sent, not_configured = DEVPORT_API_KEY
+    // not set, api_error/request_failed = DevPort issue).
+    const verifyNote = DEVPORT_API_KEY ? `\n⚠️ Auto-verify: <i>${esc(verification.reason)}</i>${verification.message ? " — " + esc(verification.message) : ""}` : "";
+    const caption = `💸 <b>New Payment Request!</b>\n\n${baseInfo}${verifyNote}`;
     const kb = { inline_keyboard: [[{ text: "✅ Approve", callback_data: `pay_approve_${batchId}_${userId}` },{ text: "❌ Reject", callback_data: `pay_reject_${batchId}_${userId}` }]] };
     if (screenshotBase64) { const buf = Buffer.from(screenshotBase64.replace(/^data:image\/\w+;base64,/,""),"base64"); await bot.sendPhoto(PAYMENT_GROUP_ID, buf, { caption, parse_mode:"HTML", filename:`payment_${userId}.jpg`, reply_markup: kb }); }
     else await bot.sendMessage(PAYMENT_GROUP_ID, caption, { parse_mode:"HTML", reply_markup: kb });
-    res.json({ success: true });
+    res.json({ success: true, autoVerified: false });
   } catch (err) { console.error("Payment request error:", err.message); res.status(500).json({ error: err.message }); }
 });
 
@@ -544,19 +670,27 @@ async function startBot() {
   // ── Callback queries ──────────────────────────────────────────────────────
   bot.on("callback_query", async (query) => {
     const userId=query.from?.id; const data=query.data||""; const chatId=query.message?.chat?.id; const msgId=query.message?.message_id;
-    if (data.startsWith("pay_approve_")||data.startsWith("pay_reject_")) {
+    if (data.startsWith("pay_approve_")||data.startsWith("pay_reject_")||data.startsWith("pay_revoke_")) {
       if (!isOwner(userId)) return bot.answerCallbackQuery(query.id,{text:"❌ Not authorized"});
       const isApprove=data.startsWith("pay_approve_");
-      const parts=data.replace("pay_approve_","").replace("pay_reject_","").split("_");
+      const isRevoke=data.startsWith("pay_revoke_");
+      const parts=data.replace("pay_approve_","").replace("pay_reject_","").replace("pay_revoke_","").split("_");
       const batchId=parts[0]; const targetUserId=parts[1];
       if (isApprove) {
         try {
-          const Batch=require("./models/Course");
-          const batch=await Batch.findById(batchId);
-          if(batch){if(!batch.premiumUsers)batch.premiumUsers=[];if(!batch.premiumUsers.includes(String(targetUserId))){batch.premiumUsers.push(String(targetUserId));await batch.save();}db.batch.upsert(batch.toObject());}
+          const batch=await grantBatchAccess(batchId, targetUserId);
           bot.sendMessage(parseInt(targetUserId),`✅ <b>Payment Approved!</b>\n\nAccess to <b>${esc(batch?.name||"the batch")}</b> unlocked! 🚀`,{parse_mode:"HTML",reply_markup:{inline_keyboard:[[{text:"📚 Open App",web_app:{url:WEB_URL}}]]}}).catch(()=>{});
           await bot.editMessageCaption(`${query.message.caption||""}\n\n✅ <b>APPROVED</b> by ${esc(query.from.first_name||"Admin")}`,{chat_id:chatId,message_id:msgId,parse_mode:"HTML",reply_markup:{inline_keyboard:[]}}).catch(()=>bot.editMessageText(`${query.message.text||""}\n\n✅ <b>APPROVED</b>`,{chat_id:chatId,message_id:msgId,parse_mode:"HTML",reply_markup:{inline_keyboard:[]}}).catch(()=>{}));
           await bot.answerCallbackQuery(query.id,{text:"✅ Approved!"});
+        } catch(err){await bot.answerCallbackQuery(query.id,{text:"❌ Error: "+err.message});}
+      } else if (isRevoke) {
+        // Undoes an auto-approved (Paytm-verified) grant — for false positives
+        // or chargebacks caught after the fact.
+        try {
+          await revokeBatchAccess(batchId, targetUserId);
+          bot.sendMessage(parseInt(targetUserId),`⚠️ <b>Access Revoked</b>\n\nYour access was revoked pending review. Please contact support.`,{parse_mode:"HTML"}).catch(()=>{});
+          await bot.editMessageCaption(`${query.message.caption||""}\n\n↩️ <b>REVOKED</b> by ${esc(query.from.first_name||"Admin")}`,{chat_id:chatId,message_id:msgId,parse_mode:"HTML",reply_markup:{inline_keyboard:[]}}).catch(()=>bot.editMessageText(`${query.message.text||""}\n\n↩️ <b>REVOKED</b>`,{chat_id:chatId,message_id:msgId,parse_mode:"HTML",reply_markup:{inline_keyboard:[]}}).catch(()=>{}));
+          await bot.answerCallbackQuery(query.id,{text:"↩️ Revoked"});
         } catch(err){await bot.answerCallbackQuery(query.id,{text:"❌ Error: "+err.message});}
       } else {
         bot.sendMessage(parseInt(targetUserId),`❌ <b>Payment Rejected</b>\n\nPlease contact support.`,{parse_mode:"HTML"}).catch(()=>{});
@@ -711,7 +845,7 @@ async function startBot() {
     syncRunning = true;
     const status = await bot.sendMessage(chatId, `🔄 Syncing SQLite → MongoDB…`);
     try {
-      const summary = await db.syncToMongo(mongoose);
+      const summary = await db.syncToMongo(mongoose, courseRoutes.getPointsBreakdown);
       const labels = {
         batches: '📚 Batches', users: '👤 Users', announcements: '📢 Announcements',
         access: '🔓 Access grants', referrals: '🔗 Referrals', coupons: '🎟️ Coupons',
@@ -719,6 +853,7 @@ async function startBot() {
         bulkBatches: '📦 Bulk batches', dailyVideoLimits: '📺 Daily video limits',
         rewardRedemptions: '🎁 Reward redemptions', batchRewardAccess: '⏳ Batch reward access',
         spinHistory: '🎡 Spin history', watchedLectures: '👁️ Watched lectures',
+        pointAdjustments: '⭐ Manual point adjustments',
       };
       let text = `✅ <b>Sync complete</b>\n\n`;
       let hadError = false;
@@ -728,6 +863,10 @@ async function startBot() {
         if (val === 'error') { text += `${labels[key]}: ⚠️ failed (check server logs)\n`; hadError = true; }
         else text += `${labels[key]}: ${val}\n`;
       }
+      text += `\n<i>👤 Users includes a fresh points-balance snapshot on each Mongo doc (points, pointsBreakdown, pointsSyncedAt).</i>`;
+      if (summary.totalPoints !== undefined) {
+        text += `\n\n⭐ <b>Total Points (all users):</b> ${summary.totalPoints} <i>(${summary.usersWithPoints} users have points > 0)</i>`;
+      }
       text += `\n<i>Skipped: pending deletes/undelivers and spin tokens — these are short-lived job markers, not data worth backing up.</i>`;
       if (hadError) text += `\n\n⚠️ Some tables had errors — check server logs for details.`;
       await bot.editMessageText(text, { chat_id: chatId, message_id: status.message_id, parse_mode: "HTML" });
@@ -736,6 +875,74 @@ async function startBot() {
       bot.editMessageText(`❌ Sync failed: ${esc(err.message)}`, { chat_id: chatId, message_id: status.message_id, parse_mode: "HTML" }).catch(() => {});
     } finally {
       syncRunning = false;
+    }
+  });
+
+  bot.onText(/\/addpoints(?:\s+(-?\d+)\s+(\S+))?/, async (msg, match) => {
+    if (isGroupChat(msg) || !isOwner(msg.from?.id)) return;
+    const chatId = msg.chat.id;
+    const points = match[1] ? parseInt(match[1], 10) : NaN;
+    const userId = match[2];
+    if (!userId || isNaN(points) || points === 0) {
+      return bot.sendMessage(chatId, `Usage: <code>/addpoints &lt;points&gt; &lt;user_id&gt;</code>\ne.g. <code>/addpoints 20 123456789</code>\n\nUse a negative number to deduct points, e.g. <code>/addpoints -10 123456789</code>.`, { parse_mode: "HTML" });
+    }
+    try {
+      const u = db.user.findOne(userId);
+      if (!u) return bot.sendMessage(chatId, `⚠️ No user found with ID <code>${esc(userId)}</code> (they must have started the bot at least once).`, { parse_mode: "HTML" });
+
+      const record = { id: db.generateId(), userId: String(userId), points, note: `Manual ${points > 0 ? 'grant' : 'deduction'} by admin`, createdAt: new Date() };
+      db.pointAdjustment.insert(record); // SQLite first (source of truth)
+      mongoose.model("PointAdjustment").create(record).catch(() => {}); // Mongo backup, fire-and-forget
+
+      const { points: newBalance } = courseRoutes.getPointsBreakdown(String(userId));
+      const displayName = [u.firstName, u.lastName].filter(Boolean).join(' ').trim() || 'Unknown';
+      const usernameStr = u.username ? ` (@${u.username})` : '';
+      await bot.sendMessage(chatId,
+        `✅ ${points > 0 ? 'Added' : 'Deducted'} <b>${Math.abs(points)}</b> point${Math.abs(points)===1?'':'s'} ${points > 0 ? 'to' : 'from'} ${esc(displayName)}${esc(usernameStr)}\n` +
+        `🆔 <code>${esc(userId)}</code>\n` +
+        `⭐ New balance: <b>${newBalance}</b> points`,
+        { parse_mode: "HTML" });
+    } catch (err) {
+      console.error("addpoints error:", err.message);
+      bot.sendMessage(chatId, `❌ Failed: ${esc(err.message)}`, { parse_mode: "HTML" }).catch(() => {});
+    }
+  });
+
+  bot.onText(/\/points/, async (msg) => {
+    if (isGroupChat(msg) || !isOwner(msg.from?.id)) return;
+    const chatId = msg.chat.id;
+    try {
+      const users = db.user.listAll();
+      if (!users.length) return bot.sendMessage(chatId, `No users found yet.`);
+
+      const rows = users
+        .map(u => {
+          const b = courseRoutes.getPointsBreakdown(u.userId);
+          const displayName = [u.firstName, u.lastName].filter(Boolean).join(' ').trim() || 'Unknown';
+          return {
+            userId: u.userId, name: displayName, username: u.username || null,
+            points: b.points, referrals: b.referrals, spinEarned: b.spinEarned,
+            adjustment: b.adjustment, spent: b.spent,
+          };
+        })
+        .filter(r => r.points > 0) // skip users sitting at 0 — nothing to show for them
+        .sort((a, b) => b.points - a.points);
+
+      if (!rows.length) return bot.sendMessage(chatId, `No users have any points yet (everyone's at 0).`);
+
+      const totalPoints = rows.reduce((s, r) => s + r.points, 0);
+      const payload = { generatedAt: new Date().toISOString(), userCount: rows.length, totalPoints, users: rows };
+      const buffer = Buffer.from(JSON.stringify(payload, null, 2), "utf-8");
+
+      await bot.sendDocument(chatId, buffer, {
+        caption: `⭐ ${rows.length} user${rows.length===1?'':'s'} with points (${totalPoints} total)`,
+      }, {
+        filename: `points_${new Date().toISOString().slice(0,10)}.json`,
+        contentType: "application/json",
+      });
+    } catch (err) {
+      console.error("points list error:", err.message);
+      bot.sendMessage(chatId, `❌ Failed: ${esc(err.message)}`, { parse_mode: "HTML" }).catch(() => {});
     }
   });
   const TG_LINK_RE=/https?:\/\/t\.me\/(c\/(\d+)|([a-zA-Z][a-zA-Z0-9_]{3,}))\/(\d+)/;
