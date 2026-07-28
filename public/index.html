@@ -686,12 +686,25 @@ body.ready{transition:none}
         <label class="form-label" style="white-space:nowrap;margin:0">💰 Price (₹)</label>
         <input class="form-input" id="bPrice" type="number" placeholder="e.g. 999" min="0" style="flex:1">
       </div>
-      <div id="bRewardEligibleGroup" class="form-group" style="display:none;align-items:center;gap:10px;padding:10px 12px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm)">
-        <input type="checkbox" id="bRewardEligible" checked style="width:18px;height:18px;cursor:pointer;accent-color:#f59e0b">
-        <label for="bRewardEligible" style="font-size:13px;font-weight:600;cursor:pointer;color:var(--text);display:flex;align-items:center;gap:6px;flex:1">
-          <i class="ti ti-gift" style="color:#f59e0b;font-size:15px"></i> Allow redeem via Reward Points
-          <span style="font-size:10px;color:var(--text3);font-weight:500">Uncheck to hide from the points Redeem picker</span>
-        </label>
+      <div id="bRewardEligibleGroup" class="form-group" style="display:none;flex-direction:column;gap:10px;padding:10px 12px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm)">
+        <div style="display:flex;align-items:center;gap:10px">
+          <input type="checkbox" id="bRewardEligible" checked style="width:18px;height:18px;cursor:pointer;accent-color:#f59e0b" onchange="document.getElementById('bRedeemCostGroup').style.display=this.checked?'flex':'none'">
+          <label for="bRewardEligible" style="font-size:13px;font-weight:600;cursor:pointer;color:var(--text);display:flex;align-items:center;gap:6px;flex:1">
+            <i class="ti ti-gift" style="color:#f59e0b;font-size:15px"></i> Allow redeem via Reward Points
+            <span style="font-size:10px;color:var(--text3);font-weight:500">Uncheck to hide from the points Redeem picker</span>
+          </label>
+        </div>
+        <div id="bRedeemCostGroup" style="display:flex;gap:10px">
+          <div style="flex:1">
+            <label class="form-label" style="font-size:11px;white-space:nowrap">⭐ 24h cost</label>
+            <input class="form-input" id="bRedeemCost24h" type="number" placeholder="default 10" min="0" style="width:100%">
+          </div>
+          <div style="flex:1">
+            <label class="form-label" style="font-size:11px;white-space:nowrap">⭐ 7d cost</label>
+            <input class="form-input" id="bRedeemCost7d" type="number" placeholder="default 50" min="0" style="width:100%">
+          </div>
+        </div>
+        <div style="font-size:10px;color:var(--text3)">Leave blank to use the site-wide default cost for that tier.</div>
       </div>
       <button class="btn-add" id="btnBatch" onclick="addBatch()"><i class="ti ti-plus"></i> Add Batch</button>
     </div>
@@ -1661,12 +1674,28 @@ function renderRewardModalBody() {
   if (!body || !_rewardModalType || !rewardsSummary) return;
   var s = rewardsSummary;
   var catalog = s.catalog || { accessPass: { cost: 5 }, batch24h: { cost: 10 }, batch7d: { cost: 50 } };
-  var cost = (catalog[_rewardModalType] || {}).cost || 0;
+  var defaultCost = (catalog[_rewardModalType] || {}).cost || 0;
+  // Per-batch cost override field name for the current tier (24h vs 7d).
+  var costField = _rewardModalType === 'batch7d' ? 'redeemCost7d' : 'redeemCost24h';
+
+  function costFor(batch) {
+    if (batch && batch[costField] != null) return batch[costField];
+    return defaultCost;
+  }
+
+  // For accessPass there's no batch, so just use the default. For the batch
+  // tiers, the header cost reflects whichever batch is currently selected
+  // (falls back to the default cost when nothing's picked yet).
+  var headerCost = defaultCost;
+  if ((_rewardModalType === 'batch24h' || _rewardModalType === 'batch7d') && _rewardEligibleBatches) {
+    var preselected = _rewardEligibleBatches.find(function(b){ return b._id === _rewardSelectedBatchId; });
+    headerCost = costFor(preselected);
+  }
 
   var header =
     '<div style="text-align:center;margin-bottom:14px">' +
       '<div style="font-size:11px;color:var(--text2)">Cost</div>' +
-      '<div style="font-size:24px;font-weight:800;color:var(--accent2)">⭐ ' + cost + ' points</div>' +
+      '<div style="font-size:24px;font-weight:800;color:var(--accent2)">⭐ ' + headerCost + ' points</div>' +
       '<div style="font-size:11px;color:var(--text2);margin-top:2px">You have ' + s.points + ' points</div>' +
     '</div>';
 
@@ -1696,13 +1725,16 @@ function renderRewardModalBody() {
 
   var listHtml = _rewardEligibleBatches.map(function(b) {
     var selected = _rewardSelectedBatchId === b._id;
+    var bCost = costFor(b);
+    var canAffordThis = s.points >= bCost;
     var thumb = b.pic ? ('<img src="' + b.pic + '">') : '<div class="reward-pick-emoji">🎓</div>';
-    var sub = b.subjectCount + ' subject' + (b.subjectCount === 1 ? '' : 's') + (b.price ? ' · ₹' + b.price : '');
+    var sub = b.subjectCount + ' subject' + (b.subjectCount === 1 ? '' : 's') + (b.price ? ' · ₹' + b.price : '') +
+      ' · <span style="color:' + (canAffordThis ? 'var(--accent2)' : 'var(--red)') + '">⭐ ' + bCost + '</span>';
     if (b.activeRewardExpiresAt) {
       var pickMsLeft = new Date(b.activeRewardExpiresAt) - new Date();
       sub += ' · <span style="color:var(--green)">' + fmtRewardDuration(pickMsLeft) + ' active — will extend</span>';
     }
-    return '<div class="reward-pick-row' + (selected ? ' selected' : '') + '" onclick="selectRewardBatch(\'' + b._id + '\')">' +
+    return '<div class="reward-pick-row' + (selected ? ' selected' : '') + '" style="' + (canAffordThis ? '' : 'opacity:0.55') + '" onclick="' + (canAffordThis ? ('selectRewardBatch(\'' + b._id + '\')') : ('toast(\'Not enough points for this batch!\',\'error\')')) + '">' +
       thumb +
       '<div class="reward-pick-info">' +
         '<div class="reward-pick-name">' + b.name + '</div>' +
@@ -1713,11 +1745,12 @@ function renderRewardModalBody() {
   }).join('');
 
   var selectedBatch = _rewardEligibleBatches.find(function(b){ return b._id === _rewardSelectedBatchId; });
+  var selectedCanAfford = selectedBatch ? (s.points >= costFor(selectedBatch)) : false;
   var confirmLabel = selectedBatch ? ('Confirm Redeem for "' + selectedBatch.name + '"') : 'Select a batch above';
 
   body.innerHTML = header +
     '<div style="max-height:260px;overflow-y:auto;margin-bottom:12px">' + listHtml + '</div>' +
-    '<button class="reward-redeem-btn" style="width:100%;justify-content:center;padding:12px" ' + (selectedBatch ? '' : 'disabled') + ' onclick="confirmRedeem()">' +
+    '<button class="reward-redeem-btn" style="width:100%;justify-content:center;padding:12px" ' + (selectedCanAfford ? '' : 'disabled') + ' onclick="confirmRedeem()">' +
       '<i class="ti ti-gift"></i> ' + confirmLabel +
     '</button>';
 }
@@ -2177,10 +2210,14 @@ async function addBatch() {
   var isPremium = document.getElementById('bIsPremium').checked;
   var price = parseInt(document.getElementById('bPrice').value) || 0;
   var rewardEligible = document.getElementById('bRewardEligible').checked;
+  var redeemCost24hRaw = document.getElementById('bRedeemCost24h').value;
+  var redeemCost7dRaw = document.getElementById('bRedeemCost7d').value;
+  var redeemCost24h = redeemCost24hRaw !== '' ? parseInt(redeemCost24hRaw, 10) : null;
+  var redeemCost7d = redeemCost7dRaw !== '' ? parseInt(redeemCost7dRaw, 10) : null;
   if (!name) return toast('Please enter a batch name!','error');
   setLoading('btnBatch',true);
   try {
-    var newBatch = await apiFetch('/api/batches','POST',{name, description:desc, pic:picBase64, isPremium, price, rewardEligible});
+    var newBatch = await apiFetch('/api/batches','POST',{name, description:desc, pic:picBase64, isPremium, price, rewardEligible, redeemCost24h, redeemCost7d});
     batches.push(newBatch);
     renderBatches(batches); populateAllSelects();
     document.getElementById('bName').value=''; document.getElementById('bDesc').value='';
@@ -2190,6 +2227,9 @@ async function addBatch() {
     document.getElementById('bPrice').value = '';
     document.getElementById('bRewardEligibleGroup').style.display = 'none';
     document.getElementById('bRewardEligible').checked = true;
+    document.getElementById('bRedeemCost24h').value = '';
+    document.getElementById('bRedeemCost7d').value = '';
+    document.getElementById('bRedeemCostGroup').style.display = 'flex';
     document.getElementById('imgPreview').innerHTML='<div class="img-preview-label"><i class="ti ti-camera" style="font-size:24px;display:block;margin-bottom:6px;color:var(--text3)"></i>Tap to select image</div>';
     picBase64='';
     toast('Batch added!','success');
@@ -2370,11 +2410,15 @@ function _renderManageLevel() {
       var pubClass = pub ? 'publish-btn public' : 'publish-btn';
       var premTag = b.isPremium ? '<span style="font-size:9px;background:rgba(245,158,11,0.2);color:#f59e0b;border:1px solid rgba(245,158,11,0.4);border-radius:20px;padding:1px 6px;font-weight:700;margin-left:4px">👑 PREMIUM</span>' : '';
       var noRewardTag = (b.isPremium && b.rewardEligible === false) ? '<span style="font-size:9px;background:rgba(148,163,184,0.2);color:var(--text2);border:1px solid var(--border);border-radius:20px;padding:1px 6px;font-weight:700;margin-left:4px">🚫 No Redeem</span>' : '';
+      var customCostTag = (b.isPremium && b.rewardEligible !== false && (b.redeemCost24h != null || b.redeemCost7d != null))
+        ? '<span style="font-size:9px;background:rgba(124,92,191,0.15);color:var(--accent2);border:1px solid rgba(124,92,191,0.3);border-radius:20px;padding:1px 6px;font-weight:700;margin-left:4px">⭐ ' +
+          (b.redeemCost24h != null ? b.redeemCost24h : '—') + '/24h · ' + (b.redeemCost7d != null ? b.redeemCost7d : '—') + '/7d</span>'
+        : '';
       var manageUsersBtn = b.isPremium ? `<button class="edit-btn" title="Manage Premium Users" onclick="openPremiumUsers('${b._id}')" style="border-color:rgba(245,158,11,0.4);color:#f59e0b"><i class="ti ti-users"></i></button>` : '';
       html += `<div class="manage-item">
         <span class="manage-item-icon">🎓</span>
         <div class="manage-item-info" style="cursor:pointer" onclick="_mDrill('subjects','${b._id}')">
-          <div class="manage-item-name">${b.name}${premTag}${noRewardTag}</div>
+          <div class="manage-item-name">${b.name}${premTag}${noRewardTag}${customCostTag}</div>
           <div class="manage-item-sub">${b.subjects.length} subjects · ${pub ? '🟢 Public' : '🔒 Private'}</div>
         </div>
         <button class="${pubClass}" onclick="togglePublish('${b._id}')">${pubLabel}</button>
@@ -2563,11 +2607,24 @@ async function openEdit(type, bid, sid, cid, uid, lid) {
               <label class="form-label" style="white-space:nowrap;margin:0">💰 Price (₹)</label>
               <input class="form-input" id="ei_price" type="number" value="${b.price||0}" min="0" style="flex:1">
             </div>
-            <div class="form-group" style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm)">
-              <input type="checkbox" id="ei_rewardEligible" ${b.rewardEligible===false?'':'checked'} style="width:18px;height:18px;cursor:pointer;accent-color:#f59e0b">
-              <label for="ei_rewardEligible" style="font-size:13px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:6px;flex:1"><i class="ti ti-gift" style="color:#f59e0b"></i> Allow redeem via Reward Points
-                <span style="font-size:10px;color:var(--text3);font-weight:500">Uncheck to hide from points Redeem picker</span>
-              </label>
+            <div class="form-group" style="display:flex;flex-direction:column;gap:10px;padding:10px 12px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm)">
+              <div style="display:flex;align-items:center;gap:10px">
+                <input type="checkbox" id="ei_rewardEligible" ${b.rewardEligible===false?'':'checked'} style="width:18px;height:18px;cursor:pointer;accent-color:#f59e0b" onchange="document.getElementById('ei_redeemCostGroup').style.display=this.checked?'flex':'none'">
+                <label for="ei_rewardEligible" style="font-size:13px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:6px;flex:1"><i class="ti ti-gift" style="color:#f59e0b"></i> Allow redeem via Reward Points
+                  <span style="font-size:10px;color:var(--text3);font-weight:500">Uncheck to hide from points Redeem picker</span>
+                </label>
+              </div>
+              <div id="ei_redeemCostGroup" style="display:${b.rewardEligible===false?'none':'flex'};gap:10px">
+                <div style="flex:1">
+                  <label class="form-label" style="font-size:11px;white-space:nowrap">⭐ 24h cost</label>
+                  <input class="form-input" id="ei_redeemCost24h" type="number" value="${b.redeemCost24h!=null?b.redeemCost24h:''}" placeholder="default 10" min="0" style="width:100%">
+                </div>
+                <div style="flex:1">
+                  <label class="form-label" style="font-size:11px;white-space:nowrap">⭐ 7d cost</label>
+                  <input class="form-input" id="ei_redeemCost7d" type="number" value="${b.redeemCost7d!=null?b.redeemCost7d:''}" placeholder="default 50" min="0" style="width:100%">
+                </div>
+              </div>
+              <div style="font-size:10px;color:var(--text3)">Leave blank to use the site-wide default cost for that tier.</div>
             </div>`;
   } else if (type === 'subject') {
     var b = batches.find(x => x._id === bid);
@@ -2645,6 +2702,8 @@ async function saveEdit() {
         isPremium: document.getElementById('ei_isPremium').checked,
         rewardEligible: document.getElementById('ei_rewardEligible').checked,
         price: parseInt(document.getElementById('ei_price').value) || 0,
+        redeemCost24h: document.getElementById('ei_redeemCost24h').value !== '' ? parseInt(document.getElementById('ei_redeemCost24h').value, 10) : null,
+        redeemCost7d: document.getElementById('ei_redeemCost7d').value !== '' ? parseInt(document.getElementById('ei_redeemCost7d').value, 10) : null,
       };
       if (_editPicBase64 !== null) payload.pic = _editPicBase64; // '' = remove, base64 = new pic
       updated = await apiFetch(`/api/batches/${bid}/edit`, 'PATCH', payload);
