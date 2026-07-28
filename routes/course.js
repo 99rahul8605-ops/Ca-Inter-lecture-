@@ -200,7 +200,7 @@ router.post("/batches", verifyAdmin, async (req, res) => {
   try {
     const count = db.batch.count();
     // Write to MongoDB first (gets real _id)
-    const batch = await Batch.create({ name: req.body.name, pic: req.body.pic||"", description: req.body.description||"", order: count, isPublic: false, isPremium: req.body.isPremium===true, premiumUsers: [], price: req.body.price ? Number(req.body.price) : 0, rewardEligible: req.body.rewardEligible !== false });
+    const batch = await Batch.create({ name: req.body.name, pic: req.body.pic||"", description: req.body.description||"", order: count, isPublic: false, isPremium: req.body.isPremium===true, premiumUsers: [], price: req.body.price ? Number(req.body.price) : 0, rewardEligible: req.body.rewardEligible !== false, redeemCost24h: (req.body.redeemCost24h !== undefined && req.body.redeemCost24h !== null) ? Number(req.body.redeemCost24h) : null, redeemCost7d: (req.body.redeemCost7d !== undefined && req.body.redeemCost7d !== null) ? Number(req.body.redeemCost7d) : null });
     db.batch.upsert(batch.toObject());
     res.json(batch);
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -233,6 +233,8 @@ router.patch("/batches/:bid/edit", verifyAdmin, async (req, res) => {
     if (req.body.description !== undefined) batch.description = req.body.description;
     if (req.body.isPremium !== undefined) batch.isPremium = req.body.isPremium;
     if (req.body.rewardEligible !== undefined) batch.rewardEligible = req.body.rewardEligible !== false;
+    if (req.body.redeemCost24h !== undefined) batch.redeemCost24h = (req.body.redeemCost24h === null || req.body.redeemCost24h === '') ? null : Number(req.body.redeemCost24h);
+    if (req.body.redeemCost7d !== undefined) batch.redeemCost7d = (req.body.redeemCost7d === null || req.body.redeemCost7d === '') ? null : Number(req.body.redeemCost7d);
     if (req.body.price !== undefined) batch.price = Number(req.body.price)||0;
     if (req.body.pic !== undefined) batch.pic = req.body.pic;
     await batch.save();
@@ -771,6 +773,8 @@ router.get('/rewards/eligible-batches/:userId', (req, res) => {
           pic: b.pic || '',
           price: b.price || 0,
           subjectCount: (b.subjects || []).length,
+          redeemCost24h: (b.redeemCost24h !== undefined && b.redeemCost24h !== null) ? b.redeemCost24h : null,
+          redeemCost7d: (b.redeemCost7d !== undefined && b.redeemCost7d !== null) ? b.redeemCost7d : null,
           activeRewardExpiresAt: (active && active.expiresAt > new Date()) ? active.expiresAt : null,
         };
       });
@@ -798,13 +802,21 @@ router.post('/rewards/redeem', async (req, res) => {
       }
     }
 
+    // Effective cost: a batch's own redeemCost24h/redeemCost7d override, when set,
+    // takes priority over the site-wide REWARD_CATALOG default for that tier.
+    let cost = catalogEntry.cost;
+    if (batchDoc) {
+      const override = rewardType === 'batch7d' ? batchDoc.redeemCost7d : batchDoc.redeemCost24h;
+      if (override !== undefined && override !== null) cost = override;
+    }
+
     // ── Critical section: everything below is synchronous SQLite work with no
     // `await` in between, so Node's single-threaded event loop guarantees no
     // other request can interleave here — this is what prevents double-spending
     // points from two rapid clicks / concurrent requests. ──────────────────────
     const spendable = getSpendablePoints(userId);
-    if (spendable < catalogEntry.cost) {
-      return res.status(400).json({ error: `Not enough points! Need ${catalogEntry.cost}, you have ${spendable}.`, required: catalogEntry.cost, available: spendable });
+    if (spendable < cost) {
+      return res.status(400).json({ error: `Not enough points! Need ${cost}, you have ${spendable}.`, required: cost, available: spendable });
     }
 
     let expiresAt;
@@ -833,7 +845,7 @@ router.post('/rewards/redeem', async (req, res) => {
         id, userId, rewardType,
         batchId: batchDoc ? String(batchId) : null,
         batchName: batchDoc ? batchDoc.name : '',
-        pointsCost: catalogEntry.cost, redeemedAt, expiresAt,
+        pointsCost: cost, redeemedAt, expiresAt,
       });
       return id;
     });
@@ -843,7 +855,7 @@ router.post('/rewards/redeem', async (req, res) => {
     // MongoDB backup — fire and forget, matches existing codebase convention
     RewardRedemption.create({
       userId, rewardType, batchId: batchDoc ? String(batchId) : null,
-      batchName: batchDoc ? batchDoc.name : '', pointsCost: catalogEntry.cost, redeemedAt, expiresAt,
+      batchName: batchDoc ? batchDoc.name : '', pointsCost: cost, redeemedAt, expiresAt,
     }).catch(() => {});
     if (rewardType === 'accessPass') {
       const rec = db.access.findOne(userId);
@@ -853,7 +865,7 @@ router.post('/rewards/redeem', async (req, res) => {
     }
     notifyOwnerOfRedemption({
       userId, rewardType, catalogEntry, batchDoc,
-      pointsCost: catalogEntry.cost, pointsRemaining: spendable - catalogEntry.cost, expiresAt,
+      pointsCost: cost, pointsRemaining: spendable - cost, expiresAt,
     });
 
     res.json({
@@ -861,8 +873,8 @@ router.post('/rewards/redeem', async (req, res) => {
       redemptionId,
       rewardType,
       label: catalogEntry.label,
-      pointsSpent: catalogEntry.cost,
-      pointsRemaining: spendable - catalogEntry.cost,
+      pointsSpent: cost,
+      pointsRemaining: spendable - cost,
       expiresAt,
       batchId: batchDoc ? String(batchId) : null,
       batchName: batchDoc ? batchDoc.name : null,
