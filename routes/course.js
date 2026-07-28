@@ -7,6 +7,10 @@ const db = require("../sqlite-manager");
 
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const OWNER_ID = parseInt(process.env.OWNER_ID || "0");
+// Set by server.js once the bot is initialized (bot doesn't exist yet at require-time),
+// so giveaway confirmation/reversal notifications can be sent from here.
+let _bot = null;
+function setBot(botInstance) { _bot = botInstance; }
 
 // ── Admin verification ────────────────────────────────────────────────────────
 function verifyAdmin(req, res, next) {
@@ -673,6 +677,19 @@ const batchRewardAccessSchema = new mongoose.Schema({
 batchRewardAccessSchema.index({ userId: 1, batchId: 1 }, { unique: true });
 const BatchRewardAccess = mongoose.models.BatchRewardAccess || mongoose.model('BatchRewardAccess', batchRewardAccessSchema);
 
+// Manual point grants/deductions made by the admin via /addpoints. Kept as its own
+// signed ledger (points can be negative) rather than a balance column, same reasoning
+// as referrals/redemptions — see getPointsBreakdown below, which is the only place
+// this actually gets folded into a user's spendable total.
+const pointAdjustmentSchema = new mongoose.Schema({
+  userId: { type: String, required: true },
+  points: { type: Number, required: true },
+  note: { type: String, default: '' },
+  createdAt: { type: Date, default: Date.now },
+});
+pointAdjustmentSchema.index({ userId: 1 });
+const PointAdjustment = mongoose.models.PointAdjustment || mongoose.model('PointAdjustment', pointAdjustmentSchema);
+
 // Reward catalog — single source of truth for cost + duration of every reward.
 // To add a new reward in future, just add an entry here (and a matching branch
 // in the redeem handler below if it needs special grant logic).
@@ -698,13 +715,14 @@ const REWARD_CATALOG = {
 
 // Single source of truth for the points formula — always fresh from the DB,
 // never trusts a client-sent value. referrals here is the raw referral COUNT;
-// points is the spendable balance (referrals*POINTS_PER_REFERRAL + spinEarned - spent).
+// points is the spendable balance (referrals*POINTS_PER_REFERRAL + spinEarned + adjustment - spent).
 function getPointsBreakdown(userId) {
   const referrals = db.referral.countByReferrer(userId);
   const spinEarned = db.spinHistory.totalEarned(userId);
+  const adjustment = db.pointAdjustment.totalForUser(userId); // manual admin grants/deductions, can be negative
   const spent = db.rewardRedemption.totalSpent(userId);
-  const points = Math.max(0, referrals * POINTS_PER_REFERRAL + spinEarned - spent);
-  return { referrals, spinEarned, spent, points };
+  const points = Math.max(0, referrals * POINTS_PER_REFERRAL + spinEarned + adjustment - spent);
+  return { referrals, spinEarned, adjustment, spent, points };
 }
 function getSpendablePoints(userId) {
   return getPointsBreakdown(userId).points;
@@ -1009,6 +1027,57 @@ const watchedLectureSchema = new mongoose.Schema({
 watchedLectureSchema.index({ userId: 1, lectureId: 1 }, { unique: true });
 const WatchedLecture = mongoose.models.WatchedLecture || mongoose.model('WatchedLecture', watchedLectureSchema);
 
+// ── Giveaway invite confirmation ────────────────────────────────────────────
+// Giveaway/GiveawayParticipant are registered earlier in server.js (before this
+// file is require()'d), so mongoose.model(name) below just retrieves them —
+// no schema is redefined here, keeping a single source of truth.
+const giveawayInviteSchema = new mongoose.Schema({
+  giveawayId: { type: mongoose.Schema.Types.ObjectId, required: true },
+  inviterId: { type: Number, required: true },
+  inviteeId: { type: Number, required: true },
+  status: { type: String, enum: ["pending","confirmed","reversed"], default: "pending" },
+  confirmedAt: { type: Date, default: null },
+  reversedAt: { type: Date, default: null },
+  createdAt: { type: Date, default: Date.now },
+});
+giveawayInviteSchema.index({ giveawayId: 1, inviteeId: 1 }, { unique: true });
+const GiveawayInvite = mongoose.models.GiveawayInvite || mongoose.model('GiveawayInvite', giveawayInviteSchema);
+
+function _giveawayName(u) { if (!u) return null; return u.username ? `@${u.username}` : (u.firstName || `User ${u.userId}`); }
+
+// Called the first time a user ever marks any lecture watched. Confirms their
+// pending invite (if any) so the inviter's giveaway count only goes up once
+// there's real engagement, not just a /start tap — this is what keeps fake
+// "joined but never used the bot" referrals from counting.
+async function confirmGiveawayInviteOnFirstWatch(userId) {
+  try {
+    const Giveaway = mongoose.model('Giveaway');
+    const GiveawayParticipant = mongoose.model('GiveawayParticipant');
+    const User = mongoose.model('User');
+    const giveaway = await Giveaway.findOne({ status: 'active' }).sort({ startedAt: -1 });
+    if (!giveaway) return;
+    const inviteeNum = Number(userId);
+    const invite = await GiveawayInvite.findOne({ giveawayId: giveaway._id, inviteeId: inviteeNum, status: 'pending' });
+    if (!invite) return;
+    invite.status = 'confirmed'; invite.confirmedAt = new Date();
+    await invite.save();
+    const participant = await GiveawayParticipant.findOneAndUpdate(
+      { giveawayId: giveaway._id, userId: invite.inviterId },
+      { $inc: { invites: 1 } },
+      { new: true }
+    );
+    if (!participant || !_bot) return;
+    const inviteeUser = await User.findOne({ userId: String(inviteeNum) }).catch(() => null);
+    const inviteeName = _giveawayName(inviteeUser) || `User ${inviteeNum}`;
+    _bot.sendMessage(invite.inviterId, `✅ <b>Referral Confirmed</b>\n\n${inviteeName} has watched their first lecture — this referral is now confirmed.\nUpdated Confirmed Invites: <b>${participant.invites}</b>`, { parse_mode: 'HTML' }).catch(() => {});
+    if (OWNER_ID) {
+      const inviterUser = await User.findOne({ userId: String(invite.inviterId) }).catch(() => null);
+      const inviterName = _giveawayName(inviterUser) || `User ${invite.inviterId}`;
+      _bot.sendMessage(OWNER_ID, `📈 <b>Giveaway — Referral Confirmed</b>\n\nInviter: ${inviterName} (<code>${invite.inviterId}</code>)\nInvitee: ${inviteeName} (<code>${inviteeNum}</code>)\nInviter's updated invite count: <b>${participant.invites}</b>`, { parse_mode: 'HTML' }).catch(() => {});
+    }
+  } catch (e) { console.error('Giveaway confirm error:', e.message); }
+}
+
 // GET — full list of lectureIds this user has marked watched
 router.get('/watched/:userId', (req, res) => {
   try {
@@ -1028,10 +1097,28 @@ router.post('/watched/:userId', (req, res) => {
       db.watchedLecture.unmark(userId, lectureId);
       WatchedLecture.deleteOne({ userId, lectureId }).catch(() => {});
     } else {
+      const hadWatchedBefore = db.watchedLecture.listByUser(userId).length > 0;
       db.watchedLecture.mark(userId, lectureId);
       WatchedLecture.updateOne({ userId, lectureId }, { userId, lectureId, watchedAt: new Date() }, { upsert: true }).catch(() => {});
+      if (!hadWatchedBefore) confirmGiveawayInviteOnFirstWatch(userId);
     }
     res.json({ success: true, lectureId, watched: watched !== false });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// GET — giveaway status for the webapp: whether one is live, and if this user
+// is participating, their invite count/rank (mirrors the bot's /myscore).
+router.get('/giveaway/status/:userId', async (req, res) => {
+  try {
+    const Giveaway = mongoose.model('Giveaway');
+    const GiveawayParticipant = mongoose.model('GiveawayParticipant');
+    const giveaway = await Giveaway.findOne({ status: 'active' }).sort({ startedAt: -1 });
+    if (!giveaway) return res.json({ active: false });
+    const userId = Number(req.params.userId);
+    const participant = await GiveawayParticipant.findOne({ giveawayId: giveaway._id, userId });
+    if (!participant) return res.json({ active: true, participating: false });
+    const higher = await GiveawayParticipant.countDocuments({ giveawayId: giveaway._id, $or: [ { invites: { $gt: participant.invites } }, { invites: participant.invites, joinedAt: { $lt: participant.joinedAt } } ] });
+    res.json({ active: true, participating: true, invites: participant.invites, rank: higher + 1 });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -1271,3 +1358,6 @@ router.post('/coupons/validate', (req, res) => {
 });
 
 module.exports = router;
+module.exports.getPointsBreakdown = getPointsBreakdown;
+module.exports.POINTS_PER_REFERRAL = POINTS_PER_REFERRAL;
+module.exports.setBot = setBot;
