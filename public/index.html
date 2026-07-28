@@ -2810,6 +2810,14 @@ var _payBatchId = null;
 var _paySsBase64 = null;
 var _payOriginalPrice = 0;
 var _payAppliedCoupon = null; // { code, discountPct, finalAmount }
+var _payTxnRef = ''; // merchant order reference embedded in the UPI QR's tr= param, reused when submitting for Paytm auto-verification
+
+// Generates a fresh order reference for a payment attempt. Doesn't need to be
+// cryptographically strong — just unique enough not to collide with a previous
+// attempt — since it's only used as a lookup key against Paytm's own records.
+function _genTxnRef() {
+  return 'PM' + Date.now().toString(36).toUpperCase() + Math.random().toString(36).slice(2, 6).toUpperCase();
+}
 
 function buyBatch(bid) {
   var b = batches.find(x => x._id === bid);
@@ -2818,6 +2826,13 @@ function buyBatch(bid) {
   _paySsBase64 = null;
   _payOriginalPrice = b.price || 0;
   _payAppliedCoupon = null;
+
+  // Fresh transaction reference per payment attempt. This gets embedded in the UPI
+  // QR as tr= (see _paymentQrUrl) and sent back in submitPayment() as orderRef —
+  // Paytm records this same value as the order reference, so the server can look
+  // it up via DevPort for auto-verification. Must NOT change between QR generation
+  // and submission, so it's generated once here and reused for the whole modal session.
+  _payTxnRef = _genTxnRef();
 
   // Set batch info
   document.getElementById('payBatchName').textContent = b.name;
@@ -2865,7 +2880,7 @@ function buyBatch(bid) {
 
 function closePayModal() {
   document.getElementById('payModal').classList.remove('show');
-  _payBatchId = null; _paySsBase64 = null; _payAppliedCoupon = null;
+  _payBatchId = null; _paySsBase64 = null; _payAppliedCoupon = null; _payTxnRef = '';
 }
 function closePayOutside(e) { if (e.target.id === 'payModal') closePayModal(); }
 
@@ -2943,6 +2958,7 @@ async function applyCoupon() {
 function _paymentQrUrl(amount, batchName) {
   var params = 'note=' + encodeURIComponent((batchName || 'batch').slice(0, 40));
   if (amount) params += '&amount=' + Number(amount).toFixed(2);
+  params += '&tr=' + encodeURIComponent(_payTxnRef);
   return location.origin + '/api/payment-qr?' + params + '&_t=' + Date.now();
 }
 
@@ -3053,6 +3069,7 @@ async function submitPayment() {
       lastName: tgUser ? (tgUser.last_name || '') : '',
       username: tgUser ? (tgUser.username || '') : '',
       txnId: txnId,
+      orderRef: _payTxnRef,
       screenshotBase64: _paySsBase64,
       couponCode: _payAppliedCoupon ? _payAppliedCoupon.code : null,
       discountPct: _payAppliedCoupon ? _payAppliedCoupon.discountPct : null,
@@ -3065,7 +3082,8 @@ async function submitPayment() {
     });
     var d = await r.json();
     if (!r.ok) throw new Error(d.error || 'Failed');
-    toast('✅ Payment submitted! Admin will verify soon.', 'success');
+    if (d.autoVerified) toast('✅ Payment verified instantly! Access unlocked 🚀', 'success');
+    else toast('✅ Payment submitted! Admin will verify soon.', 'success');
     closePayModal();
   } catch(e) {
     toast('Error: ' + e.message, 'error');
