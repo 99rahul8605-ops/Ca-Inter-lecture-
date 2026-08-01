@@ -4024,6 +4024,7 @@ async function init() {
   updateHomeTimer();
   if (hasAccess()) startCountdown();
   _hideVS();
+  maybeShowGiveawayAd();
 }
 init();
 
@@ -4045,6 +4046,29 @@ function closeLecturePopupOutside(e) {}
 </script>
 
 <!-- Lecture Popup (hidden — no longer used) -->
+<!-- Giveaway Advertisement Post — shown once per giveaway after verification -->
+<div id="giveawayAdOverlay" class="giveaway-ad-overlay" onclick="if(event.target===this) closeGiveawayAd()">
+  <div class="giveaway-ad-card">
+    <button class="giveaway-ad-close" onclick="closeGiveawayAd()"><i class="ti ti-x"></i></button>
+    <div class="giveaway-ad-banner">
+      <div class="giveaway-ad-badge">🔥 LIVE NOW</div>
+      <div class="giveaway-ad-emoji">🎁</div>
+    </div>
+    <div class="giveaway-ad-body">
+      <div class="giveaway-ad-title">Giveaway Time!</div>
+      <div class="giveaway-ad-sub">Invite friends, climb the leaderboard, and win real prizes — 100% free to join.</div>
+      <div class="giveaway-ad-prizes">
+        <div class="giveaway-ad-prize"><span>🏆</span> 1st Place — 1 Month Premium + Cash</div>
+        <div class="giveaway-ad-prize"><span>🥈</span> 2nd Place — ₹100 + USA Account</div>
+        <div class="giveaway-ad-prize"><span>🥉</span> 3rd Place — ₹50</div>
+        <div class="giveaway-ad-prize"><span>🎁</span> 4th–10th — ₹10 each</div>
+      </div>
+      <button class="giveaway-ad-join" onclick="joinFromAd()"><i class="ti ti-brand-telegram"></i> Join Giveaway</button>
+      <div class="giveaway-ad-later" onclick="closeGiveawayAd()">Maybe later</div>
+    </div>
+  </div>
+</div>
+
 <div id="lecturePopup" onclick="closeLecturePopupOutside(event)">
   <div class="lec-popup-sheet">
     <div class="lec-popup-header">
@@ -4084,6 +4108,79 @@ body.light-mode .hero{background:var(--surface);border-color:var(--border)}
 body.light-mode .hero-name{color:var(--text)}
 body.light-mode .access-card{background:var(--surface);border-color:var(--border)}
 body.light-mode .modal-overlay{background:rgba(0,0,0,0.5)}
+
+/* ── Giveaway Advertisement Post ──────────────────────────────── */
+.giveaway-ad-overlay {
+  display:none;
+  position:fixed;inset:0;z-index:9999;
+  background:rgba(0,0,0,0.65);
+  backdrop-filter:blur(4px);
+  align-items:center;justify-content:center;
+  padding:20px;
+  animation:giveawayAdFadeIn 0.25s ease;
+}
+.giveaway-ad-overlay.show { display:flex; }
+@keyframes giveawayAdFadeIn { from{opacity:0} to{opacity:1} }
+.giveaway-ad-card {
+  position:relative;
+  width:100%;max-width:360px;
+  background:var(--surface);
+  border-radius:22px;
+  overflow:hidden;
+  box-shadow:0 20px 60px rgba(0,0,0,0.4);
+  animation:giveawayAdPop 0.35s cubic-bezier(.2,.9,.3,1.2);
+}
+@keyframes giveawayAdPop { from{transform:scale(0.85);opacity:0} to{transform:scale(1);opacity:1} }
+.giveaway-ad-close {
+  position:absolute;top:12px;right:12px;z-index:2;
+  width:32px;height:32px;border-radius:50%;
+  background:rgba(0,0,0,0.35);
+  border:none;color:#fff;font-size:16px;
+  display:flex;align-items:center;justify-content:center;
+  cursor:pointer;
+}
+.giveaway-ad-banner {
+  position:relative;
+  height:150px;
+  background:linear-gradient(135deg,#f59e0b,#d97706 55%,#b45309);
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  overflow:hidden;
+}
+.giveaway-ad-banner::before {
+  content:'';position:absolute;inset:0;
+  background:radial-gradient(circle at 20% 20%,rgba(255,255,255,0.25),transparent 40%),
+             radial-gradient(circle at 85% 75%,rgba(255,255,255,0.18),transparent 45%);
+}
+.giveaway-ad-badge {
+  position:relative;z-index:1;
+  background:rgba(0,0,0,0.35);color:#fff;
+  font-size:11px;font-weight:800;letter-spacing:0.5px;
+  padding:5px 12px;border-radius:20px;margin-bottom:10px;
+}
+.giveaway-ad-emoji { position:relative;z-index:1;font-size:56px;line-height:1;filter:drop-shadow(0 4px 10px rgba(0,0,0,0.25)); }
+.giveaway-ad-body { padding:20px; }
+.giveaway-ad-title { font-size:20px;font-weight:800;color:var(--text);text-align:center;margin-bottom:6px; }
+.giveaway-ad-sub { font-size:13px;color:var(--text2);text-align:center;line-height:1.5;margin-bottom:16px; }
+.giveaway-ad-prizes { display:flex;flex-direction:column;gap:8px;margin-bottom:18px; }
+.giveaway-ad-prize {
+  display:flex;align-items:center;gap:8px;
+  background:var(--surface2);border:1px solid var(--border);
+  border-radius:10px;padding:9px 12px;
+  font-size:12.5px;font-weight:600;color:var(--text);
+}
+.giveaway-ad-prize span { font-size:16px; }
+.giveaway-ad-join {
+  width:100%;border:none;cursor:pointer;
+  background:linear-gradient(135deg,#f59e0b,#d97706);
+  color:#fff;font-size:14.5px;font-weight:800;
+  padding:13px;border-radius:12px;
+  display:flex;align-items:center;justify-content:center;gap:8px;
+  box-shadow:0 8px 20px rgba(245,158,11,0.35);
+}
+.giveaway-ad-later {
+  text-align:center;font-size:12px;color:var(--text3);
+  font-weight:600;margin-top:12px;cursor:pointer;
+}
 
 /* ── Lecture Popup ──────────────────────────────── */
 #lecturePopup {
@@ -4624,6 +4721,37 @@ function openBotChat() {
   } else {
     window.open(url, '_blank');
   }
+}
+
+// ── Giveaway Advertisement Post ────────────────────────────────────────────
+// Shown once per active giveaway, right after force-join verification passes.
+// Dismissal (✕ or "Maybe later") is remembered per giveawayId in localStorage,
+// so it won't nag again for the same giveaway, but will show fresh if a new
+// one starts later.
+var _giveawayAdId = null;
+
+async function maybeShowGiveawayAd() {
+  var uid = getUserId();
+  if (!uid) return;
+  try {
+    var r = await fetch('/api/giveaway/status/' + uid);
+    var data = await r.json();
+    if (!data.active || data.participating || !data.giveawayId) return;
+    var dismissKey = 'giveawayAdDismissed_' + data.giveawayId;
+    if (localStorage.getItem(dismissKey) === '1') return;
+    _giveawayAdId = data.giveawayId;
+    document.getElementById('giveawayAdOverlay').classList.add('show');
+  } catch (e) { console.error('Giveaway ad check error:', e); }
+}
+
+function closeGiveawayAd() {
+  document.getElementById('giveawayAdOverlay').classList.remove('show');
+  if (_giveawayAdId) localStorage.setItem('giveawayAdDismissed_' + _giveawayAdId, '1');
+}
+
+function joinFromAd() {
+  closeGiveawayAd();
+  openBotChat();
 }
 
 // ── Announcements ─────────────────────────────────────────────────────────────
