@@ -722,11 +722,11 @@ async function startBot() {
   await recoverPendingUndelivers();
 
   // ── /start ────────────────────────────────────────────────────────────────
-  bot.onText(/\/start(.*)/, async (msg, match) => {
+  bot.onText(/^\/start(?:\s+(.*))?$/, async (msg, match) => {
     if (isGroupChat(msg)) return;
     const chatId = msg.chat.id;
     const userId = msg.from?.id;
-    const param = match[1].trim();
+    const param = (match[1] || "").trim();
     const isNewUser = userId ? !db.user.findOne(String(userId)) : false;
 
     if (userId) {
