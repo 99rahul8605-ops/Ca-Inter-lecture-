@@ -887,7 +887,7 @@ body.ready{transition:none}
     <div class="card" id="giveawayCard" style="margin-bottom:14px;border:1px solid rgba(245,158,11,0.4);display:none">
       <div style="font-size:13px;font-weight:600;margin-bottom:10px;color:var(--text)">🎁 Giveaway in Progress</div>
       <div id="giveawayNotJoined" style="display:none">
-        <div style="font-size:12px;color:var(--text2);margin-bottom:10px">Send <b>/participate</b> to the bot to join and get your giveaway invite link.</div>
+        <div style="font-size:12px;color:var(--text2);margin-bottom:10px">Tap below to join and get your giveaway invite link.</div>
         <button class="btn-add" style="width:100%" onclick="openBotChat()"><i class="ti ti-brand-telegram"></i> Open Bot & Participate</button>
       </div>
       <div id="giveawayJoined" style="display:none">
@@ -4618,7 +4618,7 @@ function shareGiveawayLink() {
 }
 
 function openBotChat() {
-  var url = 'https://t.me/' + (window._botUsername || '');
+  var url = 'https://t.me/' + (window._botUsername || '') + '?start=participate';
   if (tg && tg.openLink) {
     tg.openLink(url, { try_instant_view: false });
   } else {
