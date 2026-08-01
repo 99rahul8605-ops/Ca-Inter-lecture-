@@ -777,6 +777,23 @@ async function startBot() {
         return;
       }
 
+      if (param === "participate") {
+        try {
+          const giveaway = await getActiveGiveaway();
+          if (!giveaway) { bot.sendMessage(chatId, `⚠️ No giveaway is active right now.`); return; }
+          const inviteLink = `https://t.me/${BOT_USERNAME}?start=give_${userId}`;
+          let participant = await GiveawayParticipant.findOne({ giveawayId: giveaway._id, userId });
+          if (!participant) {
+            participant = await GiveawayParticipant.create({ giveawayId: giveaway._id, userId, firstName: msg.from.first_name||"", username: msg.from.username||"" });
+          }
+          const { rank } = await giveawayRankOf(giveaway._id, userId);
+          const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(inviteLink)}&text=${encodeURIComponent("Join the giveaway and win prizes! 🎁")}`;
+          const text = `✅ <b>You Have Successfully Joined the Giveaway</b>\n\n<b>Your Invite Link:</b>\n<code>${inviteLink}</code>\n\nConfirmed Invites: <b>${participant.invites}</b>   |   Current Rank: <b>#${rank}</b>\n\n` + giveawayRulesText();
+          bot.sendMessage(chatId, text, { parse_mode:"HTML", reply_markup:{ inline_keyboard:[[{ text:"📤 Share Invite Link", url: shareUrl }]] } });
+        } catch (err) { console.error("participate deep-link error:", err.message); bot.sendMessage(chatId, `❌ Could not join giveaway.`); }
+        return;
+      }
+
       if (param.startsWith("buy_")) {
         bot.sendMessage(chatId, `💳 <b>Complete your payment in the app!</b>`, { parse_mode:"HTML", reply_markup:{ inline_keyboard:[[{ text:"💳 Pay Now", web_app:{ url:WEB_URL } }]] } });
         return;
