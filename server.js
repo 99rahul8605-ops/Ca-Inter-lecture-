@@ -149,7 +149,7 @@ const giveawayParticipantSchema = new mongoose.Schema({
 giveawayParticipantSchema.index({ giveawayId: 1, userId: 1 }, { unique: true });
 const GiveawayParticipant = mongoose.model("GiveawayParticipant", giveawayParticipantSchema);
 
-const GIVEAWAY_REWARDS = { 1: "🏆 1 Month Premium + ₹319 (any 1 plan) + 1 USA Account", 2: "🥈 ₹100 + 1 USA Account", 3: "🥉 ₹50" };
+const GIVEAWAY_REWARDS = { 1: "🏆 1 Month Premium OR ₹319 (any 1 plan) + 1 USA Account", 2: "🥈 ₹100 + 1 USA Account", 3: "🥉 ₹50" };
 function giveawayRewardFor(rank) { if (GIVEAWAY_REWARDS[rank]) return GIVEAWAY_REWARDS[rank]; if (rank>=4 && rank<=10) return "🎁 ₹10"; return null; }
 async function getActiveGiveaway() { return Giveaway.findOne({ status:"active" }).sort({ startedAt:-1 }); }
 async function getLatestGiveaway() { return Giveaway.findOne().sort({ startedAt:-1 }); }
@@ -192,7 +192,7 @@ function giveawayRulesText() {
     `5. View your personal standing anytime with /myscore.`,
     ``,
     `<b>Prize Structure</b>`,
-    `🥇 Rank 1 — 1 Month Premium + ₹319 (any 1 plan) + 1 USA Account`,
+    `🥇 Rank 1 — 1 Month Premium OR ₹319 (any 1 plan) + 1 USA Account`,
     `🥈 Rank 2 — ₹100 + 1 USA Account`,
     `🥉 Rank 3 — ₹50`,
     `🎖️ Rank 4–10 — ₹10 each`,
