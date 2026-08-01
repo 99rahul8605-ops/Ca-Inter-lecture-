@@ -2460,13 +2460,17 @@ function _renderManageLevel() {
     var b = batches.find(x => x._id === _mState.bid);
     if (!b) return;
     if (!b.subjects.length) { html = '<div style="text-align:center;padding:20px;color:var(--text2);font-size:13px">No subjects yet</div>'; }
-    b.subjects.forEach(s => {
+    b.subjects.forEach((s, idx) => {
+      var upDisabled = idx === 0 ? 'disabled style="opacity:0.3;cursor:default"' : '';
+      var downDisabled = idx === b.subjects.length - 1 ? 'disabled style="opacity:0.3;cursor:default"' : '';
       html += `<div class="manage-item">
         <span class="manage-item-icon">${s.icon}</span>
         <div class="manage-item-info" style="cursor:pointer" onclick="_mDrill('chapters','${b._id}','${s._id}')">
           <div class="manage-item-name">${s.name}</div>
           <div class="manage-item-sub">${s.chapters.length} chapters</div>
         </div>
+        <button class="edit-btn" ${upDisabled} onclick="moveSubject('${b._id}','${s._id}','up')"><i class="ti ti-arrow-up"></i></button>
+        <button class="edit-btn" ${downDisabled} onclick="moveSubject('${b._id}','${s._id}','down')"><i class="ti ti-arrow-down"></i></button>
         <button class="edit-btn" onclick="openEdit('subject','${b._id}','${s._id}')"><i class="ti ti-pencil"></i></button>
         <button class="del-btn" onclick="delSubject('${b._id}','${s._id}')"><i class="ti ti-trash"></i></button>
       </div>`;
@@ -2477,15 +2481,19 @@ function _renderManageLevel() {
     var s = b && b.subjects.find(x => x._id === _mState.sid);
     if (!s) return;
     if (!s.chapters.length) { html = '<div style="text-align:center;padding:20px;color:var(--text2);font-size:13px">No chapters yet</div>'; }
-    s.chapters.forEach(c => {
+    s.chapters.forEach((c, idx) => {
       var cs = c.comingSoon ? '<span class="coming-soon-badge">🔜 Coming Soon</span>' : '';
       var lecCount = c.lectures.length + c.units.reduce((a,u)=>a+u.lectures.length,0);
+      var upDisabled = idx === 0 ? 'disabled style="opacity:0.3;cursor:default"' : '';
+      var downDisabled = idx === s.chapters.length - 1 ? 'disabled style="opacity:0.3;cursor:default"' : '';
       html += `<div class="manage-item">
         <span class="manage-item-icon">📂</span>
         <div class="manage-item-info" style="cursor:pointer" onclick="_mDrill('lectures','${b._id}','${s._id}','${c._id}')">
           <div class="manage-item-name">${c.name} ${cs}</div>
           <div class="manage-item-sub">${lecCount} lectures</div>
         </div>
+        <button class="edit-btn" ${upDisabled} onclick="moveChapter('${b._id}','${s._id}','${c._id}','up')"><i class="ti ti-arrow-up"></i></button>
+        <button class="edit-btn" ${downDisabled} onclick="moveChapter('${b._id}','${s._id}','${c._id}','down')"><i class="ti ti-arrow-down"></i></button>
         <button class="edit-btn" onclick="openEdit('chapter','${b._id}','${s._id}','${c._id}')"><i class="ti ti-pencil"></i></button>
         <button class="del-btn" onclick="delChapter('${b._id}','${s._id}','${c._id}')"><i class="ti ti-trash"></i></button>
       </div>`;
@@ -3271,6 +3279,8 @@ async function removePremiumUser(uid) {
   } catch(e) { toast('Error: ' + e.message, 'error'); }
 }
 async function delSubject(bid,sid){if(!confirm('Subject delete?'))return;try{await apiFetch(`/api/batches/${bid}/subjects/${sid}`,'DELETE');var b=batches.find(x=>x._id===bid);if(b)b.subjects=b.subjects.filter(x=>x._id!==sid);populateAllSelects();_renderManageLevel();toast('Deleted!','success');}catch(e){toast('Error','error');}}
+async function moveSubject(bid,sid,direction){try{var updated=await apiFetch(`/api/batches/${bid}/subjects/${sid}/move`,'PATCH',{direction});var idx=batches.findIndex(x=>x._id===bid);if(idx!==-1)batches[idx]=updated;_renderManageLevel();}catch(e){toast('Could not reorder','error');}}
+async function moveChapter(bid,sid,cid,direction){try{var updated=await apiFetch(`/api/batches/${bid}/subjects/${sid}/chapters/${cid}/move`,'PATCH',{direction});var idx=batches.findIndex(x=>x._id===bid);if(idx!==-1)batches[idx]=updated;_renderManageLevel();}catch(e){toast('Could not reorder','error');}}
 async function delChapter(bid,sid,cid){if(!confirm('Chapter delete?'))return;try{await apiFetch(`/api/batches/${bid}/subjects/${sid}/chapters/${cid}`,'DELETE');var b=batches.find(x=>x._id===bid);var s=b&&b.subjects.find(x=>x._id===sid);if(s)s.chapters=s.chapters.filter(x=>x._id!==cid);populateAllSelects();_renderManageLevel();toast('Deleted!','success');}catch(e){toast('Error','error');}}
 async function delUnit(bid,sid,cid,uid){if(!confirm('Unit delete?'))return;try{await apiFetch(`/api/batches/${bid}/subjects/${sid}/chapters/${cid}/units/${uid}`,'DELETE');var b=batches.find(x=>x._id===bid);var s=b&&b.subjects.find(x=>x._id===sid);var c=s&&s.chapters.find(x=>x._id===cid);if(c)c.units=c.units.filter(x=>x._id!==uid);populateAllSelects();_renderManageLevel();toast('Deleted!','success');}catch(e){toast('Error','error');}}
 async function delLecture(bid,sid,cid,uid,lid){if(!confirm('Lecture delete?'))return;try{
