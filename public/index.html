@@ -686,12 +686,25 @@ body.ready{transition:none}
         <label class="form-label" style="white-space:nowrap;margin:0">💰 Price (₹)</label>
         <input class="form-input" id="bPrice" type="number" placeholder="e.g. 999" min="0" style="flex:1">
       </div>
-      <div id="bRewardEligibleGroup" class="form-group" style="display:none;align-items:center;gap:10px;padding:10px 12px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm)">
-        <input type="checkbox" id="bRewardEligible" checked style="width:18px;height:18px;cursor:pointer;accent-color:#f59e0b">
-        <label for="bRewardEligible" style="font-size:13px;font-weight:600;cursor:pointer;color:var(--text);display:flex;align-items:center;gap:6px;flex:1">
-          <i class="ti ti-gift" style="color:#f59e0b;font-size:15px"></i> Allow redeem via Reward Points
-          <span style="font-size:10px;color:var(--text3);font-weight:500">Uncheck to hide from the points Redeem picker</span>
-        </label>
+      <div id="bRewardEligibleGroup" class="form-group" style="display:none;flex-direction:column;gap:10px;padding:10px 12px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm)">
+        <div style="display:flex;align-items:center;gap:10px">
+          <input type="checkbox" id="bRewardEligible" checked style="width:18px;height:18px;cursor:pointer;accent-color:#f59e0b" onchange="document.getElementById('bRedeemCostGroup').style.display=this.checked?'flex':'none'">
+          <label for="bRewardEligible" style="font-size:13px;font-weight:600;cursor:pointer;color:var(--text);display:flex;align-items:center;gap:6px;flex:1">
+            <i class="ti ti-gift" style="color:#f59e0b;font-size:15px"></i> Allow redeem via Reward Points
+            <span style="font-size:10px;color:var(--text3);font-weight:500">Uncheck to hide from the points Redeem picker</span>
+          </label>
+        </div>
+        <div id="bRedeemCostGroup" style="display:flex;gap:10px">
+          <div style="flex:1">
+            <label class="form-label" style="font-size:11px;white-space:nowrap">⭐ 24h cost</label>
+            <input class="form-input" id="bRedeemCost24h" type="number" placeholder="default 10" min="0" style="width:100%">
+          </div>
+          <div style="flex:1">
+            <label class="form-label" style="font-size:11px;white-space:nowrap">⭐ 7d cost</label>
+            <input class="form-input" id="bRedeemCost7d" type="number" placeholder="default 50" min="0" style="width:100%">
+          </div>
+        </div>
+        <div style="font-size:10px;color:var(--text3)">Leave blank to use the site-wide default cost for that tier.</div>
       </div>
       <button class="btn-add" id="btnBatch" onclick="addBatch()"><i class="ti ti-plus"></i> Add Batch</button>
     </div>
@@ -870,35 +883,8 @@ body.ready{transition:none}
   </div>
   <div class="page-body">
 
-    <!-- Giveaway card (shown only while a giveaway is live) -->
-    <div class="card" id="giveawayCard" style="margin-bottom:14px;border:1px solid rgba(245,158,11,0.4);display:none">
-      <div style="font-size:13px;font-weight:600;margin-bottom:10px;color:var(--text)">🎁 Giveaway in Progress</div>
-      <div id="giveawayNotJoined" style="display:none">
-        <div style="font-size:12px;color:var(--text2);margin-bottom:10px">Send <b>/participate</b> to the bot to join and get your giveaway invite link.</div>
-        <button class="btn-add" style="width:100%" onclick="openBotChat()"><i class="ti ti-brand-telegram"></i> Open Bot & Participate</button>
-      </div>
-      <div id="giveawayJoined" style="display:none">
-        <div style="display:flex;gap:10px;margin-bottom:10px">
-          <div style="flex:1;background:var(--surface2);border-radius:var(--radius-sm);padding:10px;text-align:center">
-            <div id="giveawayInvites" style="font-size:22px;font-weight:700;color:#f59e0b">–</div>
-            <div style="font-size:10px;color:var(--text2);margin-top:2px">Invites</div>
-          </div>
-          <div style="flex:1;background:var(--surface2);border-radius:var(--radius-sm);padding:10px;text-align:center">
-            <div id="giveawayRank" style="font-size:22px;font-weight:700;color:#f59e0b">–</div>
-            <div style="font-size:10px;color:var(--text2);margin-top:2px">Rank</div>
-          </div>
-        </div>
-        <div style="font-size:11px;color:var(--text2);margin-bottom:6px">Your Giveaway Link</div>
-        <div id="giveawayLinkBox" style="background:var(--surface2);border-radius:var(--radius-sm);padding:10px 12px;font-size:12px;font-family:monospace;color:#f59e0b;word-break:break-all;margin-bottom:10px"></div>
-        <div style="display:flex;gap:8px">
-          <button class="btn-add" style="flex:1" onclick="copyGiveawayLink()"><i class="ti ti-copy"></i> Copy Link</button>
-          <button class="btn-add" style="flex:1;background:var(--surface2);color:var(--text)" onclick="shareGiveawayLink()"><i class="ti ti-brand-telegram"></i> Share</button>
-        </div>
-      </div>
-    </div>
-
     <!-- Referral link card -->
-    <div class="card" id="referLinkCard" style="margin-bottom:14px">
+    <div class="card" style="margin-bottom:14px">
       <div style="font-size:13px;font-weight:600;margin-bottom:8px;color:var(--text)">🔗 Your Referral Link</div>
       <div id="referLinkBox" style="background:var(--surface2);border-radius:var(--radius-sm);padding:10px 12px;font-size:12px;font-family:monospace;color:var(--accent);word-break:break-all;margin-bottom:10px">Loading...</div>
       <div style="display:flex;gap:8px">
@@ -1688,12 +1674,28 @@ function renderRewardModalBody() {
   if (!body || !_rewardModalType || !rewardsSummary) return;
   var s = rewardsSummary;
   var catalog = s.catalog || { accessPass: { cost: 5 }, batch24h: { cost: 10 }, batch7d: { cost: 50 } };
-  var cost = (catalog[_rewardModalType] || {}).cost || 0;
+  var defaultCost = (catalog[_rewardModalType] || {}).cost || 0;
+  // Per-batch cost override field name for the current tier (24h vs 7d).
+  var costField = _rewardModalType === 'batch7d' ? 'redeemCost7d' : 'redeemCost24h';
+
+  function costFor(batch) {
+    if (batch && batch[costField] != null) return batch[costField];
+    return defaultCost;
+  }
+
+  // For accessPass there's no batch, so just use the default. For the batch
+  // tiers, the header cost reflects whichever batch is currently selected
+  // (falls back to the default cost when nothing's picked yet).
+  var headerCost = defaultCost;
+  if ((_rewardModalType === 'batch24h' || _rewardModalType === 'batch7d') && _rewardEligibleBatches) {
+    var preselected = _rewardEligibleBatches.find(function(b){ return b._id === _rewardSelectedBatchId; });
+    headerCost = costFor(preselected);
+  }
 
   var header =
     '<div style="text-align:center;margin-bottom:14px">' +
       '<div style="font-size:11px;color:var(--text2)">Cost</div>' +
-      '<div style="font-size:24px;font-weight:800;color:var(--accent2)">⭐ ' + cost + ' points</div>' +
+      '<div style="font-size:24px;font-weight:800;color:var(--accent2)">⭐ ' + headerCost + ' points</div>' +
       '<div style="font-size:11px;color:var(--text2);margin-top:2px">You have ' + s.points + ' points</div>' +
     '</div>';
 
@@ -1723,13 +1725,16 @@ function renderRewardModalBody() {
 
   var listHtml = _rewardEligibleBatches.map(function(b) {
     var selected = _rewardSelectedBatchId === b._id;
+    var bCost = costFor(b);
+    var canAffordThis = s.points >= bCost;
     var thumb = b.pic ? ('<img src="' + b.pic + '">') : '<div class="reward-pick-emoji">🎓</div>';
-    var sub = b.subjectCount + ' subject' + (b.subjectCount === 1 ? '' : 's') + (b.price ? ' · ₹' + b.price : '');
+    var sub = b.subjectCount + ' subject' + (b.subjectCount === 1 ? '' : 's') + (b.price ? ' · ₹' + b.price : '') +
+      ' · <span style="color:' + (canAffordThis ? 'var(--accent2)' : 'var(--red)') + '">⭐ ' + bCost + '</span>';
     if (b.activeRewardExpiresAt) {
       var pickMsLeft = new Date(b.activeRewardExpiresAt) - new Date();
       sub += ' · <span style="color:var(--green)">' + fmtRewardDuration(pickMsLeft) + ' active — will extend</span>';
     }
-    return '<div class="reward-pick-row' + (selected ? ' selected' : '') + '" onclick="selectRewardBatch(\'' + b._id + '\')">' +
+    return '<div class="reward-pick-row' + (selected ? ' selected' : '') + '" style="' + (canAffordThis ? '' : 'opacity:0.55') + '" onclick="' + (canAffordThis ? ('selectRewardBatch(\'' + b._id + '\')') : ('toast(\'Not enough points for this batch!\',\'error\')')) + '">' +
       thumb +
       '<div class="reward-pick-info">' +
         '<div class="reward-pick-name">' + b.name + '</div>' +
@@ -1740,11 +1745,12 @@ function renderRewardModalBody() {
   }).join('');
 
   var selectedBatch = _rewardEligibleBatches.find(function(b){ return b._id === _rewardSelectedBatchId; });
+  var selectedCanAfford = selectedBatch ? (s.points >= costFor(selectedBatch)) : false;
   var confirmLabel = selectedBatch ? ('Confirm Redeem for "' + selectedBatch.name + '"') : 'Select a batch above';
 
   body.innerHTML = header +
     '<div style="max-height:260px;overflow-y:auto;margin-bottom:12px">' + listHtml + '</div>' +
-    '<button class="reward-redeem-btn" style="width:100%;justify-content:center;padding:12px" ' + (selectedBatch ? '' : 'disabled') + ' onclick="confirmRedeem()">' +
+    '<button class="reward-redeem-btn" style="width:100%;justify-content:center;padding:12px" ' + (selectedCanAfford ? '' : 'disabled') + ' onclick="confirmRedeem()">' +
       '<i class="ti ti-gift"></i> ' + confirmLabel +
     '</button>';
 }
@@ -2067,7 +2073,6 @@ async function checkAdminAccess() {
     if (config.upiId) window._upiId = config.upiId;
     if (config.upiName) window._upiName = config.upiName;
     if (config.contactLink) window._contactLink = config.contactLink;
-    window._paymentProvider = config.paymentProvider || 'bharatpe';
     // Store force-join requirement
     _fjRequired = !!config.forceJoinRequired;
     if (!ownerId) return;
@@ -2205,10 +2210,14 @@ async function addBatch() {
   var isPremium = document.getElementById('bIsPremium').checked;
   var price = parseInt(document.getElementById('bPrice').value) || 0;
   var rewardEligible = document.getElementById('bRewardEligible').checked;
+  var redeemCost24hRaw = document.getElementById('bRedeemCost24h').value;
+  var redeemCost7dRaw = document.getElementById('bRedeemCost7d').value;
+  var redeemCost24h = redeemCost24hRaw !== '' ? parseInt(redeemCost24hRaw, 10) : null;
+  var redeemCost7d = redeemCost7dRaw !== '' ? parseInt(redeemCost7dRaw, 10) : null;
   if (!name) return toast('Please enter a batch name!','error');
   setLoading('btnBatch',true);
   try {
-    var newBatch = await apiFetch('/api/batches','POST',{name, description:desc, pic:picBase64, isPremium, price, rewardEligible});
+    var newBatch = await apiFetch('/api/batches','POST',{name, description:desc, pic:picBase64, isPremium, price, rewardEligible, redeemCost24h, redeemCost7d});
     batches.push(newBatch);
     renderBatches(batches); populateAllSelects();
     document.getElementById('bName').value=''; document.getElementById('bDesc').value='';
@@ -2218,6 +2227,9 @@ async function addBatch() {
     document.getElementById('bPrice').value = '';
     document.getElementById('bRewardEligibleGroup').style.display = 'none';
     document.getElementById('bRewardEligible').checked = true;
+    document.getElementById('bRedeemCost24h').value = '';
+    document.getElementById('bRedeemCost7d').value = '';
+    document.getElementById('bRedeemCostGroup').style.display = 'flex';
     document.getElementById('imgPreview').innerHTML='<div class="img-preview-label"><i class="ti ti-camera" style="font-size:24px;display:block;margin-bottom:6px;color:var(--text3)"></i>Tap to select image</div>';
     picBase64='';
     toast('Batch added!','success');
@@ -2398,11 +2410,15 @@ function _renderManageLevel() {
       var pubClass = pub ? 'publish-btn public' : 'publish-btn';
       var premTag = b.isPremium ? '<span style="font-size:9px;background:rgba(245,158,11,0.2);color:#f59e0b;border:1px solid rgba(245,158,11,0.4);border-radius:20px;padding:1px 6px;font-weight:700;margin-left:4px">👑 PREMIUM</span>' : '';
       var noRewardTag = (b.isPremium && b.rewardEligible === false) ? '<span style="font-size:9px;background:rgba(148,163,184,0.2);color:var(--text2);border:1px solid var(--border);border-radius:20px;padding:1px 6px;font-weight:700;margin-left:4px">🚫 No Redeem</span>' : '';
+      var customCostTag = (b.isPremium && b.rewardEligible !== false && (b.redeemCost24h != null || b.redeemCost7d != null))
+        ? '<span style="font-size:9px;background:rgba(124,92,191,0.15);color:var(--accent2);border:1px solid rgba(124,92,191,0.3);border-radius:20px;padding:1px 6px;font-weight:700;margin-left:4px">⭐ ' +
+          (b.redeemCost24h != null ? b.redeemCost24h : '—') + '/24h · ' + (b.redeemCost7d != null ? b.redeemCost7d : '—') + '/7d</span>'
+        : '';
       var manageUsersBtn = b.isPremium ? `<button class="edit-btn" title="Manage Premium Users" onclick="openPremiumUsers('${b._id}')" style="border-color:rgba(245,158,11,0.4);color:#f59e0b"><i class="ti ti-users"></i></button>` : '';
       html += `<div class="manage-item">
         <span class="manage-item-icon">🎓</span>
         <div class="manage-item-info" style="cursor:pointer" onclick="_mDrill('subjects','${b._id}')">
-          <div class="manage-item-name">${b.name}${premTag}${noRewardTag}</div>
+          <div class="manage-item-name">${b.name}${premTag}${noRewardTag}${customCostTag}</div>
           <div class="manage-item-sub">${b.subjects.length} subjects · ${pub ? '🟢 Public' : '🔒 Private'}</div>
         </div>
         <button class="${pubClass}" onclick="togglePublish('${b._id}')">${pubLabel}</button>
@@ -2591,11 +2607,24 @@ async function openEdit(type, bid, sid, cid, uid, lid) {
               <label class="form-label" style="white-space:nowrap;margin:0">💰 Price (₹)</label>
               <input class="form-input" id="ei_price" type="number" value="${b.price||0}" min="0" style="flex:1">
             </div>
-            <div class="form-group" style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm)">
-              <input type="checkbox" id="ei_rewardEligible" ${b.rewardEligible===false?'':'checked'} style="width:18px;height:18px;cursor:pointer;accent-color:#f59e0b">
-              <label for="ei_rewardEligible" style="font-size:13px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:6px;flex:1"><i class="ti ti-gift" style="color:#f59e0b"></i> Allow redeem via Reward Points
-                <span style="font-size:10px;color:var(--text3);font-weight:500">Uncheck to hide from points Redeem picker</span>
-              </label>
+            <div class="form-group" style="display:flex;flex-direction:column;gap:10px;padding:10px 12px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm)">
+              <div style="display:flex;align-items:center;gap:10px">
+                <input type="checkbox" id="ei_rewardEligible" ${b.rewardEligible===false?'':'checked'} style="width:18px;height:18px;cursor:pointer;accent-color:#f59e0b" onchange="document.getElementById('ei_redeemCostGroup').style.display=this.checked?'flex':'none'">
+                <label for="ei_rewardEligible" style="font-size:13px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:6px;flex:1"><i class="ti ti-gift" style="color:#f59e0b"></i> Allow redeem via Reward Points
+                  <span style="font-size:10px;color:var(--text3);font-weight:500">Uncheck to hide from points Redeem picker</span>
+                </label>
+              </div>
+              <div id="ei_redeemCostGroup" style="display:${b.rewardEligible===false?'none':'flex'};gap:10px">
+                <div style="flex:1">
+                  <label class="form-label" style="font-size:11px;white-space:nowrap">⭐ 24h cost</label>
+                  <input class="form-input" id="ei_redeemCost24h" type="number" value="${b.redeemCost24h!=null?b.redeemCost24h:''}" placeholder="default 10" min="0" style="width:100%">
+                </div>
+                <div style="flex:1">
+                  <label class="form-label" style="font-size:11px;white-space:nowrap">⭐ 7d cost</label>
+                  <input class="form-input" id="ei_redeemCost7d" type="number" value="${b.redeemCost7d!=null?b.redeemCost7d:''}" placeholder="default 50" min="0" style="width:100%">
+                </div>
+              </div>
+              <div style="font-size:10px;color:var(--text3)">Leave blank to use the site-wide default cost for that tier.</div>
             </div>`;
   } else if (type === 'subject') {
     var b = batches.find(x => x._id === bid);
@@ -2673,6 +2702,8 @@ async function saveEdit() {
         isPremium: document.getElementById('ei_isPremium').checked,
         rewardEligible: document.getElementById('ei_rewardEligible').checked,
         price: parseInt(document.getElementById('ei_price').value) || 0,
+        redeemCost24h: document.getElementById('ei_redeemCost24h').value !== '' ? parseInt(document.getElementById('ei_redeemCost24h').value, 10) : null,
+        redeemCost7d: document.getElementById('ei_redeemCost7d').value !== '' ? parseInt(document.getElementById('ei_redeemCost7d').value, 10) : null,
       };
       if (_editPicBase64 !== null) payload.pic = _editPicBase64; // '' = remove, base64 = new pic
       updated = await apiFetch(`/api/batches/${bid}/edit`, 'PATCH', payload);
@@ -2779,6 +2810,14 @@ var _payBatchId = null;
 var _paySsBase64 = null;
 var _payOriginalPrice = 0;
 var _payAppliedCoupon = null; // { code, discountPct, finalAmount }
+var _payTxnRef = ''; // merchant order reference embedded in the UPI QR's tr= param, reused when submitting for Paytm auto-verification
+
+// Generates a fresh order reference for a payment attempt. Doesn't need to be
+// cryptographically strong — just unique enough not to collide with a previous
+// attempt — since it's only used as a lookup key against Paytm's own records.
+function _genTxnRef() {
+  return 'PM' + Date.now().toString(36).toUpperCase() + Math.random().toString(36).slice(2, 6).toUpperCase();
+}
 
 function buyBatch(bid) {
   var b = batches.find(x => x._id === bid);
@@ -2787,6 +2826,13 @@ function buyBatch(bid) {
   _paySsBase64 = null;
   _payOriginalPrice = b.price || 0;
   _payAppliedCoupon = null;
+
+  // Fresh transaction reference per payment attempt. This gets embedded in the UPI
+  // QR as tr= (see _paymentQrUrl) and sent back in submitPayment() as orderRef —
+  // Paytm records this same value as the order reference, so the server can look
+  // it up via DevPort for auto-verification. Must NOT change between QR generation
+  // and submission, so it's generated once here and reused for the whole modal session.
+  _payTxnRef = _genTxnRef();
 
   // Set batch info
   document.getElementById('payBatchName').textContent = b.name;
@@ -2797,11 +2843,6 @@ function buyBatch(bid) {
   var upi = window._upiId || '';
   document.getElementById('payUpiId').textContent = upi || 'Not configured';
 
-  var isPaytm = window._paymentProvider === 'paytm';
-  document.getElementById('payBharatpeFlow').style.display = isPaytm ? 'none' : '';
-  document.getElementById('payPaytmFlow').style.display = isPaytm ? '' : 'none';
-
-  if (!isPaytm) {
   // Generate QR via our own server (/api/payment-qr) — it builds the UPI link itself
   // (using the server's UPI_ID/UPI_NAME) and overlays public/logo.png in the center.
   var payNowBtn = document.getElementById('payNowBtn');
@@ -2818,7 +2859,6 @@ function buyBatch(bid) {
     payNowBtn.disabled = true;
     payNowBtn.classList.add('disabled');
   }
-  }
 
   // Reset coupon
   document.getElementById('payCouponInput').value = '';
@@ -2826,11 +2866,6 @@ function buyBatch(bid) {
   cs.className = 'pay-coupon-status'; cs.textContent = '';
   var applyBtn = document.getElementById('payCouponApplyBtn');
   if (applyBtn) { applyBtn.textContent = 'Apply'; applyBtn.disabled = false; }
-  document.getElementById('payCouponInputPaytm').value = '';
-  var csP = document.getElementById('payCouponStatusPaytm');
-  csP.className = 'pay-coupon-status'; csP.textContent = '';
-  var applyBtnP = document.getElementById('payCouponApplyBtnPaytm');
-  if (applyBtnP) { applyBtnP.textContent = 'Apply'; applyBtnP.disabled = false; }
 
   // Reset form
   document.getElementById('payTxnId').value = '';
@@ -2839,15 +2874,13 @@ function buyBatch(bid) {
   document.getElementById('paySsBox').classList.remove('has-img');
   document.getElementById('paySubmitBtn').disabled = false;
   document.getElementById('paySubmitBtn').innerHTML = '<i class="ti ti-send"></i> Submit Payment Proof';
-  var paytmBtn = document.getElementById('paySubmitBtnPaytm');
-  if (paytmBtn) { paytmBtn.disabled = false; paytmBtn.innerHTML = '<i class="ti ti-credit-card"></i> Pay with Paytm'; }
 
   document.getElementById('payModal').classList.add('show');
 }
 
 function closePayModal() {
   document.getElementById('payModal').classList.remove('show');
-  _payBatchId = null; _paySsBase64 = null; _payAppliedCoupon = null;
+  _payBatchId = null; _paySsBase64 = null; _payAppliedCoupon = null; _payTxnRef = '';
 }
 function closePayOutside(e) { if (e.target.id === 'payModal') closePayModal(); }
 
@@ -2920,86 +2953,12 @@ async function applyCoupon() {
   btn.disabled = false; if (btn.textContent === '...') btn.textContent = 'Apply';
 }
 
-async function applyCouponPaytm() {
-  var code = document.getElementById('payCouponInputPaytm').value.trim().toUpperCase();
-  var cs = document.getElementById('payCouponStatusPaytm');
-  var btn = document.getElementById('payCouponApplyBtnPaytm');
-  if (!code) { cs.className = 'pay-coupon-status error'; cs.textContent = 'Coupon code daalo!'; return; }
-  btn.disabled = true; btn.textContent = '...';
-  cs.className = 'pay-coupon-status'; cs.textContent = '';
-  try {
-    var r = await fetch('/api/coupons/validate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code, batchId: _payBatchId }) });
-    var d = await r.json();
-    if (!r.ok) {
-      _payAppliedCoupon = null;
-      cs.className = 'pay-coupon-status error'; cs.textContent = '❌ ' + (d.error || 'Invalid coupon');
-      document.getElementById('payAmount').textContent = _payOriginalPrice ? '₹' + _payOriginalPrice : 'Contact Admin';
-      document.getElementById('payAmount').className = 'pay-amount';
-    } else {
-      var disc = d.discountPct;
-      var final = Math.round(_payOriginalPrice * (1 - disc / 100));
-      _payAppliedCoupon = { code: d.code, discountPct: disc, finalAmount: final };
-      cs.className = 'pay-coupon-status success'; cs.textContent = '✅ ' + disc + '% off applied! You pay ₹' + final + ' instead of ₹' + _payOriginalPrice;
-      var amtEl = document.getElementById('payAmount');
-      amtEl.innerHTML = '<span class="pay-amount-original">₹' + _payOriginalPrice + '</span><span class="pay-amount-final">₹' + final + '</span>';
-      amtEl.className = '';
-      btn.textContent = '✓';
-    }
-  } catch(e) {
-    cs.className = 'pay-coupon-status error'; cs.textContent = '❌ Error validating coupon';
-  }
-  btn.disabled = false; if (btn.textContent === '...') btn.textContent = 'Apply';
-}
-
-// Kicks off the official Paytm checkout: asks our server to open an order (Paytm
-// Initiate Transaction), then submits a hidden form to Paytm's own hosted payment
-// page — this navigates the WebView to Paytm, and Paytm redirects back to our
-// /api/paytm/callback (server-verified) once the user finishes paying.
-async function payWithPaytm() {
-  if (!_payBatchId) return;
-  var btn = document.getElementById('paySubmitBtnPaytm');
-  btn.disabled = true;
-  btn.innerHTML = '<i class="ti ti-loader-2" style="animation:spin 0.8s linear infinite;display:inline-block"></i> Starting checkout...';
-  try {
-    var tgUser = tg && tg.initDataUnsafe && tg.initDataUnsafe.user;
-    if (!tgUser) throw new Error('Could not detect Telegram user');
-    var payload = {
-      batchId: _payBatchId,
-      userId: String(tgUser.id),
-      firstName: tgUser.first_name || '',
-      lastName: tgUser.last_name || '',
-      username: tgUser.username || '',
-      couponCode: _payAppliedCoupon ? _payAppliedCoupon.code : null,
-      discountPct: _payAppliedCoupon ? _payAppliedCoupon.discountPct : null,
-      finalAmount: _payAppliedCoupon ? _payAppliedCoupon.finalAmount : null,
-    };
-    var r = await fetch('/api/paytm/initiate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-    var d = await r.json();
-    if (!d.success) throw new Error((d.error && d.error.message) || 'Could not start checkout');
-    var data = d.data;
-
-    var form = document.createElement('form');
-    form.method = 'POST';
-    form.action = data.checkoutUrl + '?mid=' + encodeURIComponent(data.mid) + '&orderId=' + encodeURIComponent(data.orderId);
-    ['mid','orderId','txnToken'].forEach(function(key) {
-      var input = document.createElement('input');
-      input.type = 'hidden'; input.name = key; input.value = data[key];
-      form.appendChild(input);
-    });
-    document.body.appendChild(form);
-    form.submit();
-  } catch(e) {
-    toast('Error: ' + e.message, 'error');
-    btn.disabled = false;
-    btn.innerHTML = '<i class="ti ti-credit-card"></i> Pay with Paytm';
-  }
-}
-
 // Builds the URL for our own /api/payment-qr endpoint (server builds the UPI link and
 // overlays public/logo.png). amount can be a number or null/0 (no am= param, generic QR).
 function _paymentQrUrl(amount, batchName) {
   var params = 'note=' + encodeURIComponent((batchName || 'batch').slice(0, 40));
   if (amount) params += '&amount=' + Number(amount).toFixed(2);
+  params += '&tr=' + encodeURIComponent(_payTxnRef);
   return location.origin + '/api/payment-qr?' + params + '&_t=' + Date.now();
 }
 
@@ -3110,6 +3069,7 @@ async function submitPayment() {
       lastName: tgUser ? (tgUser.last_name || '') : '',
       username: tgUser ? (tgUser.username || '') : '',
       txnId: txnId,
+      orderRef: _payTxnRef,
       screenshotBase64: _paySsBase64,
       couponCode: _payAppliedCoupon ? _payAppliedCoupon.code : null,
       discountPct: _payAppliedCoupon ? _payAppliedCoupon.discountPct : null,
@@ -3122,11 +3082,8 @@ async function submitPayment() {
     });
     var d = await r.json();
     if (!r.ok) throw new Error(d.error || 'Failed');
-    if (d.autoApproved) {
-      toast('✅ Payment verified instantly! Access unlocked 🚀', 'success');
-    } else {
-      toast('✅ Payment submitted! Admin will verify soon.', 'success');
-    }
+    if (d.autoVerified) toast('✅ Payment verified instantly! Access unlocked 🚀', 'success');
+    else toast('✅ Payment submitted! Admin will verify soon.', 'success');
     closePayModal();
   } catch(e) {
     toast('Error: ' + e.message, 'error');
@@ -3454,7 +3411,6 @@ function switchNavTab(tab) {
     refEl.classList.add('active');
     if (tg) tg.BackButton.hide();
     loadReferStats();
-    loadGiveawayStatus();
     loadRewardsSummary();
     startRewardsCountdown();
     return;
@@ -4237,75 +4193,54 @@ body.light-mode .lec-mini-notes{background:var(--surface2);color:var(--text)}
         </div>
         <div class="pay-amount" id="payAmount">—</div>
       </div>
-      <!-- BharatPe flow: QR + UPI + manual UTR + screenshot -->
-      <div id="payBharatpeFlow">
-        <div class="pay-qr-wrap">
-          <img class="pay-qr-img" id="payQrImg" src="" alt="QR Code">
-          <div class="pay-upi-row">
-            <span class="pay-upi-id" id="payUpiId">—</span>
-            <button class="pay-copy-btn" onclick="copyUpi()">Copy</button>
-          </div>
-          <button class="pay-now-btn" id="payNowBtn" onclick="downloadPayQr()">⬇️ Download QR Code</button>
-          <div class="pay-now-hint">Save the QR, then scan it in your UPI app to pay</div>
+      <!-- QR + UPI -->
+      <div class="pay-qr-wrap">
+        <img class="pay-qr-img" id="payQrImg" src="" alt="QR Code">
+        <div class="pay-upi-row">
+          <span class="pay-upi-id" id="payUpiId">—</span>
+          <button class="pay-copy-btn" onclick="copyUpi()">Copy</button>
         </div>
-        <!-- Steps -->
-        <div class="pay-steps">
-          <b>How to pay:</b><br>
-          1️⃣ Scan QR or copy UPI ID<br>
-          2️⃣ Pay the exact amount shown above<br>
-          3️⃣ Take a screenshot of payment confirmation<br>
-          4️⃣ Enter UTR Number (12-digit) &amp; upload screenshot below<br>
-          5️⃣ Submit — admin will verify &amp; unlock your batch
-        </div>
-        <!-- Coupon Code -->
-        <div style="margin-bottom:4px">
-          <label class="form-label" style="margin-bottom:5px;display:block">🎟 Coupon Code (optional)</label>
-          <div class="pay-coupon-row">
-            <input class="pay-coupon-input" id="payCouponInput" placeholder="ENTER CODE" maxlength="30" oninput="this.value=this.value.toUpperCase()">
-            <button class="pay-coupon-btn" id="payCouponApplyBtn" onclick="applyCoupon()">Apply</button>
-          </div>
-          <div class="pay-coupon-status" id="payCouponStatus"></div>
-        </div>
-        <!-- UTR Number -->
-        <div class="form-group" style="margin-bottom:6px">
-          <label class="form-label">UTR Number <span style="color:var(--text3);font-weight:400">(12-digit, numbers only)</span></label>
-          <input class="form-input" id="payTxnId" placeholder="e.g. 123456789012" maxlength="12" inputmode="numeric" oninput="this.value=this.value.replace(/\D/g,'').slice(0,12);validateUtr(this.value)">
-          <div id="utrError" style="font-size:11px;color:var(--red);margin-top:4px;min-height:16px"></div>
-        </div>
-        <!-- Screenshot upload -->
-        <div class="pay-ss-box" id="paySsBox" onclick="document.getElementById('paySsInput').click()">
-          <img class="pay-ss-preview" id="paySsPreview">
-          <div class="pay-ss-label" id="paySsLabel">
-            <i class="ti ti-upload" style="font-size:22px;color:var(--text3)"></i>
-            <span>Tap to upload payment screenshot</span>
-            <span style="font-size:10px;color:var(--text3)">JPG, PNG supported</span>
-          </div>
-        </div>
-        <input type="file" id="paySsInput" accept="image/*" style="display:none" onchange="handleSsUpload(event)">
-        <!-- Submit -->
-        <button class="pay-submit-btn" id="paySubmitBtn" onclick="submitPayment()">
-          <i class="ti ti-send"></i> Submit Payment Proof
-        </button>
+        <button class="pay-now-btn" id="payNowBtn" onclick="downloadPayQr()">⬇️ Download QR Code</button>
+        <div class="pay-now-hint">Save the QR, then scan it in your UPI app to pay</div>
       </div>
-
-      <!-- Paytm flow: official checkout, redirects to Paytm's hosted page -->
-      <div id="payPaytmFlow" style="display:none">
-        <!-- Coupon Code -->
-        <div style="margin-bottom:14px">
-          <label class="form-label" style="margin-bottom:5px;display:block">🎟 Coupon Code (optional)</label>
-          <div class="pay-coupon-row">
-            <input class="pay-coupon-input" id="payCouponInputPaytm" placeholder="ENTER CODE" maxlength="30" oninput="this.value=this.value.toUpperCase()">
-            <button class="pay-coupon-btn" id="payCouponApplyBtnPaytm" onclick="applyCouponPaytm()">Apply</button>
-          </div>
-          <div class="pay-coupon-status" id="payCouponStatusPaytm"></div>
-        </div>
-        <div class="pay-steps">
-          You'll be redirected to Paytm's secure checkout page to complete the payment. Access unlocks automatically once Paytm confirms the transaction — no need to submit a UTR or screenshot.
-        </div>
-        <button class="pay-submit-btn" id="paySubmitBtnPaytm" onclick="payWithPaytm()">
-          <i class="ti ti-credit-card"></i> Pay with Paytm
-        </button>
+      <!-- Steps -->
+      <div class="pay-steps">
+        <b>How to pay:</b><br>
+        1️⃣ Scan QR or copy UPI ID<br>
+        2️⃣ Pay the exact amount shown above<br>
+        3️⃣ Take a screenshot of payment confirmation<br>
+        4️⃣ Enter UTR Number (12-digit) &amp; upload screenshot below<br>
+        5️⃣ Submit — admin will verify &amp; unlock your batch
       </div>
+      <!-- Coupon Code -->
+      <div style="margin-bottom:4px">
+        <label class="form-label" style="margin-bottom:5px;display:block">🎟 Coupon Code (optional)</label>
+        <div class="pay-coupon-row">
+          <input class="pay-coupon-input" id="payCouponInput" placeholder="ENTER CODE" maxlength="30" oninput="this.value=this.value.toUpperCase()">
+          <button class="pay-coupon-btn" id="payCouponApplyBtn" onclick="applyCoupon()">Apply</button>
+        </div>
+        <div class="pay-coupon-status" id="payCouponStatus"></div>
+      </div>
+      <!-- UTR Number -->
+      <div class="form-group" style="margin-bottom:6px">
+        <label class="form-label">UTR Number <span style="color:var(--text3);font-weight:400">(12-digit, numbers only)</span></label>
+        <input class="form-input" id="payTxnId" placeholder="e.g. 123456789012" maxlength="12" inputmode="numeric" oninput="this.value=this.value.replace(/\D/g,'').slice(0,12);validateUtr(this.value)">
+        <div id="utrError" style="font-size:11px;color:var(--red);margin-top:4px;min-height:16px"></div>
+      </div>
+      <!-- Screenshot upload -->
+      <div class="pay-ss-box" id="paySsBox" onclick="document.getElementById('paySsInput').click()">
+        <img class="pay-ss-preview" id="paySsPreview">
+        <div class="pay-ss-label" id="paySsLabel">
+          <i class="ti ti-upload" style="font-size:22px;color:var(--text3)"></i>
+          <span>Tap to upload payment screenshot</span>
+          <span style="font-size:10px;color:var(--text3)">JPG, PNG supported</span>
+        </div>
+      </div>
+      <input type="file" id="paySsInput" accept="image/*" style="display:none" onchange="handleSsUpload(event)">
+      <!-- Submit -->
+      <button class="pay-submit-btn" id="paySubmitBtn" onclick="submitPayment()">
+        <i class="ti ti-send"></i> Submit Payment Proof
+      </button>
     </div>
   </div>
 </div>
@@ -4489,81 +4424,6 @@ function shareReferLink() {
     tg.openLink(shareUrl, { try_instant_view: false });
   } else {
     window.open(shareUrl, '_blank');
-  }
-}
-
-// ── Giveaway ──────────────────────────────────────────────────────────────────
-var _giveawayLink = '';
-
-async function loadGiveawayStatus() {
-  var uid = getUserId();
-  var card = document.getElementById('giveawayCard');
-  var referCard = document.getElementById('referLinkCard');
-  if (!uid || !card) return;
-  try {
-    var r = await fetch('/api/giveaway/status/' + uid);
-    var data = await r.json();
-    if (!data.active) { card.style.display = 'none'; if (referCard) referCard.style.display = ''; return; }
-    card.style.display = '';
-    var joinedBox = document.getElementById('giveawayJoined');
-    var notJoinedBox = document.getElementById('giveawayNotJoined');
-    if (data.participating) {
-      // While actively participating, hide the normal referral link so there's
-      // only one link to manage — this auto-reverts (see !data.active branch
-      // above and the `else` below) the moment the giveaway ends or they're
-      // not counted as a participant, no manual cleanup needed.
-      if (referCard) referCard.style.display = 'none';
-      joinedBox.style.display = '';
-      notJoinedBox.style.display = 'none';
-      document.getElementById('giveawayInvites').textContent = data.invites || 0;
-      document.getElementById('giveawayRank').textContent = '#' + (data.rank || '–');
-      _giveawayLink = 'https://t.me/' + (window._botUsername || '') + '?start=give_' + uid;
-      document.getElementById('giveawayLinkBox').textContent = _giveawayLink;
-    } else {
-      if (referCard) referCard.style.display = '';
-      joinedBox.style.display = 'none';
-      notJoinedBox.style.display = '';
-    }
-  } catch (e) {
-    console.error('Giveaway status error:', e);
-    card.style.display = 'none';
-    if (referCard) referCard.style.display = '';
-  }
-}
-
-function copyGiveawayLink() {
-  if (!_giveawayLink) return toast('Open via Telegram to get your link', 'error');
-  if (navigator.clipboard) {
-    navigator.clipboard.writeText(_giveawayLink).then(function() {
-      toast('Link copied! 📋', 'success');
-    });
-  } else {
-    var el = document.createElement('textarea');
-    el.value = _giveawayLink;
-    document.body.appendChild(el);
-    el.select();
-    document.execCommand('copy');
-    document.body.removeChild(el);
-    toast('Link copied! 📋', 'success');
-  }
-}
-
-function shareGiveawayLink() {
-  if (!_giveawayLink) return toast('Open via Telegram to get your link', 'error');
-  var shareUrl = 'https://t.me/share/url?url=' + encodeURIComponent(_giveawayLink) + '&text=' + encodeURIComponent('Join the giveaway and win prizes! 🎁');
-  if (tg && tg.openLink) {
-    tg.openLink(shareUrl, { try_instant_view: false });
-  } else {
-    window.open(shareUrl, '_blank');
-  }
-}
-
-function openBotChat() {
-  var url = 'https://t.me/' + (window._botUsername || '');
-  if (tg && tg.openLink) {
-    tg.openLink(url, { try_instant_view: false });
-  } else {
-    window.open(url, '_blank');
   }
 }
 
