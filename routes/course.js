@@ -1116,9 +1116,9 @@ router.get('/giveaway/status/:userId', async (req, res) => {
     if (!giveaway) return res.json({ active: false });
     const userId = Number(req.params.userId);
     const participant = await GiveawayParticipant.findOne({ giveawayId: giveaway._id, userId });
-    if (!participant) return res.json({ active: true, participating: false });
+    if (!participant) return res.json({ active: true, participating: false, giveawayId: String(giveaway._id) });
     const higher = await GiveawayParticipant.countDocuments({ giveawayId: giveaway._id, $or: [ { invites: { $gt: participant.invites } }, { invites: participant.invites, joinedAt: { $lt: participant.joinedAt } } ] });
-    res.json({ active: true, participating: true, invites: participant.invites, rank: higher + 1 });
+    res.json({ active: true, participating: true, invites: participant.invites, rank: higher + 1, giveawayId: String(giveaway._id) });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
