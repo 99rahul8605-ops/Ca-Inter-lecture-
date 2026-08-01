@@ -38,13 +38,40 @@ const UPI_NAME = process.env.UPI_NAME || ""; // payee name shown in the UPI app 
 const PAYMENT_GROUP_ID = process.env.PAYMENT_GROUP_ID ? parseInt(process.env.PAYMENT_GROUP_ID) : null;
 const CONTACT_LINK = process.env.CONTACT_LINK || "";
 
-// Ilambit DevPort — used to auto-verify payments before they hit the admin
-// approval queue. Get a key from https://devport.ilambit.in/dashboard and
-// set your Paytm MID under Services → Paytm. If DEVPORT_API_KEY is left
-// unset, auto-verification is simply skipped and every payment falls back
-// to the existing manual Approve/Reject flow — nothing breaks.
+// Ilambit DevPort — used to auto-verify UPI payments by UTR against the BharatPe
+// merchant account before falling back to manual admin approval. Get a key from
+// https://devport.ilambit.in/signup and configure BharatPe creds under Services.
 const DEVPORT_API_KEY = process.env.DEVPORT_API_KEY || "";
-const DEVPORT_BASE_URL = process.env.DEVPORT_BASE_URL || "https://devport.ilambit.in/api/v1";
+// Allowed absolute paisa-level mismatch between what BharatPe reports and what we
+// expect (batch price / coupon final amount) before we refuse to auto-approve.
+const PAYMENT_AMOUNT_TOLERANCE = 0;
+
+// ── Payment provider switch ─────────────────────────────────────────────────────
+// "bharatpe" (default) = existing static-QR + manual UTR entry, verified via DevPort.
+// "paytm" = official Paytm checkout (Initiate Transaction + hosted page), but the
+// FINAL status confirmation goes through Ilambit DevPort's Paytm endpoint (same
+// DEVPORT_API_KEY as BharatPe) instead of calling Paytm's Order Status API directly
+// — so also configure your Paytm Merchant ID under Services → Paytm on the DevPort
+// dashboard. PAYTM_MERCHANT_KEY below is still needed for two things Paytm itself
+// requires directly: creating the checkout order (Initiate Transaction) and
+// verifying the authenticity of Paytm's callback POST to our server.
+const PAYMENT_PROVIDER = (process.env.PAYMENT_PROVIDER || "bharatpe").trim().toLowerCase();
+const PAYTM_MID = process.env.PAYTM_MID || "";
+const PAYTM_MERCHANT_KEY = process.env.PAYTM_MERCHANT_KEY || "";
+const PAYTM_WEBSITE = process.env.PAYTM_WEBSITE || "DEFAULT"; // "WEBSTAGING" for staging, or your registered production website name
+const PAYTM_INDUSTRY_TYPE = process.env.PAYTM_INDUSTRY_TYPE || "Retail";
+const PAYTM_CHANNEL_ID = process.env.PAYTM_CHANNEL_ID || "WEB";
+const PAYTM_ENV = (process.env.PAYTM_ENV || "production").trim().toLowerCase(); // "production" or "staging"
+const PAYTM_HOST = PAYTM_ENV === "staging" ? "securegw-stage.paytm.in" : "securegw.paytm.in";
+// Public HTTPS URL Paytm redirects/POSTs back to after checkout — must be reachable
+// from the internet (your WEB_URL's domain). Falls back to WEB_URL's origin + this path.
+const PAYTM_CALLBACK_URL = process.env.PAYTM_CALLBACK_URL || (() => { try { return WEB_URL ? new URL("/api/paytm/callback", WEB_URL).toString() : ""; } catch (_) { return ""; } })();
+
+let PaytmChecksum = null;
+if (PAYMENT_PROVIDER === "paytm") {
+  try { PaytmChecksum = require("paytmchecksum"); }
+  catch (e) { console.warn("paytmchecksum not installed — Paytm payments will be unavailable. Run `npm install paytmchecksum --save`."); }
+}
 
 let BOT_USERNAME = "";
 let bot = null;
@@ -97,6 +124,82 @@ const User = mongoose.model("User", userSchema);
 const dailyLimitSchema = new mongoose.Schema({ userId: { type: Number, required: true, unique: true }, count: { type: Number, default: 0 }, resetDate: { type: String, required: true } });
 const DailyVideoLimit = mongoose.model("DailyVideoLimit", dailyLimitSchema);
 const DAILY_VIDEO_LIMIT = 10;
+
+// ── Giveaway ──────────────────────────────────────────────────────────────────
+// Self-contained: doesn't touch the referral/points system at all, so it can't
+// break existing referral counts. Invite tracking uses its own deep-link prefix
+// (?start=give_<userId>) separate from the existing ref_ prefix.
+const giveawaySchema = new mongoose.Schema({
+  status: { type: String, enum: ["active","ended"], default: "active" },
+  startedAt: { type: Date, default: Date.now },
+  endedAt: { type: Date, default: null },
+  startedBy: Number,
+});
+const Giveaway = mongoose.model("Giveaway", giveawaySchema);
+
+const giveawayParticipantSchema = new mongoose.Schema({
+  giveawayId: { type: mongoose.Schema.Types.ObjectId, required: true },
+  userId: { type: Number, required: true },
+  firstName: { type: String, default: "" },
+  username: { type: String, default: "" },
+  invites: { type: Number, default: 0 },
+  invitedIds: { type: [Number], default: [] }, // prevents the same invitee being counted twice
+  joinedAt: { type: Date, default: Date.now },
+});
+giveawayParticipantSchema.index({ giveawayId: 1, userId: 1 }, { unique: true });
+const GiveawayParticipant = mongoose.model("GiveawayParticipant", giveawayParticipantSchema);
+
+const GIVEAWAY_REWARDS = { 1: "🏆 1 Month Premium + ₹319 (any 1 plan) + 1 USA Account", 2: "🥈 ₹100 + 1 USA Account", 3: "🥉 ₹50" };
+function giveawayRewardFor(rank) { if (GIVEAWAY_REWARDS[rank]) return GIVEAWAY_REWARDS[rank]; if (rank>=4 && rank<=10) return "🎁 ₹10"; return null; }
+async function getActiveGiveaway() { return Giveaway.findOne({ status:"active" }).sort({ startedAt:-1 }); }
+async function getLatestGiveaway() { return Giveaway.findOne().sort({ startedAt:-1 }); }
+async function giveawayRankOf(giveawayId, userId) {
+  const me = await GiveawayParticipant.findOne({ giveawayId, userId });
+  if (!me) return { participant:null, rank:null };
+  const higher = await GiveawayParticipant.countDocuments({ giveawayId, $or:[ { invites:{ $gt:me.invites } }, { invites:me.invites, joinedAt:{ $lt:me.joinedAt } } ] });
+  return { participant:me, rank: higher+1 };
+}
+function giveawayDisplayName(p) { return p.username ? `@${p.username}` : (p.firstName || `User ${p.userId}`); }
+
+// ── Paytm order tracking ─────────────────────────────────────────────────────────
+// One row per checkout attempt, created at /api/paytm/initiate and resolved by the
+// callback (checksum-verified) + an authoritative Order Status API call.
+const paytmOrderSchema = new mongoose.Schema({
+  orderId: { type: String, required: true, unique: true },
+  batchId: String,
+  userId: String,
+  firstName: String,
+  lastName: String,
+  username: String,
+  amount: Number,
+  couponCode: String,
+  discountPct: Number,
+  status: { type: String, enum: ["pending","success","failed"], default: "pending" },
+  txnId: String, // Paytm's own transaction id, filled in on success
+  createdAt: { type: Date, default: Date.now },
+});
+const PaytmOrder = mongoose.model("PaytmOrder", paytmOrderSchema);
+
+function giveawayRulesText() {
+  return [
+    `🎁 <b>GIVEAWAY — TERMS &amp; CONDITIONS</b>`,
+    ``,
+    `<b>How It Works</b>`,
+    `1. Share your unique invite link with friends.`,
+    `2. An invite is counted only after the invited user joins <b>and</b> watches their first lecture — opening the bot alone does not count.`,
+    `3. If an invited user later leaves the required channel/group, that invite is reversed and your count is reduced accordingly.`,
+    `4. Rankings are based on total confirmed invites — check anytime via /scoreboard.`,
+    `5. View your personal standing anytime with /myscore.`,
+    ``,
+    `<b>Prize Structure</b>`,
+    `🥇 Rank 1 — 1 Month Premium + ₹319 (any 1 plan) + 1 USA Account`,
+    `🥈 Rank 2 — ₹100 + 1 USA Account`,
+    `🥉 Rank 3 — ₹50`,
+    `🎖️ Rank 4–10 — ₹10 each`,
+    ``,
+    `Results will be announced once the giveaway concludes, and all winners will be notified individually.`,
+  ].join("\n");
+}
 
 // ── MongoDB connect ───────────────────────────────────────────────────────────
 mongoose.connect(MONGO_URI).then(async () => {
@@ -281,38 +384,42 @@ async function recoverPendingUndelivers() {
 const esc = (s) => String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
 async function wait(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-// ── Paytm payment verification via Ilambit DevPort ─────────────────────────
-// Docs: https://devport.ilambit.in/docs#paytm
-// Looks up a payment by orderId against Paytm's own records via DevPort's
-// gateway proxy. Returns { ok:true, transaction } only when Paytm confirms
-// the txn as a genuine success; otherwise { ok:false, reason, message } with
-// a reason drawn from DevPort's response so admins/logs know *why* it
-// didn't auto-verify (not_found, not_verified, an upstream error code, etc).
-// Never throws — network/API failures just mean "couldn't auto-verify",
-// so callers always have a safe manual-review fallback.
-async function verifyPaytmPayment(orderId) {
-  if (!DEVPORT_API_KEY) return { ok: false, reason: "not_configured", message: "DEVPORT_API_KEY not set" };
-  if (!orderId) return { ok: false, reason: "missing_order_id", message: "No order ID provided" };
+// ── BharatPe payment verification (via Ilambit DevPort) ────────────────────────
+// In-memory guard against the same UTR being submitted twice and auto-approved
+// twice. Resets on restart — if you need this to survive restarts, persist UTRs
+// used against a batch/user in SQLite/Mongo instead (e.g. a column on FileRecord-
+// style payment log) and check that table here too.
+const usedUTRs = new Set();
+
+async function verifyBharatPePayment(utr) {
+  if (!DEVPORT_API_KEY) return { ok: false, reason: "not_configured" };
   try {
-    const r = await fetch(`${DEVPORT_BASE_URL}/paytm/status/${encodeURIComponent(orderId)}`, {
+    const resp = await fetch(`https://devport.ilambit.in/api/v1/bharatpe/status/${encodeURIComponent(utr)}`, {
       headers: { "X-API-Key": DEVPORT_API_KEY },
       signal: AbortSignal.timeout(10000),
     });
-    const j = await r.json();
-    if (!j.success) return { ok: false, reason: j.error?.code || "api_error", message: j.error?.message || "DevPort API error" };
-    const d = j.data || {};
-    if (!d.found) return { ok: false, reason: "not_found", message: d.message || "Order not found on Paytm" };
-    if (!d.verified || d.transaction?.status !== "TXN_SUCCESS") return { ok: false, reason: "not_verified", message: d.message || "Payment not verified" };
-    return { ok: true, transaction: d.transaction };
+    const data = await resp.json();
+    if (!data.success) return { ok: false, reason: data.error?.code || "api_error", message: data.error?.message || "" };
+    const txn = data.data?.transaction || null;
+    return {
+      ok: true,
+      verified: !!data.data?.verified,
+      found: !!data.data?.found,
+      amount: txn ? Number(txn.amount) : null,
+      senderName: txn?.senderName || null,
+      status: txn?.status || null,
+      timestamp: txn?.transactionTimestamp || null,
+      requestsRemaining: data.meta?.requestsRemaining,
+    };
   } catch (e) {
-    console.error("Paytm verify error:", e.message);
-    return { ok: false, reason: "request_failed", message: e.message };
+    console.error("BharatPe verify error:", e.message);
+    return { ok: false, reason: "network_error", message: e.message };
   }
 }
 
-// Grants a user premium access to a batch — shared by the auto-verify path
-// (pay-request) and the manual owner Approve button (callback_query), so
-// both stay in sync instead of duplicating the Mongo+SQLite write.
+// Shared by both auto-approval (BharatPe-verified) and manual admin approval —
+// grants a user access to a batch in both Mongo (source of truth) and SQLite
+// (fast local reads).
 async function grantBatchAccess(batchId, targetUserId) {
   const Batch = require("./models/Course");
   const batch = await Batch.findById(batchId);
@@ -324,17 +431,71 @@ async function grantBatchAccess(batchId, targetUserId) {
   return batch;
 }
 
-// Reverses grantBatchAccess — used both by manual Reject-after-approval
-// ("Revoke") and could be reused elsewhere if needed.
-async function revokeBatchAccess(batchId, targetUserId) {
-  const Batch = require("./models/Course");
-  const batch = await Batch.findById(batchId);
-  if (batch && batch.premiumUsers) {
-    batch.premiumUsers = batch.premiumUsers.filter(u => u !== String(targetUserId));
-    await batch.save();
-    db.batch.upsert(batch.toObject());
+// ── Paytm Payment Gateway (official) ────────────────────────────────────────────
+// Standard "Initiate Transaction" + hosted checkout page + Order Status confirmation
+// flow, per Paytm's documented Payment Gateway integration. Requires real PG
+// credentials (MID + Merchant Key) from Paytm Business dashboard → Developer Settings
+// — NOT the same as a plain Paytm UPI collection ID, which has no public status API.
+async function paytmInitiateTransaction({ orderId, amount, custId, email, mobile }) {
+  if (!PaytmChecksum || !PAYTM_MID || !PAYTM_MERCHANT_KEY) return { ok:false, reason:"not_configured" };
+  try {
+    const body = {
+      requestType: "Payment",
+      mid: PAYTM_MID,
+      websiteName: PAYTM_WEBSITE,
+      orderId,
+      callbackUrl: PAYTM_CALLBACK_URL,
+      txnAmount: { value: Number(amount).toFixed(2), currency: "INR" },
+      userInfo: { custId: String(custId), ...(email?{email}:{}) , ...(mobile?{mobile}:{}) },
+    };
+    const signature = await PaytmChecksum.generateSignature(JSON.stringify(body), PAYTM_MERCHANT_KEY);
+    const resp = await fetch(`https://${PAYTM_HOST}/theia/api/v1/initiateTransaction?mid=${encodeURIComponent(PAYTM_MID)}&orderId=${encodeURIComponent(orderId)}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ head: { signature }, body }),
+      signal: AbortSignal.timeout(15000),
+    });
+    const data = await resp.json();
+    const txnToken = data?.body?.txnToken;
+    if (!txnToken) return { ok:false, reason: data?.body?.resultInfo?.resultMsg || "no_txn_token", raw: data };
+    return { ok:true, txnToken };
+  } catch (e) {
+    console.error("Paytm initiate error:", e.message);
+    return { ok:false, reason:"network_error", message: e.message };
   }
-  return batch;
+}
+
+// Authoritative status check — via Ilambit DevPort's Paytm endpoint (same pattern as
+// verifyBharatPePayment), NOT a direct call to Paytm. DevPort holds the Paytm Order
+// Status lookup against your configured Merchant ID (Services → Paytm on their
+// dashboard) — reuses the same DEVPORT_API_KEY already used for BharatPe.
+async function verifyPaytmPayment(orderId) {
+  if (!DEVPORT_API_KEY) return { ok:false, reason:"not_configured" };
+  try {
+    const resp = await fetch(`https://devport.ilambit.in/api/v1/paytm/status/${encodeURIComponent(orderId)}`, {
+      headers: { "X-API-Key": DEVPORT_API_KEY },
+      signal: AbortSignal.timeout(10000),
+    });
+    const data = await resp.json();
+    if (!data.success) return { ok:false, reason: data.error?.code || "api_error", message: data.error?.message || "" };
+    const txn = data.data?.transaction || null;
+    return {
+      ok: true,
+      verified: !!data.data?.verified,
+      found: !!data.data?.found,
+      status: txn?.status || null, // "TXN_SUCCESS" | ...
+      amount: txn?.txnAmount != null ? Number(txn.txnAmount) : null,
+      txnId: txn?.txnId || null,
+      bankTxnId: txn?.bankTxnId || null,
+      paymentMode: txn?.paymentMode || null,
+      gatewayName: txn?.gatewayName || null,
+      timestamp: txn?.txnDate || null,
+      requestsRemaining: data.meta?.requestsRemaining,
+    };
+  } catch (e) {
+    console.error("Paytm (DevPort) verify error:", e.message);
+    return { ok:false, reason:"network_error", message: e.message };
+  }
 }
 
 // ── Express ───────────────────────────────────────────────────────────────────
@@ -345,7 +506,7 @@ app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 app.get("/health", (req, res) => res.json({ status: "ok", uptime: process.uptime(), mongo: mongoose.connection.readyState===1?"connected":"disconnected", sqlite: "active" }));
 app.get("/api/config", (req, res) => {
   const fj = (process.env.FORCE_JOIN_CHANNELS||"").split(",").map(s=>s.trim()).filter(Boolean);
-  res.json({ ownerId: OWNER_ID, botUsername: BOT_USERNAME||"", forceJoinRequired: fj.length>0, upiId: UPI_ID||"", upiName: UPI_NAME||"", contactLink: CONTACT_LINK||`https://t.me/${BOT_USERNAME}` });
+  res.json({ ownerId: OWNER_ID, botUsername: BOT_USERNAME||"", forceJoinRequired: fj.length>0, upiId: UPI_ID||"", upiName: UPI_NAME||"", contactLink: CONTACT_LINK||`https://t.me/${BOT_USERNAME}`, paymentProvider: PAYMENT_PROVIDER });
 });
 
 // Generates the payment UPI QR server-side (so it's a real, shareable/downloadable HTTPS
@@ -353,26 +514,16 @@ app.get("/api/config", (req, res) => {
 // the center. errorCorrectionLevel "H" (30% redundancy) keeps the code scannable even with
 // ~22% of the middle covered by the logo. If public/logo.png doesn't exist yet, falls back
 // to a plain QR with no logo — drop your logo file in at public/logo.png to enable this.
-//
-// `tr` (transaction reference) is the key piece for auto-verification: it's generated
-// per payment attempt (by the frontend, see _genTxnRef in index.html) and embedded in the
-// UPI intent. Paytm records this same value as the order reference when the payment is
-// made, so /api/pay-request can later look it up via DevPort's Paytm status API using
-// this exact value as orderId. If the caller doesn't pass one, we generate a fallback here
-// so the QR still works — but the frontend must use the SAME value it sends back at
-// submission time, so generating it client-side (once per modal-open) is what makes that possible.
 app.get("/api/payment-qr", async (req, res) => {
   try {
     if (!QRCode || !JimpLib) return res.status(503).send("QR generator not installed on server. Run: npm install qrcode jimp --save");
     if (!UPI_ID) return res.status(404).send("UPI_ID not configured");
     const amount = req.query.amount ? Number(req.query.amount) : null;
     const note = (req.query.note || "Payment").toString().slice(0, 40);
-    const txnRef = (req.query.tr || `PM${Date.now().toString(36)}${crypto.randomBytes(3).toString("hex")}`).toString().slice(0, 35).toUpperCase();
 
-    const amtStr = amount && amount > 0 ? amount.toFixed(2) : "";
-    let upiStr = `upi://pay?cu=INR&pa=${encodeURIComponent(UPI_ID)}&pn=${encodeURIComponent(UPI_NAME || "Payment")}`;
-    if (amtStr) upiStr += `&am=${amtStr}&mam=${amtStr}`;
-    upiStr += `&tr=${encodeURIComponent(txnRef)}&tn=${encodeURIComponent("Payment for " + note)}`;
+    let upiStr = `upi://pay?pa=${encodeURIComponent(UPI_ID)}&pn=${encodeURIComponent(UPI_NAME || "Payment")}`;
+    if (amount && amount > 0) upiStr += `&am=${amount.toFixed(2)}`;
+    upiStr += `&cu=INR&tn=${encodeURIComponent("Payment for " + note)}`;
 
     const qrBuffer = await QRCode.toBuffer(upiStr, { errorCorrectionLevel: "H", width: 500, margin: 1 });
     const qrImg = await JimpLib.read(qrBuffer);
@@ -397,7 +548,6 @@ app.get("/api/payment-qr", async (req, res) => {
     const outBuffer = await qrImg.getBuffer("image/png");
     res.set("Content-Type", "image/png");
     res.set("Cache-Control", "no-store");
-    res.set("X-Txn-Ref", txnRef); // exposed in case a caller wants to confirm what ref got embedded
     res.send(outBuffer);
   } catch (e) {
     console.error("payment-qr error:", e);
@@ -406,58 +556,137 @@ app.get("/api/payment-qr", async (req, res) => {
 });
 
 const courseRoutes = require("./routes/course");
+const GiveawayInvite = mongoose.model("GiveawayInvite"); // schema lives in routes/course.js, registered at require-time above
 app.use("/api", courseRoutes);
 const autoLectureSession = courseRoutes.autoLectureSession;
 const autoAddLecture = courseRoutes.autoAddLecture;
 
 app.post("/api/pay-request", async (req, res) => {
   try {
-    const { batchId, userId, firstName, lastName, username, txnId, orderRef, screenshotBase64, couponCode, discountPct, finalAmount } = req.body;
+    const { batchId, userId, firstName, lastName, username, txnId, screenshotBase64, couponCode, discountPct, finalAmount } = req.body;
     if (!batchId || !txnId) return res.status(400).json({ error: "Missing fields" });
     const batchData = db.batch.getOne(batchId);
     const batchName = batchData ? batchData.name : batchId;
     const origPrice = batchData?.price ? `₹${batchData.price}` : "N/A";
+    const expectedAmount = finalAmount != null ? Number(finalAmount) : (batchData?.price != null ? Number(batchData.price) : null);
     let priceLine = `💰 Amount: <b>${esc(origPrice)}</b>`;
     if (couponCode && discountPct && finalAmount!=null) priceLine = `💰 Original: <b>${esc(origPrice)}</b>\n🎟 Coupon: <code>${esc(couponCode)}</code> (${esc(String(discountPct))}% off)\n✅ Final: <b>₹${esc(String(finalAmount))}</b>`;
     if (!PAYMENT_GROUP_ID) return res.status(500).json({ error: "PAYMENT_GROUP_ID not configured" });
 
-    // Verify against Paytm via DevPort using orderRef — the `tr` value the
-    // frontend generated and embedded in the UPI QR (see _genTxnRef in
-    // index.html), NOT the manually-typed UTR. This is what makes lookup
-    // actually work: `tr` is a merchant-controlled order reference that
-    // Paytm records against the transaction, so it's a genuine order ID —
-    // the user-entered UTR never was. Safe no-op (falls through to manual
-    // review) if DEVPORT_API_KEY isn't set or orderRef is missing/unmatched.
-    const verification = await verifyPaytmPayment(orderRef);
+    // ── Try auto-verifying the UTR against BharatPe via DevPort before bothering an admin ──
+    const alreadyUsed = usedUTRs.has(txnId);
+    const verify = alreadyUsed ? { ok: false, reason: "utr_reused" } : await verifyBharatPePayment(txnId);
+    const amountMatches = verify.ok && expectedAmount != null && verify.amount != null && Math.abs(verify.amount - expectedAmount) <= PAYMENT_AMOUNT_TOLERANCE;
+    const autoApprove = verify.ok && verify.verified && verify.found && verify.status === "SUCCESS" && amountMatches;
 
-    const baseInfo = `👤 <b>${esc(firstName)}${lastName?" "+esc(lastName):""}</b>\n🆔 UID: <code>${esc(userId)}</code>\n📱 @${username||"N/A"}\n\n📚 Batch: <b>${esc(batchName)}</b>\n${priceLine}\n🔖 UTR: <code>${esc(txnId)}</code>${orderRef?`\n🧾 Order Ref: <code>${esc(orderRef)}</code>`:""}`;
+    let verifyLine;
+    if (alreadyUsed) verifyLine = `🔍 Verify: ⚠️ UTR already used earlier`;
+    else if (!verify.ok) verifyLine = `🔍 Verify: ⚠️ ${verify.reason === "not_configured" ? "DevPort not configured" : "could not verify (" + (verify.reason || "error") + ")"}`;
+    else if (!verify.found) verifyLine = `🔍 Verify: ❌ Not found on BharatPe`;
+    else if (!verify.verified || verify.status !== "SUCCESS") verifyLine = `🔍 Verify: ⚠️ Found but status is ${esc(verify.status||"unknown")}`;
+    else if (!amountMatches) verifyLine = `🔍 Verify: ⚠️ Amount mismatch (paid ₹${esc(String(verify.amount))}, expected ₹${esc(String(expectedAmount))})`;
+    else verifyLine = `🔍 Verify: ✅ Matched — ₹${esc(String(verify.amount))} from ${esc(verify.senderName||"N/A")}`;
 
-    if (verification.ok) {
-      // ── Auto-approved: Paytm confirmed the transaction ─────────────────────
-      const t = verification.transaction;
-      await grantBatchAccess(batchId, userId);
-      bot.sendMessage(parseInt(userId), `✅ <b>Payment Verified & Approved!</b>\n\nAccess to <b>${esc(batchName)}</b> unlocked! 🚀`, { parse_mode:"HTML", reply_markup:{ inline_keyboard:[[{ text:"📚 Open App", web_app:{ url:WEB_URL } }]] } }).catch(()=>{});
+    const caption = `💸 <b>New Payment Request!</b>\n\n👤 <b>${esc(firstName)}${lastName?" "+esc(lastName):""}</b>\n🆔 UID: <code>${esc(userId)}</code>\n📱 @${username||"N/A"}\n\n📚 Batch: <b>${esc(batchName)}</b>\n${priceLine}\n🔖 UTR: <code>${esc(txnId)}</code>\n${verifyLine}`;
 
-      const caption = `💸 <b>Payment Request — ✅ AUTO-VERIFIED (Paytm)</b>\n\n${baseInfo}\n\n💳 Paytm Amount: <b>₹${esc(t.txnAmount)}</b> · Mode: ${esc(t.paymentMode)}\n🏦 Gateway: ${esc(t.gatewayName)} · Paytm Txn: <code>${esc(t.txnId)}</code>`;
-      const kb = { inline_keyboard: [[{ text: "↩️ Revoke Access", callback_data: `pay_revoke_${batchId}_${userId}` }]] };
-      if (screenshotBase64) { const buf = Buffer.from(screenshotBase64.replace(/^data:image\/\w+;base64,/,""),"base64"); await bot.sendPhoto(PAYMENT_GROUP_ID, buf, { caption, parse_mode:"HTML", filename:`payment_${userId}.jpg`, reply_markup: kb }); }
-      else await bot.sendMessage(PAYMENT_GROUP_ID, caption, { parse_mode:"HTML", reply_markup: kb });
-
-      return res.json({ success: true, autoVerified: true });
+    if (autoApprove) {
+      usedUTRs.add(txnId);
+      try {
+        const batch = await grantBatchAccess(batchId, userId);
+        await bot.sendMessage(parseInt(userId), `✅ <b>Payment Verified & Approved!</b>\n\nAccess to <b>${esc(batch?.name||batchName)}</b> unlocked! 🚀`, { parse_mode:"HTML", reply_markup:{ inline_keyboard:[[{text:"📚 Open App",web_app:{url:WEB_URL}}]] } }).catch(()=>{});
+        const autoCaption = `${caption}\n\n✅ <b>AUTO-APPROVED</b> (BharatPe verified)`;
+        if (screenshotBase64) { const buf = Buffer.from(screenshotBase64.replace(/^data:image\/\w+;base64,/,""),"base64"); await bot.sendPhoto(PAYMENT_GROUP_ID, buf, { caption: autoCaption, parse_mode:"HTML", filename:`payment_${userId}.jpg` }); }
+        else await bot.sendMessage(PAYMENT_GROUP_ID, autoCaption, { parse_mode:"HTML" });
+        return res.json({ success: true, autoApproved: true });
+      } catch (err) {
+        console.error("Auto-approve grant error:", err.message);
+        // fall through to manual review below if granting access failed
+      }
     }
 
-    // ── Not auto-verified: fall back to the existing manual Approve/Reject flow ──
-    // reason is included so the admin can see at a glance why it wasn't auto-approved
-    // (not_found = order ref unrecognized by Paytm, not_verified = found but not a
-    // success, missing_order_id = orderRef wasn't sent, not_configured = DEVPORT_API_KEY
-    // not set, api_error/request_failed = DevPort issue).
-    const verifyNote = DEVPORT_API_KEY ? `\n⚠️ Auto-verify: <i>${esc(verification.reason)}</i>${verification.message ? " — " + esc(verification.message) : ""}` : "";
-    const caption = `💸 <b>New Payment Request!</b>\n\n${baseInfo}${verifyNote}`;
+    // ── Manual review fallback — same as before, plus the verification line above ──
     const kb = { inline_keyboard: [[{ text: "✅ Approve", callback_data: `pay_approve_${batchId}_${userId}` },{ text: "❌ Reject", callback_data: `pay_reject_${batchId}_${userId}` }]] };
     if (screenshotBase64) { const buf = Buffer.from(screenshotBase64.replace(/^data:image\/\w+;base64,/,""),"base64"); await bot.sendPhoto(PAYMENT_GROUP_ID, buf, { caption, parse_mode:"HTML", filename:`payment_${userId}.jpg`, reply_markup: kb }); }
     else await bot.sendMessage(PAYMENT_GROUP_ID, caption, { parse_mode:"HTML", reply_markup: kb });
-    res.json({ success: true, autoVerified: false });
+    res.json({ success: true, autoApproved: false });
   } catch (err) { console.error("Payment request error:", err.message); res.status(500).json({ error: err.message }); }
+});
+
+// ── DevPort-style response envelope ─────────────────────────────────────────────
+// Mirrors the success/data/meta and error.code conventions documented at
+// https://devport.ilambit.in/docs#response-format — used for our own Paytm
+// endpoints so error handling on the frontend can switch on `error.code` the
+// same way it would for a DevPort-backed service.
+function apiOk(res, data, extraMeta) {
+  res.json({ success: true, data, meta: { requestId: crypto.randomUUID(), timestamp: new Date().toISOString(), ...extraMeta } });
+}
+function apiErr(res, httpStatus, code, message) {
+  res.status(httpStatus).json({ success: false, error: { code, message }, meta: { requestId: crypto.randomUUID(), timestamp: new Date().toISOString() } });
+}
+
+// ── Paytm: start checkout ─────────────────────────────────────────────────────
+// Creates a tracked order, asks Paytm for a txnToken, and hands the frontend what
+// it needs to redirect into Paytm's own hosted payment page.
+app.post("/api/paytm/initiate", async (req, res) => {
+  try {
+    if (PAYMENT_PROVIDER !== "paytm") return apiErr(res, 400, "SERVICE_DISABLED", "Paytm is not the active payment provider");
+    if (!PaytmChecksum || !PAYTM_MID || !PAYTM_MERCHANT_KEY) return apiErr(res, 500, "NOT_CONFIGURED", "Paytm not configured (missing PAYTM_MID/PAYTM_MERCHANT_KEY or paytmchecksum package)");
+    const { batchId, userId, firstName, lastName, username, couponCode, discountPct, finalAmount } = req.body;
+    if (!batchId || !userId) return apiErr(res, 400, "MISSING_FIELDS", "batchId and userId are required");
+    const batchData = db.batch.getOne(batchId);
+    const amount = finalAmount != null ? Number(finalAmount) : (batchData?.price != null ? Number(batchData.price) : null);
+    if (!amount || amount <= 0) return apiErr(res, 400, "INVALID_AMOUNT", "Could not determine a valid amount for this batch");
+
+    const orderId = `ORD${Date.now()}${Math.floor(Math.random()*1000)}`;
+    await PaytmOrder.create({ orderId, batchId, userId: String(userId), firstName, lastName, username, amount, couponCode, discountPct, status: "pending" });
+
+    const result = await paytmInitiateTransaction({ orderId, amount, custId: userId });
+    if (!result.ok) return apiErr(res, 502, "UPSTREAM_ERROR", result.reason === "not_configured" ? "Paytm not configured" : (result.message || `Paytm rejected the request: ${result.reason}`));
+
+    return apiOk(res, { orderId, mid: PAYTM_MID, txnToken: result.txnToken, amount, checkoutUrl: `https://${PAYTM_HOST}/theia/api/v1/showPaymentPage` }, { service: "paytm" });
+  } catch (err) { console.error("Paytm initiate error:", err.message); apiErr(res, 500, "INTERNAL_ERROR", err.message); }
+});
+
+// ── Paytm: checkout callback ──────────────────────────────────────────────────
+// Paytm POSTs (form-urlencoded) here once the user finishes on their hosted page.
+// We verify the checksum for authenticity, then call the Order Status API as the
+// authoritative source (never trust callback params alone for granting access).
+app.post("/api/paytm/callback", async (req, res) => {
+  const params = req.body || {};
+  const orderId = params.ORDERID;
+  const resultPage = (ok, msg) => res.send(`<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><style>body{font-family:system-ui,sans-serif;background:#0f1115;color:#fff;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;text-align:center;padding:24px}a{color:#f59e0b}</style></head><body><div><h2>${ok?"✅ Payment "+esc(msg||"Successful"):"❌ "+esc(msg||"Payment Failed")}</h2><p><a href="${esc(WEB_URL||"/")}">Tap here to return to the app</a></p></div></body></html>`);
+  try {
+    if (!orderId) return resultPage(false, "Invalid callback");
+    const order = await PaytmOrder.findOne({ orderId });
+    if (!order) return resultPage(false, "Order not found");
+    if (order.status === "success") return resultPage(true, "Already Verified"); // idempotent — Paytm may hit this more than once
+
+    if (PaytmChecksum) {
+      const receivedChecksum = params.CHECKSUMHASH;
+      const toVerify = { ...params }; delete toVerify.CHECKSUMHASH;
+      const valid = receivedChecksum ? await PaytmChecksum.verifySignature(toVerify, PAYTM_MERCHANT_KEY, receivedChecksum) : false;
+      if (!valid) { console.error(`Paytm callback checksum mismatch for order ${orderId}`); return resultPage(false, "Verification Failed"); }
+    }
+
+    // Authoritative check — via DevPort, don't trust the callback body alone
+    const status = await verifyPaytmPayment(orderId);
+    const amountMatches = status.ok && status.amount != null && Math.abs(status.amount - order.amount) <= PAYMENT_AMOUNT_TOLERANCE;
+    const confirmed = status.ok && status.verified && status.found && status.status === "TXN_SUCCESS" && amountMatches;
+    if (confirmed) {
+      order.status = "success"; order.txnId = status.txnId || params.TXNID || ""; await order.save();
+      const batch = await grantBatchAccess(order.batchId, order.userId);
+      await bot.sendMessage(parseInt(order.userId), `✅ <b>Payment Verified & Approved!</b>\n\nAccess to <b>${esc(batch?.name||order.batchId)}</b> unlocked! 🚀`, { parse_mode:"HTML", reply_markup:{ inline_keyboard:[[{text:"📚 Open App",web_app:{url:WEB_URL}}]] } }).catch(()=>{});
+      if (PAYMENT_GROUP_ID) bot.sendMessage(PAYMENT_GROUP_ID, `💸 <b>Paytm Payment Received</b>\n\n👤 UID: <code>${esc(order.userId)}</code>\n📚 Batch: <b>${esc(batch?.name||order.batchId)}</b>\n💰 Amount: <b>₹${esc(String(status.amount))}</b>\n🔖 Paytm Txn: <code>${esc(order.txnId)}</code>\n💳 Mode: ${esc(status.paymentMode||"N/A")} via ${esc(status.gatewayName||"N/A")}\n\n✅ <b>AUTO-APPROVED</b> (verified via DevPort)`, { parse_mode:"HTML" }).catch(()=>{});
+      return resultPage(true, "Successful");
+    } else {
+      order.status = "failed"; await order.save();
+      if (PAYMENT_GROUP_ID) bot.sendMessage(PAYMENT_GROUP_ID, `⚠️ <b>Paytm Payment Failed/Unmatched</b>\n\n👤 UID: <code>${esc(order.userId)}</code>\nOrder: <code>${esc(orderId)}</code>\nStatus: ${esc(status.status||"unknown")}`, { parse_mode:"HTML" }).catch(()=>{});
+      return resultPage(false, status.status || "Payment Failed");
+    }
+  } catch (err) {
+    console.error("Paytm callback error:", err.message);
+    return resultPage(false, "Server Error");
+  }
 });
 
 app.use(express.static(path.join(__dirname, "public")));
@@ -474,7 +703,7 @@ async function startBot() {
   console.log("Clearing old polling...");
 
   for (let attempt=1; attempt<=5; attempt++) {
-    try { bot = new TelegramBot(TOKEN, { polling: { interval:2000, autoStart:false, params:{ timeout:30 } } }); await bot.getMe(); break; }
+    try { bot = new TelegramBot(TOKEN, { polling: { interval:2000, autoStart:false, params:{ timeout:30, allowed_updates: JSON.stringify(["message","edited_message","callback_query","chat_member"]) } } }); await bot.getMe(); break; }
     catch (err) { console.error(`Bot init attempt ${attempt} failed`); if(attempt===5) throw err; await wait(5000*attempt); }
   }
 
@@ -482,6 +711,7 @@ async function startBot() {
   const me = await bot.getMe();
   BOT_USERNAME = me.username;
   console.log(`Bot started: @${BOT_USERNAME}`);
+  courseRoutes.setBot(bot);
 
   try {
     await fetch(`https://api.telegram.org/bot${TOKEN}/setChatMenuButton`, { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ menu_button:{ type:"web_app", text:"Open EduBot", web_app:{ url:WEB_URL } } }) });
@@ -515,6 +745,32 @@ async function startBot() {
             if (d.isNew) {
               const s = await (await fetch(`http://localhost:${PORT}/api/refer/stats/${referrerId}`)).json();
               bot.sendMessage(parseInt(referrerId), `🎉 <b>New Referral!</b>\n\n${msg.from.first_name} joined using your link!\n⭐ <b>+5 Points!</b> Total: <b>${s.points}</b>`, { parse_mode:"HTML" }).catch(() => {});
+            }
+          } catch (_) {}
+        }
+        return;
+      }
+
+      if (param.startsWith("give_")) {
+        const inviterId = param.replace("give_","");
+        bot.sendMessage(chatId, `👋 Hello ${msg.from.first_name}!\n\nTap below to browse all lectures! 📚`, { reply_markup:{ inline_keyboard:[[{ text:"📚 Browse Lectures", web_app:{ url:WEB_URL } }]] } });
+        if (inviterId && inviterId !== String(userId)) {
+          try {
+            const giveaway = await getActiveGiveaway();
+            if (giveaway && isNewUser) {
+              const inviterNum = parseInt(inviterId, 10);
+              const isParticipant = await GiveawayParticipant.findOne({ giveawayId: giveaway._id, userId: inviterNum });
+              // Only counts if the inviter is an actual participant, and only ONE invite
+              // record can ever exist per invitee (unique index) — no double counting.
+              // It stays "pending" here; it only turns into a real point once this user
+              // watches their first lecture (see routes/course.js) — this is what filters
+              // out fake/inactive "joins" from actually counting toward the giveaway.
+              if (isParticipant) {
+                try {
+                  await GiveawayInvite.create({ giveawayId: giveaway._id, inviterId: inviterNum, inviteeId: userId, status: "pending" });
+                  bot.sendMessage(inviterNum, `📥 <b>New Referral Received</b>\n\n${msg.from.first_name} has joined using your giveaway invite link.\nThis referral will be confirmed and added to your count once they watch their first lecture.`, { parse_mode:"HTML" }).catch(() => {});
+                } catch (dupErr) { /* already invited via this or another link — ignored, unique index blocks it */ }
+              }
             }
           } catch (_) {}
         }
@@ -585,13 +841,38 @@ async function startBot() {
     }
 
     const referLink = userId ? `https://t.me/${BOT_USERNAME}?start=ref_${userId}` : "";
-    const referLinkCode = referLink ? `<code>${referLink}</code>` : "";
-    const welcomeText = isOwner(userId)
-      ? `👋 Hello Admin!\n\nTap below to browse lectures! 📚\n\n📁 File Store:\n/bulk — bulk upload\n/myfiles — view files\n/delete &lt;code&gt; — delete file\n/rmword 'word' — remove word from names\n/cancel — cancel bulk\n\n📡 Broadcast:\n/broadcast &lt;text&gt; or reply to media\n\n🔗 <b>Your Invite Link:</b> (tap to copy)\n${referLinkCode}`
-      : `👋 Hello ${msg.from.first_name}!\n\nTap below to browse all lectures! 📚\n\n🔗 <b>Your Invite Link:</b> (tap to copy)\n${referLinkCode}\n\nShare karo aur har referral pe <b>5 points</b> kamao! 🎁`;
-    const shareUrl = referLink ? `https://t.me/share/url?url=${encodeURIComponent(referLink)}&text=${encodeURIComponent("Join and get free lectures! 📚")}` : "";
+
+    // ── Giveaway banner: shown to everyone while a giveaway is live.
+    // While a user is an active-giveaway participant, their normal referral
+    // link is hidden and replaced by the giveaway link, so they don't manage
+    // two links at once. This reverts automatically once the giveaway ends
+    // (isParticipating becomes false the moment there's no active giveaway),
+    // no separate "restore" step needed.
+    let giveawayBanner = "", giveawayShareUrl = "", isParticipating = false;
+    try {
+      const activeGiveaway = await getActiveGiveaway();
+      if (activeGiveaway) {
+        const participant = userId ? await GiveawayParticipant.findOne({ giveawayId: activeGiveaway._id, userId }) : null;
+        if (participant) {
+          isParticipating = true;
+          const { rank } = await giveawayRankOf(activeGiveaway._id, userId);
+          const giveLink = `https://t.me/${BOT_USERNAME}?start=give_${userId}`;
+          giveawayShareUrl = `https://t.me/share/url?url=${encodeURIComponent(giveLink)}&text=${encodeURIComponent("Join the giveaway and win prizes! 🎁")}`;
+          giveawayBanner = `\n\n🎁 <b>Giveaway in Progress</b>\nConfirmed Invites: <b>${participant.invites}</b>   |   Current Rank: <b>#${rank}</b>\n\n<b>Your Invite Link:</b>\n<code>${giveLink}</code>\n\nTrack your progress: /scoreboard · /myscore`;
+        } else {
+          giveawayBanner = `\n\n🎁 <b>A Giveaway Is Currently Running</b>\nJoin now with /participate to receive your personal invite link and compete for rewards.`;
+        }
+      }
+    } catch (_) {}
+
+    const referLinkLine = isParticipating ? "" : `\n\n🔗 <b>Your Invite Link:</b> (tap to copy)\n<code>${referLink}</code>`;
+    const welcomeText = (isOwner(userId)
+      ? `👋 Hello Admin!\n\nTap below to browse lectures! 📚\n\n📁 File Store:\n/bulk — bulk upload\n/myfiles — view files\n/delete &lt;code&gt; — delete file\n/rmword 'word' — remove word from names\n/cancel — cancel bulk\n\n📡 Broadcast:\n/broadcast &lt;text&gt; or reply to media${referLinkLine}`
+      : `👋 Hello ${msg.from.first_name}!\n\nTap below to browse all lectures! 📚${referLinkLine}${isParticipating ? "" : "\n\nShare karo aur har referral pe <b>5 points</b> kamao! 🎁"}`) + giveawayBanner;
+    const shareUrl = (!isParticipating && referLink) ? `https://t.me/share/url?url=${encodeURIComponent(referLink)}&text=${encodeURIComponent("Join and get free lectures! 📚")}` : "";
     const startButtons = [[{ text:"📚 Browse Lectures", web_app:{ url:WEB_URL } }]];
     if (shareUrl) startButtons.push([{ text:"📤 Share & Earn Points", url: shareUrl }]);
+    if (giveawayShareUrl) startButtons.push([{ text:"🎁 Share Giveaway Link", url: giveawayShareUrl }]);
     bot.sendMessage(chatId, welcomeText, { parse_mode:"HTML", reply_markup:{ inline_keyboard: startButtons } });
   });
 
@@ -670,27 +951,17 @@ async function startBot() {
   // ── Callback queries ──────────────────────────────────────────────────────
   bot.on("callback_query", async (query) => {
     const userId=query.from?.id; const data=query.data||""; const chatId=query.message?.chat?.id; const msgId=query.message?.message_id;
-    if (data.startsWith("pay_approve_")||data.startsWith("pay_reject_")||data.startsWith("pay_revoke_")) {
+    if (data.startsWith("pay_approve_")||data.startsWith("pay_reject_")) {
       if (!isOwner(userId)) return bot.answerCallbackQuery(query.id,{text:"❌ Not authorized"});
       const isApprove=data.startsWith("pay_approve_");
-      const isRevoke=data.startsWith("pay_revoke_");
-      const parts=data.replace("pay_approve_","").replace("pay_reject_","").replace("pay_revoke_","").split("_");
+      const parts=data.replace("pay_approve_","").replace("pay_reject_","").split("_");
       const batchId=parts[0]; const targetUserId=parts[1];
       if (isApprove) {
         try {
-          const batch=await grantBatchAccess(batchId, targetUserId);
+          const batch = await grantBatchAccess(batchId, targetUserId);
           bot.sendMessage(parseInt(targetUserId),`✅ <b>Payment Approved!</b>\n\nAccess to <b>${esc(batch?.name||"the batch")}</b> unlocked! 🚀`,{parse_mode:"HTML",reply_markup:{inline_keyboard:[[{text:"📚 Open App",web_app:{url:WEB_URL}}]]}}).catch(()=>{});
           await bot.editMessageCaption(`${query.message.caption||""}\n\n✅ <b>APPROVED</b> by ${esc(query.from.first_name||"Admin")}`,{chat_id:chatId,message_id:msgId,parse_mode:"HTML",reply_markup:{inline_keyboard:[]}}).catch(()=>bot.editMessageText(`${query.message.text||""}\n\n✅ <b>APPROVED</b>`,{chat_id:chatId,message_id:msgId,parse_mode:"HTML",reply_markup:{inline_keyboard:[]}}).catch(()=>{}));
           await bot.answerCallbackQuery(query.id,{text:"✅ Approved!"});
-        } catch(err){await bot.answerCallbackQuery(query.id,{text:"❌ Error: "+err.message});}
-      } else if (isRevoke) {
-        // Undoes an auto-approved (Paytm-verified) grant — for false positives
-        // or chargebacks caught after the fact.
-        try {
-          await revokeBatchAccess(batchId, targetUserId);
-          bot.sendMessage(parseInt(targetUserId),`⚠️ <b>Access Revoked</b>\n\nYour access was revoked pending review. Please contact support.`,{parse_mode:"HTML"}).catch(()=>{});
-          await bot.editMessageCaption(`${query.message.caption||""}\n\n↩️ <b>REVOKED</b> by ${esc(query.from.first_name||"Admin")}`,{chat_id:chatId,message_id:msgId,parse_mode:"HTML",reply_markup:{inline_keyboard:[]}}).catch(()=>bot.editMessageText(`${query.message.text||""}\n\n↩️ <b>REVOKED</b>`,{chat_id:chatId,message_id:msgId,parse_mode:"HTML",reply_markup:{inline_keyboard:[]}}).catch(()=>{}));
-          await bot.answerCallbackQuery(query.id,{text:"↩️ Revoked"});
         } catch(err){await bot.answerCallbackQuery(query.id,{text:"❌ Error: "+err.message});}
       } else {
         bot.sendMessage(parseInt(targetUserId),`❌ <b>Payment Rejected</b>\n\nPlease contact support.`,{parse_mode:"HTML"}).catch(()=>{});
@@ -987,6 +1258,44 @@ async function startBot() {
     });
   });
 
+  // ── Giveaway: force-join leave detection ────────────────────────────────────
+  // Requires the bot to be an admin of the FORCE_JOIN_CHANNELS so Telegram
+  // delivers chat_member updates for them (enabled via allowed_updates above).
+  bot.on("chat_member", async (update) => {
+    try {
+      const chatId = String(update.chat.id);
+      const forceJoinIds = (process.env.FORCE_JOIN_CHANNELS||"").split(",").map(s=>s.trim()).filter(Boolean);
+      console.log(`[chat_member] chat=${chatId} user=${update.new_chat_member?.user?.id} ${update.old_chat_member?.status}→${update.new_chat_member?.status} | watching:[${forceJoinIds.join(",")}]`);
+      if (!forceJoinIds.includes(chatId)) return;
+      const oldStatus = update.old_chat_member?.status;
+      const newStatus = update.new_chat_member?.status;
+      const wasIn = ["member","administrator","creator"].includes(oldStatus);
+      const nowOut = ["left","kicked"].includes(newStatus);
+      if (!(wasIn && nowOut)) return;
+      const inviteeNum = update.new_chat_member.user.id;
+
+      const giveaway = await getActiveGiveaway();
+      if (!giveaway) return;
+      const invite = await GiveawayInvite.findOne({ giveawayId: giveaway._id, inviteeId: inviteeNum, status: "confirmed" });
+      if (!invite) return; // this user's invite was never confirmed (or already reversed) — nothing to undo
+      invite.status = "reversed"; invite.reversedAt = new Date(); await invite.save();
+      const participant = await GiveawayParticipant.findOneAndUpdate(
+        { giveawayId: giveaway._id, userId: invite.inviterId, invites: { $gt: 0 } },
+        { $inc: { invites: -1 } },
+        { new: true }
+      );
+      const newCount = participant ? participant.invites : 0;
+      const inviteeUser = await User.findOne({ userId: String(inviteeNum) }).catch(() => null);
+      const inviteeName = inviteeUser ? (inviteeUser.username ? `@${inviteeUser.username}` : (inviteeUser.firstName||`User ${inviteeNum}`)) : `User ${inviteeNum}`;
+      bot.sendMessage(invite.inviterId, `⚠️ <b>Referral Update</b>\n\n${inviteeName} has left the required channel/group, so this referral has been removed from your count.\nUpdated Confirmed Invites: <b>${newCount}</b>`, { parse_mode:"HTML" }).catch(() => {});
+      if (OWNER_ID) {
+        const inviterUser = await User.findOne({ userId: String(invite.inviterId) }).catch(() => null);
+        const inviterName = inviterUser ? (inviterUser.username ? `@${inviterUser.username}` : (inviterUser.firstName||`User ${invite.inviterId}`)) : `User ${invite.inviterId}`;
+        bot.sendMessage(OWNER_ID, `📉 <b>Giveaway — Referral Reversed</b>\n\nInvitee: ${inviteeName} (<code>${inviteeNum}</code>) left a required channel/group.\nInviter: ${inviterName} (<code>${invite.inviterId}</code>)\nInviter's updated invite count: <b>${newCount}</b>`, { parse_mode:"HTML" }).catch(() => {});
+      }
+    } catch (err) { console.error("chat_member giveaway-reversal error:", err.message); }
+  });
+
   // ── File upload handler ───────────────────────────────────────────────────
   bot.on("message", (msg) => {
     if(isGroupChat(msg)||msg.text||!isOwner(msg.from?.id)) return;
@@ -1144,6 +1453,92 @@ async function startBot() {
 
       await bot.editMessageText(text,{chat_id:chatId,message_id:processing.message_id});
     } catch(err){ console.error("Stats error:", err.message); bot.editMessageText("❌ Could not fetch stats.",{chat_id:chatId,message_id:processing.message_id}); }
+  });
+
+  // ── /startgiveaway ────────────────────────────────────────────────────────
+  bot.onText(/\/startgiveaway/, async (msg) => {
+    if (isGroupChat(msg)||!isOwner(msg.from?.id)) return;
+    const chatId = msg.chat.id;
+    try {
+      const existing = await getActiveGiveaway();
+      if (existing) return bot.sendMessage(chatId, `⚠️ A giveaway is already in progress (started ${formatIST(existing.startedAt)}).\n\nUse /endgiveaway to conclude it before launching a new one.`, { parse_mode:"HTML" });
+      await Giveaway.create({ status:"active", startedBy: msg.from.id });
+      bot.sendMessage(chatId, `✅ <b>Giveaway Launched</b>\n\nParticipants can now join using /participate — the full terms and prize structure are shown to them automatically.\nEnd the giveaway anytime with /endgiveaway.\n\n` + giveawayRulesText(), { parse_mode:"HTML" });
+    } catch (err) { console.error("startgiveaway error:", err.message); bot.sendMessage(chatId, `❌ Could not start giveaway.`); }
+  });
+
+  // ── /participate ──────────────────────────────────────────────────────────
+  bot.onText(/\/participate/, async (msg) => {
+    if (isGroupChat(msg)) return;
+    const chatId = msg.chat.id; const userId = msg.from.id;
+    try {
+      const giveaway = await getActiveGiveaway();
+      if (!giveaway) return bot.sendMessage(chatId, `⚠️ No giveaway is active right now.`);
+      const inviteLink = `https://t.me/${BOT_USERNAME}?start=give_${userId}`;
+      let participant = await GiveawayParticipant.findOne({ giveawayId: giveaway._id, userId });
+      if (!participant) {
+        participant = await GiveawayParticipant.create({ giveawayId: giveaway._id, userId, firstName: msg.from.first_name||"", username: msg.from.username||"" });
+      }
+      const { rank } = await giveawayRankOf(giveaway._id, userId);
+      const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(inviteLink)}&text=${encodeURIComponent("Join the giveaway and win prizes! 🎁")}`;
+      const text = `✅ <b>You Have Successfully Joined the Giveaway</b>\n\n<b>Your Invite Link:</b>\n<code>${inviteLink}</code>\n\nConfirmed Invites: <b>${participant.invites}</b>   |   Current Rank: <b>#${rank}</b>\n\n` + giveawayRulesText();
+      bot.sendMessage(chatId, text, { parse_mode:"HTML", reply_markup:{ inline_keyboard:[[{ text:"📤 Share Invite Link", url: shareUrl }]] } });
+    } catch (err) { console.error("participate error:", err.message); bot.sendMessage(chatId, `❌ Could not join giveaway.`); }
+  });
+
+  // ── /scoreboard ───────────────────────────────────────────────────────────
+  bot.onText(/\/scoreboard/, async (msg) => {
+    if (isGroupChat(msg)) return;
+    const chatId = msg.chat.id;
+    try {
+      const giveaway = await getLatestGiveaway();
+      if (!giveaway) return bot.sendMessage(chatId, `⚠️ No giveaway has been run yet.`);
+      const top = await GiveawayParticipant.find({ giveawayId: giveaway._id }).sort({ invites:-1, joinedAt:1 }).limit(20);
+      const statusLine = giveaway.status==="active" ? `Status: 🟢 Active — started ${formatIST(giveaway.startedAt)}` : `Status: 🔴 Concluded — ended ${formatIST(giveaway.endedAt)}`;
+      let text = `🏆 <b>GIVEAWAY LEADERBOARD</b>\n${statusLine}\n\n`;
+      if (!top.length) { text += `No participants yet. Use /participate to join.`; }
+      else {
+        top.forEach((p,i) => {
+          const medal = ["🥇","🥈","🥉"][i] || `${i+1}.`;
+          text += `${medal} ${giveawayDisplayName(p)} — <b>${p.invites}</b> confirmed invites\n`;
+        });
+      }
+      bot.sendMessage(chatId, text, { parse_mode:"HTML" });
+    } catch (err) { console.error("scoreboard error:", err.message); bot.sendMessage(chatId, `❌ Could not load the leaderboard.`); }
+  });
+
+  // ── /myscore ──────────────────────────────────────────────────────────────
+  bot.onText(/\/myscore/, async (msg) => {
+    if (isGroupChat(msg)) return;
+    const chatId = msg.chat.id; const userId = msg.from.id;
+    try {
+      const giveaway = await getLatestGiveaway();
+      if (!giveaway) return bot.sendMessage(chatId, `⚠️ No giveaway has been run yet.`);
+      const { participant, rank } = await giveawayRankOf(giveaway._id, userId);
+      if (!participant) return bot.sendMessage(chatId, `⚠️ You have not joined the giveaway yet. Use /participate to join.`);
+      const total = await GiveawayParticipant.countDocuments({ giveawayId: giveaway._id });
+      bot.sendMessage(chatId, `📊 <b>Your Giveaway Standing</b>\n\nConfirmed Invites: <b>${participant.invites}</b>\nCurrent Rank: <b>#${rank}</b> of ${total} participants`, { parse_mode:"HTML" });
+    } catch (err) { console.error("myscore error:", err.message); bot.sendMessage(chatId, `❌ Could not load your standing.`); }
+  });
+
+  // ── /endgiveaway ──────────────────────────────────────────────────────────
+  bot.onText(/\/endgiveaway/, async (msg) => {
+    if (isGroupChat(msg)||!isOwner(msg.from?.id)) return;
+    const chatId = msg.chat.id;
+    try {
+      const giveaway = await getActiveGiveaway();
+      if (!giveaway) return bot.sendMessage(chatId, `⚠️ There is no active giveaway to end.`);
+      giveaway.status = "ended"; giveaway.endedAt = new Date(); await giveaway.save();
+      const top10 = await GiveawayParticipant.find({ giveawayId: giveaway._id }).sort({ invites:-1, joinedAt:1 }).limit(10);
+      if (!top10.length) return bot.sendMessage(chatId, `🏁 <b>Giveaway Concluded</b>\n\nNo participants were recorded — no winners to announce.`, { parse_mode:"HTML" });
+      let text = `🏁 <b>GIVEAWAY — FINAL RESULTS</b>\n\n`;
+      top10.forEach((p,i) => {
+        const rank = i+1; const reward = giveawayRewardFor(rank);
+        text += `<b>Rank #${rank}</b> — ${giveawayDisplayName(p)} (${p.invites} confirmed invites)\nReward: ${reward}\n\n`;
+        bot.sendMessage(p.userId, `🎉 <b>Congratulations!</b>\n\nYou have finished <b>Rank #${rank}</b> in the giveaway with <b>${p.invites}</b> confirmed invites.\n\n<b>Your Reward:</b> ${reward}\n\nOur team will reach out to you shortly to arrange delivery of your reward.`, { parse_mode:"HTML" }).catch(() => {});
+      });
+      bot.sendMessage(chatId, text, { parse_mode:"HTML" });
+    } catch (err) { console.error("endgiveaway error:", err.message); bot.sendMessage(chatId, `❌ Could not conclude the giveaway.`); }
   });
 
   bot.on("polling_error",(err)=>console.error("Polling error:",err.message));
