@@ -200,6 +200,8 @@ body.ready{transition:none}
 .batch-buy-btn:active{opacity:0.8}
 .batch-view-btn{display:inline-flex;align-items:center;gap:5px;margin-top:8px;padding:6px 14px;border-radius:20px;border:none;background:var(--surface2);border:1px solid var(--border);color:var(--text);font-size:11px;font-weight:700;cursor:pointer;transition:opacity 0.15s;-webkit-tap-highlight-color:transparent}
 .batch-view-btn:active{opacity:0.8}
+.batch-redeem-btn{display:inline-flex;align-items:center;gap:5px;margin-top:8px;padding:6px 14px;border-radius:20px;border:1px solid rgba(124,92,191,0.4);background:linear-gradient(135deg,rgba(124,92,191,0.18),rgba(79,142,247,0.1));color:var(--accent2);font-size:11px;font-weight:700;cursor:pointer;transition:opacity 0.15s;-webkit-tap-highlight-color:transparent}
+.batch-redeem-btn:active{opacity:0.8}
 /* Demo Modal */
 .demo-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:400;align-items:flex-end;justify-content:center}
 .demo-overlay.show{display:flex}
@@ -1415,14 +1417,17 @@ function _batchCard(b, isPremiumLocked) {
   var buyBtn = isPremiumLocked
     ? '<button class="batch-buy-btn" data-bid="' + b._id + '" onclick="event.stopPropagation();buyBatch(this.dataset.bid)"><i class="ti ti-shopping-cart" style="font-size:12px"></i> Buy' + (b.price ? ' ₹' + b.price : '') + '</button>'
     : '';
+  var redeemBtn = (isPremiumLocked && b.isPremium && b.rewardEligible !== false)
+    ? '<button class="batch-redeem-btn" onclick="event.stopPropagation();switchNavTab(\'refer\')"><i class="ti ti-gift" style="font-size:12px"></i> Free Redeem</button>'
+    : '';
   var demoLectures = _getAllDemoLectures(b);
   var viewBtn = (!isPremiumLocked && b.isPremium)
     ? '' // purchased user — full access, no need for demo
     : (demoLectures.length
         ? '<button class="batch-view-btn" data-bid="' + b._id + '" onclick="event.stopPropagation();openDemoModal(this.dataset.bid)"><i class="ti ti-player-play" style="font-size:12px"></i> View Demo</button>'
         : '');
-  var actionBtns = (buyBtn || viewBtn)
-    ? '<div style="display:flex;gap:6px;flex-wrap:wrap">' + viewBtn + buyBtn + '</div>'
+  var actionBtns = (buyBtn || viewBtn || redeemBtn)
+    ? '<div style="display:flex;gap:6px;flex-wrap:wrap">' + viewBtn + buyBtn + redeemBtn + '</div>'
     : '';
 
   // Reward-granted (temporary) access gets its own badge, distinct from permanent
