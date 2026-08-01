@@ -336,6 +336,25 @@ router.patch("/batches/:bid/subjects/:sid/edit", verifyAdmin, async (req, res) =
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// Re-arrange a subject's position within the batch — { direction: 'up' | 'down' }
+router.patch("/batches/:bid/subjects/:sid/move", verifyAdmin, async (req, res) => {
+  try {
+    const batch = await Batch.findById(req.params.bid);
+    if (!batch) return res.status(404).json({ error: "Batch not found" });
+    const idx = batch.subjects.findIndex(s => s._id.toString() === req.params.sid);
+    if (idx === -1) return res.status(404).json({ error: "Not found" });
+    const swapIdx = req.body.direction === "up" ? idx - 1 : idx + 1;
+    if (swapIdx < 0 || swapIdx >= batch.subjects.length) return res.status(400).json({ error: "Already at the edge" });
+    const reordered = batch.subjects.map(s => s.toObject());
+    [reordered[idx], reordered[swapIdx]] = [reordered[swapIdx], reordered[idx]];
+    reordered.forEach((s, i) => { s.order = i; });
+    batch.subjects = reordered;
+    await batch.save();
+    db.batch.upsert(batch.toObject());
+    res.json(batch);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ── Chapters ──────────────────────────────────────────────────────────────────
 
 router.post("/batches/:bid/subjects/:sid/chapters", verifyAdmin, async (req, res) => {
@@ -370,6 +389,26 @@ router.patch("/batches/:bid/subjects/:sid/chapters/:cid/edit", verifyAdmin, asyn
     if (!chap) return res.status(404).json({ error: "Not found" });
     if (req.body.name) chap.name = req.body.name;
     if (req.body.comingSoon !== undefined) chap.comingSoon = req.body.comingSoon;
+    await batch.save();
+    db.batch.upsert(batch.toObject());
+    res.json(batch);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Re-arrange a chapter's position within the subject — { direction: 'up' | 'down' }
+router.patch("/batches/:bid/subjects/:sid/chapters/:cid/move", verifyAdmin, async (req, res) => {
+  try {
+    const batch = await Batch.findById(req.params.bid);
+    const subj = batch && batch.subjects.id(req.params.sid);
+    if (!subj) return res.status(404).json({ error: "Not found" });
+    const idx = subj.chapters.findIndex(c => c._id.toString() === req.params.cid);
+    if (idx === -1) return res.status(404).json({ error: "Not found" });
+    const swapIdx = req.body.direction === "up" ? idx - 1 : idx + 1;
+    if (swapIdx < 0 || swapIdx >= subj.chapters.length) return res.status(400).json({ error: "Already at the edge" });
+    const reordered = subj.chapters.map(c => c.toObject());
+    [reordered[idx], reordered[swapIdx]] = [reordered[swapIdx], reordered[idx]];
+    reordered.forEach((c, i) => { c.order = i; });
+    subj.chapters = reordered;
     await batch.save();
     db.batch.upsert(batch.toObject());
     res.json(batch);
