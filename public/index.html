@@ -3911,6 +3911,14 @@ openBatch = function(bid) {
     _origOpenBatch(bid);
     return;
   }
+  // Batch is currently free, but if this user previously purchased it back when
+  // it WAS premium, they're still in premiumUsers — that permanent access should
+  // keep working even after the admin flips the batch back to free, so they're
+  // never made to sit through the ad-gate for a batch they already paid for.
+  if (b && !isAdmin && b.premiumUsers && b.premiumUsers.includes(String(getUserId()))) {
+    _origOpenBatch(bid);
+    return;
+  }
   if (!hasAccess()) {
     toast('Watch an ad to unlock access!', 'error');
     switchNavTab('access');
