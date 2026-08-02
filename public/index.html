@@ -193,6 +193,7 @@ body.ready{transition:none}
 .batch-tab{flex:1;display:flex;align-items:center;justify-content:center;gap:6px;padding:9px 12px;border-radius:10px;border:1.5px solid var(--border);background:var(--surface);color:var(--text2);font-size:13px;font-weight:600;cursor:pointer;transition:all 0.18s}
 .batch-tab.active-free{background:rgba(34,197,94,0.1);border-color:var(--green);color:var(--green)}
 .batch-tab.active-premium{background:rgba(245,158,11,0.1);border-color:#f59e0b;color:#f59e0b}
+.batch-tab.active-favorite{background:rgba(239,68,68,0.1);border-color:#ef4444;color:#ef4444}
 .batch-tab i{font-size:15px}
 .batch-card-premium{border-color:rgba(245,158,11,0.35) !important}
 .batch-card-premium .batch-meta{color:#f59e0b}
@@ -213,6 +214,10 @@ body.ready{transition:none}
 .demo-badge{display:inline-flex;align-items:center;gap:3px;font-size:9px;font-weight:700;color:#fff;background:linear-gradient(135deg,var(--accent),var(--accent2));border-radius:20px;padding:2px 7px;letter-spacing:0.3px}
 .premium-lock-overlay{position:absolute;inset:0;background:rgba(10,14,26,0.55);backdrop-filter:blur(2px);display:flex;align-items:center;justify-content:center;z-index:5;border-radius:0}
 .premium-badge{position:absolute;top:6px;right:6px;background:linear-gradient(135deg,#f59e0b,#d97706);color:#fff;font-size:9px;font-weight:800;padding:3px 7px;border-radius:20px;letter-spacing:0.5px;z-index:6;display:flex;align-items:center;gap:3px}
+.batch-fav-btn{position:absolute;top:6px;left:6px;z-index:7;width:26px;height:26px;border-radius:50%;background:rgba(0,0,0,0.45);border:none;display:flex;align-items:center;justify-content:center;cursor:pointer;-webkit-tap-highlight-color:transparent;transition:transform 0.15s}
+.batch-fav-btn:active{transform:scale(0.85)}
+.batch-fav-btn i{font-size:14px;color:#fff;transition:color 0.15s}
+.batch-fav-btn.favorited i{color:#ef4444}
 .premium-locked-msg{position:absolute;bottom:0;left:0;right:0;background:linear-gradient(transparent,rgba(0,0,0,0.85));padding:8px 10px 6px;z-index:6}
 .premium-locked-text{font-size:10px;font-weight:600;color:#f59e0b;text-align:center}
 
@@ -513,6 +518,9 @@ body.ready{transition:none}
         <button class="batch-tab" id="tabPremiumBtn" onclick="switchBatchTab('premium')">
           <i class="ti ti-crown"></i> Premium
         </button>
+        <button class="batch-tab" id="tabFavoriteBtn" onclick="switchBatchTab('favorite')">
+          <i class="ti ti-heart"></i> Favorites
+        </button>
       </div>
       <!-- Free Batches -->
       <div id="freeBatchSection">
@@ -521,6 +529,10 @@ body.ready{transition:none}
       <!-- Premium Batches -->
       <div id="premiumBatchSection" style="display:none">
         <div class="batch-grid" id="premiumBatchGrid"></div>
+      </div>
+      <!-- Favorite Batches -->
+      <div id="favoriteBatchSection" style="display:none">
+        <div class="batch-grid" id="favoriteBatchGrid"></div>
       </div>
     </div>
   </div>
@@ -1384,26 +1396,23 @@ function switchBatchTab(tab) {
   _activeBatchTab = tab;
   var freeBtn = document.getElementById('tabFreeBtn');
   var premBtn = document.getElementById('tabPremiumBtn');
+  var favBtn = document.getElementById('tabFavoriteBtn');
   var freeSec = document.getElementById('freeBatchSection');
   var premSec = document.getElementById('premiumBatchSection');
+  var favSec = document.getElementById('favoriteBatchSection');
 
-  if (tab === 'free') {
-    freeBtn.className = 'batch-tab active-free';
-    premBtn.className = 'batch-tab';
-    freeSec.style.display = '';
-    premSec.style.display = 'none';
-  } else {
-    freeBtn.className = 'batch-tab';
-    premBtn.className = 'batch-tab active-premium';
-    freeSec.style.display = 'none';
-    premSec.style.display = '';
-  }
+  freeBtn.className = tab === 'free' ? 'batch-tab active-free' : 'batch-tab';
+  premBtn.className = tab === 'premium' ? 'batch-tab active-premium' : 'batch-tab';
+  favBtn.className = tab === 'favorite' ? 'batch-tab active-favorite' : 'batch-tab';
+  freeSec.style.display = tab === 'free' ? '' : 'none';
+  premSec.style.display = tab === 'premium' ? '' : 'none';
+  favSec.style.display = tab === 'favorite' ? '' : 'none';
 }
 
 function _batchCard(b, isPremiumLocked) {
   // isPremiumLocked = user does not have access to this premium batch
   var adminDraftBadge = (isAdmin && b.isPublic !== true)
-    ? '<div style="position:absolute;top:6px;left:6px;background:rgba(0,0,0,0.7);border-radius:6px;padding:3px 7px;font-size:10px;font-weight:700;color:#aaa;display:flex;align-items:center;gap:4px"><i class="ti ti-lock" style="font-size:10px"></i>Private</div>'
+    ? '<div style="position:absolute;top:36px;left:6px;background:rgba(0,0,0,0.7);border-radius:6px;padding:3px 7px;font-size:10px;font-weight:700;color:#aaa;display:flex;align-items:center;gap:4px;z-index:6"><i class="ti ti-lock" style="font-size:10px"></i>Private</div>'
     : '';
   var premiumBadge = b.isPremium
     ? '<div class="premium-badge"><i class="ti ti-crown" style="font-size:9px"></i>PREMIUM</div>'
@@ -1441,9 +1450,11 @@ function _batchCard(b, isPremiumLocked) {
     }
   }
 
+  var isFav = isFavoriteBatch(b._id);
   return `<div class="batch-card${b.isPremium ? ' batch-card-premium' : ''}" onclick="openBatch('${b._id}')" style="${cardStyle}">
     <div class="batch-img" style="position:relative;overflow:hidden">
       ${b.pic ? `<img src="${b.pic}">` : '🎓'}
+      <button class="batch-fav-btn${isFav ? ' favorited' : ''}" onclick="event.stopPropagation();toggleFavoriteBatch('${b._id}')"><i class="ti ${isFav ? 'ti-heart-filled' : 'ti-heart'}"></i></button>
       ${adminDraftBadge}${premiumBadge}${lockOverlay}
     </div>
     <div class="batch-body">
@@ -1485,8 +1496,8 @@ function renderBatches(list) {
 
   // Premium section
   var premEl = document.getElementById('premiumBatchGrid');
+  var curUid = getUserId();
   if (premEl && premium.length) {
-    var curUid = getUserId();
     premEl.innerHTML = premium.map(b => {
       var isPermanentOwner = !!(b.premiumUsers && b.premiumUsers.includes(String(curUid)));
       var locked = !isAdmin && !isPermanentOwner && !hasBatchRewardAccess(b._id);
@@ -1494,6 +1505,22 @@ function renderBatches(list) {
     }).join('');
   } else if (premEl) {
     premEl.innerHTML = '<div class="empty" style="grid-column:1/-1"><i class="ti ti-crown"></i>No premium batches yet</div>';
+  }
+
+  // Favorites section — pulled from both free and premium, filtered by the
+  // client-side favorites list, keeping each batch's own lock/access status.
+  var favEl = document.getElementById('favoriteBatchGrid');
+  if (favEl) {
+    var favIds = _loadFavorites();
+    var favBatches = visible.filter(b => favIds.includes(b._id));
+    favEl.innerHTML = favBatches.length
+      ? favBatches.map(b => {
+          if (!b.isPremium) return _batchCard(b, false);
+          var isPermanentOwner = !!(b.premiumUsers && b.premiumUsers.includes(String(curUid)));
+          var locked = !isAdmin && !isPermanentOwner && !hasBatchRewardAccess(b._id);
+          return _batchCard(b, locked);
+        }).join('')
+      : '<div class="empty" style="grid-column:1/-1"><i class="ti ti-heart"></i>No favorites yet — tap the ❤️ on any batch</div>';
   }
 }
 
@@ -3449,6 +3476,23 @@ function openLecLink(codeOrLink, type) {
 function getUserId() {
   var tgUser = tg && tg.initDataUnsafe && tg.initDataUnsafe.user;
   return tgUser ? String(tgUser.id) : 'guest_' + (localStorage.getItem('guest_id') || (function(){ var id=Math.random().toString(36).slice(2); localStorage.setItem('guest_id',id); return id; })());
+}
+
+// ── Favorite Batches ──────────────────────────────────────────────────────
+// Stored client-side (per user id) since it's purely a personal UI preference,
+// not something the admin/backend needs to know about.
+function _favKey() { return 'favBatches_' + getUserId(); }
+function _loadFavorites() {
+  try { return JSON.parse(localStorage.getItem(_favKey()) || '[]'); } catch(e) { return []; }
+}
+function isFavoriteBatch(bid) { return _loadFavorites().includes(bid); }
+function toggleFavoriteBatch(bid) {
+  var favs = _loadFavorites();
+  var idx = favs.indexOf(bid);
+  if (idx === -1) { favs.push(bid); toast('Added to favorites ❤️','success'); }
+  else { favs.splice(idx,1); toast('Removed from favorites','success'); }
+  localStorage.setItem(_favKey(), JSON.stringify(favs));
+  renderBatches(batches);
 }
 
 function hasAccess() {
