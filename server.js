@@ -731,34 +731,6 @@ app.get("/hta-code-7287365.js", async (req, res) => {
   }
 });
 
-// ── Monetag SDK proxy ────────────────────────────────────────────────────────
-// Monetag doesn't offer a signed server-to-server API like HilltopAds does —
-// this is a plain reverse-proxy of their static sdk.js file. Same idea though:
-// serving it from our own domain means hostname-based blocklist rules that
-// target "libtl.com/sdk.js" specifically won't match this request at all.
-// Cached briefly so we're not re-fetching it on every page load, but short
-// enough that we pick up any update Monetag pushes to the script fairly soon.
-let mnSdkCache = null; // { code, fetchedAt }
-const MN_SDK_CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
-
-app.get("/mn-sdk.js", async (req, res) => {
-  res.set("Content-Type", "application/javascript");
-  try {
-    if (mnSdkCache && Date.now() - mnSdkCache.fetchedAt < MN_SDK_CACHE_TTL_MS) {
-      return res.send(mnSdkCache.code);
-    }
-    const upstream = await fetch("https://libtl.com/sdk.js");
-    const code = await upstream.text();
-    if (code) mnSdkCache = { code, fetchedAt: Date.now() };
-    res.send(code);
-  } catch (err) {
-    console.error("Monetag SDK proxy error:", err.message);
-    // Fall back to last known-good copy rather than breaking the watch-ad
-    // flow entirely if libtl.com is briefly unreachable.
-    res.send(mnSdkCache ? mnSdkCache.code : "");
-  }
-});
-
 app.use(express.static(path.join(__dirname, "public")));
 app.get("*", (req, res) => res.sendFile(path.join(__dirname, "public", "index.html")));
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
