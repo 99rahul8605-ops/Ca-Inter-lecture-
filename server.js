@@ -689,6 +689,48 @@ app.post("/api/paytm/callback", async (req, res) => {
   }
 });
 
+// ── HilltopAds Anti-AdBlock proxy ───────────────────────────────────────────
+// Ports HilltopAds' server-to-server PHP proxy to Node. Serving the popunder
+// script from OUR OWN domain (instead of a third-party ad domain) means
+// hostname-based ad-blocker rules can't identify or block it — the browser
+// just sees a same-origin script request like any other JS file on the page.
+// Response is cached in memory for 5 minutes (same TTL the original PHP used)
+// so we're not hitting HilltopAds' API on every single page load.
+const HTA_ZONE_ID = "7287365-7287369"; // desktop-mobile pair, same as the provided PHP
+const HTA_KEY = "8KkmJD5CPIS0VyxejQTktY9StWnV12tyErGag3xPWPIMY2NFDuFqOidgFMekyyLh";
+const HTA_CACHE = {}; // keyed by resolved zoneId -> { code, fetchedAt }
+const HTA_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes, matches the PHP version's 300s file cache
+
+function htaResolveZoneId(userAgent) {
+  const parts = HTA_ZONE_ID.split("-");
+  if (parts.length !== 2) return HTA_ZONE_ID;
+  const ua = (userAgent || "").toLowerCase();
+  const isMobile = ["mobi", "ipad", "iphone", "blackberry", "android"].some(k => ua.includes(k));
+  return isMobile ? parts[1] : parts[0];
+}
+
+app.get("/hta-code-7287365.js", async (req, res) => {
+  res.set("Content-Type", "application/javascript");
+  try {
+    const zoneId = htaResolveZoneId(req.headers["user-agent"]);
+    const cached = HTA_CACHE[zoneId];
+    if (cached && Date.now() - cached.fetchedAt < HTA_CACHE_TTL_MS) {
+      return res.send(cached.code);
+    }
+    const params = new URLSearchParams({ zoneId, key: HTA_KEY, version: "1.0", transport: "node" });
+    const upstream = await fetch(`https://api.hilltopads.com/publisher/antiAdBlock?${params.toString()}`, {
+      headers: { "User-Agent": "HilltopAds Anti-AdBlock Client/1.0" },
+    });
+    const data = await upstream.json();
+    const code = (data && data.result && data.result.code) || "";
+    if (code) HTA_CACHE[zoneId] = { code, fetchedAt: Date.now() };
+    res.send(code);
+  } catch (err) {
+    console.error("HilltopAds anti-adblock proxy error:", err.message);
+    res.send(""); // fail quiet — an empty script just means no popunder that request, not a broken page
+  }
+});
+
 app.use(express.static(path.join(__dirname, "public")));
 app.get("*", (req, res) => res.sendFile(path.join(__dirname, "public", "index.html")));
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
