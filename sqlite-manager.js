@@ -204,6 +204,18 @@ function _setupTables(db) {
     );
     CREATE INDEX IF NOT EXISTS idx_reward_redemptions_user ON reward_redemptions(userId);
 
+    -- Point Adjustments (manual admin grants/deductions to a user's point balance,
+    -- e.g. compensating a user, or penalizing one caught abusing the system —
+    -- can be positive or negative; factored into getPointsBreakdown()).
+    CREATE TABLE IF NOT EXISTS point_adjustments (
+      id         TEXT PRIMARY KEY,
+      userId     TEXT NOT NULL,
+      amount     INTEGER NOT NULL,      -- can be negative
+      reason     TEXT DEFAULT '',
+      adjustedAt INTEGER DEFAULT 0
+    );
+    CREATE INDEX IF NOT EXISTS idx_point_adjustments_user ON point_adjustments(userId);
+
     -- Batch Reward Access (live, time-limited premium-batch unlocks granted via points)
     -- Kept completely separate from batches.premiumUsers (which is permanent/paid access),
     -- so an expiring reward can never accidentally strip someone's permanent access.
@@ -251,19 +263,6 @@ function _setupTables(db) {
       PRIMARY KEY (userId, lectureId)
     );
     CREATE INDEX IF NOT EXISTS idx_watched_lectures_user ON watched_lectures(userId);
-
-    -- Manual point adjustments (admin /addpoints command). Kept as a separate ledger,
-    -- same pattern as referrals/spin history — points are still never stored as a
-    -- direct balance column, this just adds one more signed term into the formula
-    -- (getPointsBreakdown in course.js), so nothing can drift or double-count.
-    CREATE TABLE IF NOT EXISTS point_adjustments (
-      id        TEXT PRIMARY KEY,
-      userId    TEXT NOT NULL,
-      points    INTEGER NOT NULL,     -- can be negative (manual deduction)
-      note      TEXT DEFAULT '',
-      createdAt INTEGER DEFAULT 0
-    );
-    CREATE INDEX IF NOT EXISTS idx_point_adjustments_user ON point_adjustments(userId);
   `);
 }
 
@@ -622,21 +621,6 @@ async function syncFromMongo(mongoose) {
     }
   } catch (e) { console.error('  ❌ Watched Lectures sync error:', e.message); }
 
-  try {
-    // 16. Point Adjustments (manual admin grants/deductions)
-    const PointAdjustment = mongoose.models.PointAdjustment;
-    if (PointAdjustment) {
-      const rows = await PointAdjustment.find({}).lean();
-      const upsertPA = db.prepare(`INSERT INTO point_adjustments(id,userId,points,note,createdAt)
-        VALUES(?,?,?,?,?) ON CONFLICT(id) DO NOTHING`);
-      const paTx = db.transaction(() => {
-        for (const r of rows) upsertPA.run(String(r._id), r.userId, r.points, r.note||'', new Date(r.createdAt||0).getTime());
-      });
-      paTx();
-      console.log(`  ✅ Point Adjustments: ${rows.length}`);
-    }
-  } catch (e) { console.error('  ❌ Point Adjustments sync error:', e.message); }
-
   console.log('✅ SQLite sync complete');
 }
 
@@ -658,16 +642,7 @@ async function syncFromMongo(mongoose) {
 // pending_undelivers (transient scheduled-job markers) — none of these are
 // data worth backing up, same reasoning the app already applies to spin_tokens
 // elsewhere.
-//
-// getPointsBreakdown (optional) — pass courseRoutes.getPointsBreakdown from server.js.
-// If given, each user's CURRENT points balance is computed fresh from SQLite (the
-// live source of truth — referrals + spin + manual adjustments − spent) and saved
-// onto their Mongo User document as a read-only snapshot (points/pointsBreakdown/
-// pointsSyncedAt fields). This is only a cached snapshot for visibility when
-// browsing Mongo directly — the app itself never reads points from here, it always
-// recomputes live from SQLite, so this snapshot can never cause a points mismatch
-// in the product itself, only go stale in the Mongo copy until the next /sync.
-async function syncToMongo(mongoose, getPointsBreakdown) {
+async function syncToMongo(mongoose) {
   const db = getDb();
   const summary = {};
   console.log('🔄 Syncing from SQLite to MongoDB...');
@@ -685,31 +660,20 @@ async function syncToMongo(mongoose, getPointsBreakdown) {
   } catch (e) { console.error('  ❌ Batches sync error:', e.message); summary.batches = 'error'; }
 
   try {
-    // 2. Users (matched by userId) — also snapshots each user's current points
-    // balance onto their Mongo doc when getPointsBreakdown is provided.
+    // 2. Users (matched by userId)
     const User = mongoose.models.User;
     if (User) {
       const rows = db.prepare(`SELECT * FROM users`).all();
-      const now = new Date();
-      let totalPoints = 0, usersWithPoints = 0;
-      const ops = rows.map(u => {
-        const fields = { userId: u.userId, firstName: u.firstName||'', lastName: u.lastName||'', username: u.username||'', firstSeen: new Date(u.firstSeen||0), lastSeen: new Date(u.lastSeen||0) };
-        if (typeof getPointsBreakdown === 'function') {
-          try {
-            const b = getPointsBreakdown(u.userId);
-            fields.points = b.points;
-            fields.pointsBreakdown = { referrals: b.referrals, spinEarned: b.spinEarned, adjustment: b.adjustment, spent: b.spent };
-            fields.pointsSyncedAt = now;
-            totalPoints += b.points;
-            if (b.points > 0) usersWithPoints++;
-          } catch (e) { /* leave points fields untouched for this user if computation fails */ }
-        }
-        return { updateOne: { filter: { userId: u.userId }, update: { $set: fields }, upsert: true } };
-      });
+      const ops = rows.map(u => ({
+        updateOne: {
+          filter: { userId: u.userId },
+          update: { $set: { userId: u.userId, firstName: u.firstName||'', lastName: u.lastName||'', username: u.username||'', firstSeen: new Date(u.firstSeen||0), lastSeen: new Date(u.lastSeen||0) } },
+          upsert: true,
+        },
+      }));
       if (ops.length) await User.bulkWrite(ops, { ordered: false });
       summary.users = rows.length;
-      if (typeof getPointsBreakdown === 'function') { summary.totalPoints = totalPoints; summary.usersWithPoints = usersWithPoints; }
-      console.log(`  ✅ Users: ${rows.length}${typeof getPointsBreakdown === 'function' ? ` (points snapshot: ${totalPoints} total across ${usersWithPoints} users)` : ''}`);
+      console.log(`  ✅ Users: ${rows.length}`);
     }
   } catch (e) { console.error('  ❌ Users sync error:', e.message); summary.users = 'error'; }
 
@@ -940,23 +904,6 @@ async function syncToMongo(mongoose, getPointsBreakdown) {
     }
   } catch (e) { console.error('  ❌ Watched Lectures sync error:', e.message); summary.watchedLectures = 'error'; }
 
-  try {
-    // 15. Point Adjustments (SQLite id === Mongo _id, same linked pattern as batches/announcements/coupons)
-    const PointAdjustment = mongoose.models.PointAdjustment;
-    if (PointAdjustment) {
-      const rows = db.prepare(`SELECT * FROM point_adjustments`).all();
-      let ok = 0;
-      for (const r of rows) {
-        try {
-          await PointAdjustment.findByIdAndUpdate(r.id, { userId: r.userId, points: r.points, note: r.note||'', createdAt: new Date(r.createdAt||0) }, { upsert: true });
-          ok++;
-        } catch (e) {}
-      }
-      summary.pointAdjustments = ok;
-      console.log(`  ✅ Point Adjustments: ${ok}/${rows.length}`);
-    }
-  } catch (e) { console.error('  ❌ Point Adjustments sync error:', e.message); summary.pointAdjustments = 'error'; }
-
   console.log('✅ SQLite → MongoDB sync complete');
   return summary;
 }
@@ -1008,31 +955,6 @@ const user = {
   },
   getAll() {
     return getDb().prepare(`SELECT userId FROM users`).all();
-  },
-  // Full rows (not just userId) — powers the /points admin command.
-  listAll() {
-    return getDb().prepare(`SELECT * FROM users`).all();
-  },
-};
-
-// ── POINT ADJUSTMENT Operations (manual admin grants/deductions, /addpoints) ──
-
-const pointAdjustment = {
-  insert({ id, userId, points, note, createdAt }) {
-    getDb().prepare(`INSERT INTO point_adjustments(id,userId,points,note,createdAt) VALUES(?,?,?,?,?)`)
-      .run(id, userId, points, note||'', new Date(createdAt||Date.now()).getTime());
-  },
-  // Net manual adjustment for one user — added straight into the points formula.
-  totalForUser(userId) {
-    return getDb().prepare(`SELECT COALESCE(SUM(points),0) as total FROM point_adjustments WHERE userId=?`).get(userId).total;
-  },
-  totalGlobal() {
-    return getDb().prepare(`SELECT COALESCE(SUM(points),0) as total FROM point_adjustments`).get().total;
-  },
-  history(userId, limit) {
-    return getDb().prepare(`SELECT * FROM point_adjustments WHERE userId=? ORDER BY createdAt DESC LIMIT ?`)
-      .all(userId, limit || 20)
-      .map(r => ({ ...r, createdAt: new Date(r.createdAt) }));
   },
 };
 
@@ -1107,6 +1029,11 @@ const referral = {
   },
   countByReferrer(referrerId) {
     return getDb().prepare(`SELECT COUNT(*) as c FROM referrals WHERE referrerId=?`).get(referrerId).c;
+  },
+  // Referrals by one referrer within a recent time window — used to flag
+  // suspiciously fast referral farming (e.g. 5+ "new users" in an hour).
+  countByReferrerSince(referrerId, sinceMs) {
+    return getDb().prepare(`SELECT COUNT(*) as c FROM referrals WHERE referrerId=? AND createdAt>=?`).get(referrerId, sinceMs).c;
   },
   insert({ id, referrerId, referredId }) {
     getDb().prepare(`INSERT INTO referrals(id,referrerId,referredId,createdAt) VALUES(?,?,?,?)`)
@@ -1407,6 +1334,25 @@ const rewardRedemption = {
   },
 };
 
+// Manual admin point grants/deductions — factored into getPointsBreakdown()
+// alongside referral earnings, spin earnings, and reward-redemption spending.
+const pointAdjustment = {
+  insert({ id, userId, amount, reason, adjustedAt }) {
+    getDb().prepare(`INSERT INTO point_adjustments(id,userId,amount,reason,adjustedAt) VALUES(?,?,?,?,?)`)
+      .run(id, userId, amount, reason || '', new Date(adjustedAt || Date.now()).getTime());
+  },
+  // Net total of all manual adjustments for this user — can be negative
+  totalForUser(userId) {
+    return getDb().prepare(`SELECT COALESCE(SUM(amount),0) as total FROM point_adjustments WHERE userId=?`)
+      .get(userId).total;
+  },
+  history(userId, limit) {
+    return getDb().prepare(`SELECT * FROM point_adjustments WHERE userId=? ORDER BY adjustedAt DESC LIMIT ?`)
+      .all(userId, limit || 20)
+      .map(r => ({ ...r, adjustedAt: new Date(r.adjustedAt) }));
+  },
+};
+
 // ── BATCH REWARD ACCESS Operations (live, time-limited premium access via points) ──
 // Separate from batches.premiumUsers on purpose — that array is permanent (paid/admin
 // granted), this table is the temporary layer that quietly expires on its own.
@@ -1506,6 +1452,12 @@ const watchedLecture = {
   unmark(userId, lectureId) {
     getDb().prepare(`DELETE FROM watched_lectures WHERE userId=? AND lectureId=?`).run(userId, lectureId);
   },
+  // How many lectures this user has marked watched within a recent window —
+  // used to flag bot-like bulk marking (no one genuinely watches 8+ lectures
+  // in 2 minutes; this is almost always a script hitting the API directly).
+  countByUserSince(userId, sinceMs) {
+    return getDb().prepare(`SELECT COUNT(*) as c FROM watched_lectures WHERE userId=? AND watchedAt>=?`).get(userId, sinceMs).c;
+  },
 };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -1532,10 +1484,10 @@ module.exports = {
   pendingUndeliver,
   dailyVideoLimit,
   rewardRedemption,
+  pointAdjustment,
   batchRewardAccess,
   spinToken,
   spinHistory,
   watchedLecture,
-  pointAdjustment,
   generateId,
 };
