@@ -118,6 +118,10 @@ const userSchema = new mongoose.Schema({
     spent: { type: Number, default: 0 },
   },
   pointsSyncedAt: { type: Date, default: null },
+  // ── Abuse / unusual-activity moderation ────────────────────────────────
+  banned: { type: Boolean, default: false },
+  banReason: { type: String, default: "" },
+  bannedAt: { type: Date, default: null },
 });
 const User = mongoose.model("User", userSchema);
 
@@ -851,6 +855,8 @@ async function startBot() {
 
       if (param === "participate") {
         try {
+          const banReason = await courseRoutes.isUserBanned(userId);
+          if (banReason) { bot.sendMessage(chatId, `🚫 Aapka account suspend hai: ${banReason}`); return; }
           const giveaway = await getActiveGiveaway();
           if (!giveaway) { bot.sendMessage(chatId, `⚠️ No giveaway is active right now.`); return; }
           const inviteLink = `https://t.me/${BOT_USERNAME}?start=give_${userId}`;
@@ -1561,6 +1567,8 @@ async function startBot() {
     if (isGroupChat(msg)) return;
     const chatId = msg.chat.id; const userId = msg.from.id;
     try {
+      const banReason = await courseRoutes.isUserBanned(userId);
+      if (banReason) return bot.sendMessage(chatId, `🚫 Aapka account suspend hai: ${banReason}`);
       const giveaway = await getActiveGiveaway();
       if (!giveaway) return bot.sendMessage(chatId, `⚠️ No giveaway is active right now.`);
       const inviteLink = `https://t.me/${BOT_USERNAME}?start=give_${userId}`;
