@@ -446,7 +446,7 @@ body.ready{transition:none}
   <div class="vs-bar"><div class="vs-fill" id="vsFill"></div></div>
   <div style="margin-top:32px;text-align:center">
     <div style="font-size:11px;color:var(--text3);margin-bottom:10px">Having trouble? Contact us</div>
-    <button onclick="var _cl=window._contactLink||('https://t.me/'+(window._botUsername||''));if(tg){tg.openLink(_cl,{try_instant_view:false});}else{window.open(_cl,'_blank');}" style="display:inline-flex;align-items:center;gap:7px;background:var(--surface2);border:1px solid var(--border);color:var(--text2);padding:9px 18px;border-radius:20px;font-size:13px;font-weight:600;cursor:pointer;">
+    <button onclick="var _cl=window._contactLink||('https://t.me/'+(window._botUsername||''));if(tg&&/^https?:\/\/t\.me\//i.test(_cl)&&typeof tg.openTelegramLink==='function'){tg.openTelegramLink(_cl);}else if(tg){tg.openLink(_cl,{try_instant_view:false});}else{window.open(_cl,'_blank');}" style="display:inline-flex;align-items:center;gap:7px;background:var(--surface2);border:1px solid var(--border);color:var(--text2);padding:9px 18px;border-radius:20px;font-size:13px;font-weight:600;cursor:pointer;">
       📩 Contact Support
     </button>
   </div>
@@ -1320,7 +1320,18 @@ function openLink(url, type) {
   // Open link first — THEN close popup after a small delay
   // This prevents the popup close animation from conflicting with app-switch
   if (tg) {
-    tg.openLink(url, { try_instant_view: false });
+    // t.me links (our bot deep links, share links, etc.) must go through
+    // openTelegramLink — this is the method Telegram uses to navigate WITHIN
+    // its own client on every platform. tg.openLink() is meant for ordinary
+    // external URLs; on Telegram Desktop it always hands those off to the
+    // system browser, which is why lecture/notes links were popping out into
+    // Chrome instead of staying inside Telegram like they do on mobile.
+    var isTelegramLink = /^https?:\/\/t\.me\//i.test(url);
+    if (isTelegramLink && typeof tg.openTelegramLink === 'function') {
+      tg.openTelegramLink(url);
+    } else {
+      tg.openLink(url, { try_instant_view: false });
+    }
   } else {
     var a = document.createElement('a');
     a.href = url;
@@ -4024,7 +4035,9 @@ function _escFj(s) {
 }
 
 function fjOpenChannel(link) {
-  if (tg && tg.openLink) {
+  if (tg && /^https?:\/\/t\.me\//i.test(link) && typeof tg.openTelegramLink === 'function') {
+    tg.openTelegramLink(link);
+  } else if (tg && tg.openLink) {
     tg.openLink(link, { try_instant_view: false });
   } else {
     window.open(link, '_blank');
@@ -4658,8 +4671,9 @@ function handleContact(){
   } else {
     clearTimeout(_contactTimer);
     var _cl = window._contactLink || ('https://t.me/' + (window._botUsername||''));
-    if(tg){tg.openLink(_cl,{try_instant_view:false});}
-    else{window.open(_cl,'_blank');}
+    if (tg && /^https?:\/\/t\.me\//i.test(_cl) && typeof tg.openTelegramLink === 'function') { tg.openTelegramLink(_cl); }
+    else if (tg) { tg.openLink(_cl,{try_instant_view:false}); }
+    else { window.open(_cl,'_blank'); }
     collapseContact();
   }
 }
@@ -4723,7 +4737,9 @@ function copyReferLink() {
 function shareReferLink() {
   if (!_referLink) return toast('Open via Telegram to get your link', 'error');
   var shareUrl = 'https://t.me/share/url?url=' + encodeURIComponent(_referLink) + '&text=' + encodeURIComponent('Join and access free lectures! 📚');
-  if (tg && tg.openLink) {
+  if (tg && typeof tg.openTelegramLink === 'function') {
+    tg.openTelegramLink(shareUrl);
+  } else if (tg && tg.openLink) {
     tg.openLink(shareUrl, { try_instant_view: false });
   } else {
     window.open(shareUrl, '_blank');
@@ -4789,7 +4805,9 @@ function copyGiveawayLink() {
 function shareGiveawayLink() {
   if (!_giveawayLink) return toast('Open via Telegram to get your link', 'error');
   var shareUrl = 'https://t.me/share/url?url=' + encodeURIComponent(_giveawayLink) + '&text=' + encodeURIComponent('Join the giveaway and win prizes! 🎁');
-  if (tg && tg.openLink) {
+  if (tg && typeof tg.openTelegramLink === 'function') {
+    tg.openTelegramLink(shareUrl);
+  } else if (tg && tg.openLink) {
     tg.openLink(shareUrl, { try_instant_view: false });
   } else {
     window.open(shareUrl, '_blank');
@@ -4798,7 +4816,9 @@ function shareGiveawayLink() {
 
 function openBotChat() {
   var url = 'https://t.me/' + (window._botUsername || '') + '?start=participate';
-  if (tg && tg.openLink) {
+  if (tg && typeof tg.openTelegramLink === 'function') {
+    tg.openTelegramLink(url);
+  } else if (tg && tg.openLink) {
     tg.openLink(url, { try_instant_view: false });
   } else {
     window.open(url, '_blank');
