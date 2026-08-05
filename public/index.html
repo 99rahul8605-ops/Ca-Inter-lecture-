@@ -1069,9 +1069,12 @@ if (tg) {
   tg.ready();
   tg.expand();
 
-  // Full screen mode (Bot API 8.0+). Older Telegram clients won't have this
-  // method — feature-detect so the app doesn't break on them.
-  if (typeof tg.requestFullscreen === 'function') {
+  // Full screen mode (Bot API 8.0+) — only on mobile devices. Telegram
+  // Desktop / Web (laptop, PC) should open in normal windowed mode, so we
+  // feature-detect the platform Telegram itself reports and only request
+  // fullscreen when it's a phone (android/ios), not desktop/web/macos.
+  var isMobilePlatform = tg.platform === 'android' || tg.platform === 'ios' || tg.platform === 'android_x';
+  if (isMobilePlatform && typeof tg.requestFullscreen === 'function') {
     try { tg.requestFullscreen(); } catch (e) {}
   }
 
