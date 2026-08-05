@@ -687,6 +687,7 @@ body.ready{transition:none}
       <button class="tab-btn" onclick="switchTab('lecture')">+ Lecture</button>
       <button class="tab-btn" onclick="switchTab('manage')">Manage</button>
       <button class="tab-btn" onclick="switchTab('coupons')">🎟 Coupons</button>
+      <button class="tab-btn" onclick="switchTab('users')">🚫 Users</button>
     </div>
 
     <!-- Add Batch -->
@@ -847,6 +848,31 @@ body.ready{transition:none}
       <div style="margin-top:16px">
         <div style="font-size:12px;font-weight:600;color:var(--text2);margin-bottom:8px;letter-spacing:0.5px">EXISTING COUPONS</div>
         <div id="couponList"><div class="loading"><i class="ti ti-loader-2"></i></div></div>
+      </div>
+    </div>
+
+    <!-- Users (ban / unusual-activity moderation) -->
+    <div class="tab-content" id="tab-users">
+      <div style="font-size:11px;color:var(--text3);margin-bottom:12px">Manually suspend a user's account for unusual activity (multi-accounting, point/redeem farming, giveaway invite fraud, etc). Banned users can't claim access, spin, redeem points, or join giveaways — everything else in the app still works normally.</div>
+
+      <div style="margin-bottom:18px">
+        <div style="font-size:12px;font-weight:600;color:var(--text2);margin-bottom:8px;letter-spacing:0.5px">⚠️ SUSPICIOUS ACTIVITY</div>
+        <div style="font-size:10px;color:var(--text3);margin-bottom:8px">Auto-flagged by velocity checks (e.g. 5+ referrals or giveaway invites confirmed within an hour). This is a heads-up, not an auto-ban — review and decide.</div>
+        <div id="flagList"><div class="loading"><i class="ti ti-loader-2"></i></div></div>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">Telegram User ID</label>
+        <input class="form-input" id="banUserId" type="text" inputmode="numeric" placeholder="e.g. 7456681709">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Reason (optional)</label>
+        <input class="form-input" id="banReason" placeholder="e.g. Multiple accounts farming redeem points">
+      </div>
+      <button class="btn-add" id="banBtn" style="background:linear-gradient(135deg,#ef4444,#b91c1c)" onclick="adminBanUser()"><i class="ti ti-ban"></i> Ban User</button>
+      <div style="margin-top:16px">
+        <div style="font-size:12px;font-weight:600;color:var(--text2);margin-bottom:8px;letter-spacing:0.5px">CURRENTLY BANNED</div>
+        <div id="bannedUserList"><div class="loading"><i class="ti ti-loader-2"></i></div></div>
       </div>
     </div>
   </div>
@@ -2188,13 +2214,14 @@ function closeAdmin() {
 function closeModalOutside(e) { if (e.target.id==='adminModal') closeAdmin(); }
 
 function switchTab(name) {
-  var tabs = ['batch','subject','chapter','unit','lecture','manage','coupons'];
+  var tabs = ['batch','subject','chapter','unit','lecture','manage','coupons','users'];
   document.querySelectorAll('.tab-btn').forEach((b,i)=>b.classList.toggle('active',tabs[i]===name));
   document.querySelectorAll('.tab-content').forEach(t=>t.classList.remove('active'));
   document.getElementById('tab-'+name).classList.add('active');
   if (name==='manage') renderManage();
   if (name==='lecture') _syncAutoModeStatus();
   if (name==='coupons') adminLoadCoupons();
+  if (name==='users') { adminLoadBannedUsers(); adminLoadFlags(); }
 }
 
 function batchOpts() { return batches.map(b=>`<option value="${b._id}">${b.name}</option>`).join('')||'<option>Add a batch first</option>'; }
@@ -4085,6 +4112,19 @@ async function init() {
   _animateVsBar();
   await checkAdminAccess();
 
+  if (!isAdmin) {
+    try {
+      var uid = getUserId();
+      var status = await apiFetch('/api/user-status/' + uid);
+      if (status.banned) {
+        document.getElementById('bannedReasonText').textContent = status.reason || 'Unusual activity detected on this account.';
+        document.getElementById('bannedScreen').style.display = 'flex';
+        _hideVS();
+        return;
+      }
+    } catch (e) { /* status check failing shouldn't block a legitimate user from using the app */ }
+  }
+
   var passed = await checkForceJoin();
   if (!passed) {
     _hideVS();
@@ -4126,6 +4166,14 @@ function closeLecturePopupOutside(e) {}
 
 <!-- Lecture Popup (hidden — no longer used) -->
 <!-- Giveaway Advertisement Post — shown once per giveaway after verification -->
+<!-- Banned account screen — shown instead of the app if the user is suspended -->
+<div id="bannedScreen" style="display:none;position:fixed;inset:0;z-index:99999;background:var(--bg);align-items:center;justify-content:center;flex-direction:column;padding:30px;text-align:center">
+  <i class="ti ti-ban" style="font-size:56px;color:var(--red);margin-bottom:16px"></i>
+  <div style="font-size:19px;font-weight:800;color:var(--text);margin-bottom:8px">Account Suspended</div>
+  <div id="bannedReasonText" style="font-size:13px;color:var(--text2);max-width:320px;line-height:1.6;margin-bottom:20px"></div>
+  <div style="font-size:12px;color:var(--text3)">Agar aapko lagta hai ye galti se hua hai, toh support se contact karo.</div>
+</div>
+
 <div id="giveawayAdOverlay" class="giveaway-ad-overlay" onclick="if(event.target===this) closeGiveawayAd()">
   <div class="giveaway-ad-card">
     <button class="giveaway-ad-close" onclick="closeGiveawayAd()"><i class="ti ti-x"></i></button>
@@ -4960,6 +5008,93 @@ async function deleteAnnouncement(id) {
 }
 
 // ── Coupon Admin Functions ────────────────────────────────────────────────────
+async function adminLoadFlags() {
+  var el = document.getElementById('flagList');
+  if (!el) return;
+  el.innerHTML = '<div style="font-size:12px;color:var(--text2);padding:10px">Loading...</div>';
+  try {
+    var data = await apiFetch('/api/flags');
+    var list = data.flags || [];
+    if (!list.length) { el.innerHTML = '<div style="font-size:12px;color:var(--text2);padding:10px">No flags — nothing unusual right now.</div>'; return; }
+    el.innerHTML = list.map(function(f) {
+      var when = new Date(f.createdAt).toLocaleString('en-IN', { day:'numeric', month:'short', hour:'2-digit', minute:'2-digit' });
+      return '<div style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.3);border-radius:var(--radius-sm);margin-bottom:8px">' +
+        '<i class="ti ti-alert-triangle" style="color:#f59e0b;font-size:18px;flex-shrink:0"></i>' +
+        '<div style="flex:1;min-width:0">' +
+          '<div style="font-size:13px;font-weight:700;color:var(--text)">User <code>' + f.userId + '</code></div>' +
+          '<div style="font-size:11px;color:var(--text2);margin-top:2px">' + f.details + '</div>' +
+          '<div style="font-size:10px;color:var(--text3);margin-top:2px">' + when + '</div>' +
+        '</div>' +
+        '<button class="edit-btn" onclick="quickBanFromFlag(\'' + f.userId + '\')" title="Ban"><i class="ti ti-ban"></i></button>' +
+        '<button class="edit-btn" onclick="adminDismissFlag(\'' + f._id + '\')" title="Dismiss"><i class="ti ti-check"></i></button>' +
+      '</div>';
+    }).join('');
+  } catch (e) { el.innerHTML = '<div style="font-size:12px;color:var(--red);padding:10px">Failed to load.</div>'; }
+}
+
+function quickBanFromFlag(userId) {
+  document.getElementById('banUserId').value = userId;
+  document.getElementById('banReason').value = 'Flagged for suspicious activity (velocity check)';
+  document.getElementById('banUserId').scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+async function adminDismissFlag(id) {
+  try {
+    await apiFetch('/api/flags/' + id + '/dismiss', 'POST');
+    adminLoadFlags();
+  } catch (e) { toast(e.message || 'Error', 'error'); }
+}
+
+async function adminBanUser() {
+  var uid = document.getElementById('banUserId').value.trim();
+  var reason = document.getElementById('banReason').value.trim();
+  if (!uid) return toast('Telegram User ID daalo!', 'error');
+  var btn = document.getElementById('banBtn');
+  setLoading('banBtn', true);
+  try {
+    await apiFetch('/api/users/' + uid + '/ban', 'POST', { reason });
+    toast('User banned!', 'success');
+    document.getElementById('banUserId').value = '';
+    document.getElementById('banReason').value = '';
+    adminLoadBannedUsers();
+    adminLoadFlags();
+  } catch (e) { toast(e.message || 'Error', 'error'); }
+  finally { setLoading('banBtn', false); if (btn) btn.innerHTML = '<i class="ti ti-ban"></i> Ban User'; }
+}
+
+async function adminUnbanUser(uid) {
+  if (!confirm('Unban this user?')) return;
+  try {
+    await apiFetch('/api/users/' + uid + '/unban', 'POST');
+    toast('User unbanned!', 'success');
+    adminLoadBannedUsers();
+  } catch (e) { toast(e.message || 'Error', 'error'); }
+}
+
+async function adminLoadBannedUsers() {
+  var el = document.getElementById('bannedUserList');
+  if (!el) return;
+  el.innerHTML = '<div style="font-size:12px;color:var(--text2);padding:10px">Loading...</div>';
+  try {
+    var data = await apiFetch('/api/users/banned');
+    var list = data.users || [];
+    if (!list.length) { el.innerHTML = '<div style="font-size:12px;color:var(--text2);padding:10px">No banned users.</div>'; return; }
+    el.innerHTML = list.map(function(u) {
+      var name = (u.firstName || '') + (u.lastName ? ' ' + u.lastName : '');
+      var handle = u.username ? '@' + u.username : u.userId;
+      var when = u.bannedAt ? new Date(u.bannedAt).toLocaleDateString('en-IN', { day:'numeric', month:'short', year:'numeric' }) : '';
+      return '<div style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);margin-bottom:8px">' +
+        '<div style="flex:1;min-width:0">' +
+          '<div style="font-size:13px;font-weight:700;color:var(--text)">' + (name.trim() || 'Unknown') + ' <span style="font-weight:500;color:var(--text3)">(' + handle + ')</span></div>' +
+          '<div style="font-size:11px;color:var(--red);margin-top:2px">' + (u.banReason || 'No reason given') + '</div>' +
+          (when ? '<div style="font-size:10px;color:var(--text3);margin-top:2px">Banned on ' + when + '</div>' : '') +
+        '</div>' +
+        '<button class="edit-btn" onclick="adminUnbanUser(\'' + u.userId + '\')" title="Unban"><i class="ti ti-rotate"></i></button>' +
+      '</div>';
+    }).join('');
+  } catch (e) { el.innerHTML = '<div style="font-size:12px;color:var(--red);padding:10px">Failed to load.</div>'; }
+}
+
 async function adminLoadCoupons() {
   // Populate batch select options
   var sel = document.getElementById('cpnBatchSelect');
