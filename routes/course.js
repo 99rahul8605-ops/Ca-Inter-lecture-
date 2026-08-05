@@ -12,44 +12,6 @@ const OWNER_ID = parseInt(process.env.OWNER_ID || "0");
 let _bot = null;
 function setBot(botInstance) { _bot = botInstance; }
 
-// ── Ban / abuse moderation ──────────────────────────────────────────────────
-// User model is registered in server.js (loaded before this router), same
-// pattern as the Giveaway models used further down this file.
-async function isUserBanned(userId) {
-  try {
-    const User = mongoose.model('User');
-    const user = await User.findOne({ userId: String(userId) }).select('banned banReason').lean();
-    return user && user.banned ? (user.banReason || 'Unusual activity detected') : null;
-  } catch (e) { return null; } // fail open — a lookup error shouldn't lock out legitimate users
-}
-
-// ── Suspicious activity flagging ────────────────────────────────────────────
-// Automatic, velocity-based detection — NOT auto-ban. Crossing a threshold
-// just raises a flag for a human admin to review (via the Users tab or the
-// Telegram alert), because automatically banning on a heuristic risks locking
-// out real users who just happen to be popular referrers, active on launch
-// day, etc. The admin always makes the final call.
-const suspiciousActivitySchema = new mongoose.Schema({
-  userId: { type: String, required: true },
-  type: { type: String, required: true },      // 'referral_velocity' | 'giveaway_invite_velocity'
-  details: { type: String, default: '' },
-  reviewed: { type: Boolean, default: false },
-  createdAt: { type: Date, default: Date.now },
-});
-const SuspiciousActivity = mongoose.model('SuspiciousActivity', suspiciousActivitySchema);
-
-async function flagSuspicious(userId, type, details) {
-  try {
-    await SuspiciousActivity.create({ userId: String(userId), type, details });
-    if (_bot && OWNER_ID) {
-      _bot.sendMessage(OWNER_ID,
-        `⚠️ <b>Suspicious Activity Flagged</b>\n\nUser: <code>${userId}</code>\nType: ${type}\n${details}\n\nCheck Admin Panel → 🚫 Users tab to review/ban.`,
-        { parse_mode: 'HTML' }
-      ).catch(() => {});
-    }
-  } catch (e) { console.error('flagSuspicious error:', e.message); }
-}
-
 // ── Admin verification ────────────────────────────────────────────────────────
 function verifyAdmin(req, res, next) {
   const initData = req.headers["x-tg-init-data"];
@@ -642,8 +604,6 @@ router.get("/access/:userId", (req, res) => {
 router.post("/access/token/:userId", async (req, res) => {
   try {
     const userId = req.params.userId;
-    const banReason = await isUserBanned(userId);
-    if (banReason) return res.status(403).json({ error: `Aapka account suspend hai: ${banReason}`, banned: true });
     const today = new Date().toISOString().slice(0, 10);
     const existing = db.access.findOne(userId);
     const claimsToday = (existing && existing.claimDay === today) ? (existing.claimsToday||0) : 0;
@@ -665,8 +625,6 @@ router.post("/access/token/:userId", async (req, res) => {
 router.post("/access/claim/:userId", async (req, res) => {
   try {
     const userId = req.params.userId;
-    const banReason = await isUserBanned(userId);
-    if (banReason) return res.status(403).json({ error: `Aapka account suspend hai: ${banReason}`, banned: true });
     const { token } = req.body;
     if (!token) return res.status(400).json({ error: "Token required" });
 
@@ -723,14 +681,6 @@ router.post('/refer/record', async (req, res) => {
     db.referral.insert({ id, referrerId, referredId });
     // MongoDB backup
     Referral.create({ referrerId, referredId }).catch(() => {});
-
-    // Velocity check: 5+ new referrals from the same referrer within an hour
-    // is a strong farming signal (real organic sharing rarely lands this fast).
-    const recentCount = db.referral.countByReferrerSince(referrerId, Date.now() - 60 * 60 * 1000);
-    if (recentCount >= 5) {
-      flagSuspicious(referrerId, 'referral_velocity', `${recentCount} referrals confirmed in the last hour.`);
-    }
-
     res.json({ success: true, isNew: true });
   } catch (e) {
     if (e.code === 11000) return res.json({ success: false, reason: 'Already referred' });
@@ -894,8 +844,6 @@ router.post('/rewards/redeem', async (req, res) => {
   try {
     const { userId, rewardType, batchId } = req.body;
     if (!userId) return res.status(400).json({ error: 'userId required' });
-    const banReason = await isUserBanned(userId);
-    if (banReason) return res.status(403).json({ error: `Aapka account suspend hai: ${banReason}`, banned: true });
     const catalogEntry = REWARD_CATALOG[rewardType];
     if (!catalogEntry) return res.status(400).json({ error: 'Invalid reward type' });
 
@@ -1044,11 +992,9 @@ router.get('/spin/status/:userId', (req, res) => {
 });
 
 // POST token — issued right before the ad plays; must be redeemed via /spin/claim afterwards
-router.post('/spin/token/:userId', async (req, res) => {
+router.post('/spin/token/:userId', (req, res) => {
   try {
     const userId = req.params.userId;
-    const banReason = await isUserBanned(userId);
-    if (banReason) return res.status(403).json({ error: `Aapka account suspend hai: ${banReason}`, banned: true });
     const status = getSpinStatus(userId);
     if (!status.canSpin) {
       if (status.spinsLeft <= 0) return res.status(429).json({ error: 'Aaj ke saare 5 spins ho gaye! Kal wapas aao.', ...status });
@@ -1069,11 +1015,9 @@ router.post('/spin/token/:userId', async (req, res) => {
 // POST claim — verifies the ad was actually watched (min elapsed time, same as access/claim),
 // re-checks the daily limit + cooldown fresh (defends against races/stale client state),
 // then rolls the wheel server-side and records the spin.
-router.post('/spin/claim/:userId', async (req, res) => {
+router.post('/spin/claim/:userId', (req, res) => {
   try {
     const userId = req.params.userId;
-    const banReason = await isUserBanned(userId);
-    if (banReason) return res.status(403).json({ error: `Aapka account suspend hai: ${banReason}`, banned: true });
     const { token } = req.body;
     if (!token) return res.status(400).json({ error: 'Token required' });
 
@@ -1170,14 +1114,6 @@ async function confirmGiveawayInviteOnFirstWatch(userId) {
       const inviterName = _giveawayName(inviterUser) || `User ${invite.inviterId}`;
       _bot.sendMessage(OWNER_ID, `📈 <b>Giveaway — Referral Confirmed</b>\n\nInviter: ${inviterName} (<code>${invite.inviterId}</code>)\nInvitee: ${inviteeName} (<code>${inviteeNum}</code>)\nInviter's updated invite count: <b>${participant.invites}</b>`, { parse_mode: 'HTML' }).catch(() => {});
     }
-
-    // Velocity check: 5+ confirmed giveaway invites within an hour is a strong
-    // fake-account farming signal for rank manipulation.
-    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
-    const recentInviteCount = await GiveawayInvite.countDocuments({ giveawayId: giveaway._id, inviterId: invite.inviterId, status: 'confirmed', confirmedAt: { $gte: oneHourAgo } });
-    if (recentInviteCount >= 5) {
-      flagSuspicious(invite.inviterId, 'giveaway_invite_velocity', `${recentInviteCount} giveaway invites confirmed in the last hour.`);
-    }
   } catch (e) { console.error('Giveaway confirm error:', e.message); }
 }
 
@@ -1190,7 +1126,7 @@ router.get('/watched/:userId', (req, res) => {
 });
 
 // POST — mark or unmark a single lecture as watched
-router.post('/watched/:userId', async (req, res) => {
+router.post('/watched/:userId', (req, res) => {
   try {
     const userId = req.params.userId;
     const { lectureId, watched } = req.body;
@@ -1203,41 +1139,7 @@ router.post('/watched/:userId', async (req, res) => {
       const hadWatchedBefore = db.watchedLecture.listByUser(userId).length > 0;
       db.watchedLecture.mark(userId, lectureId);
       WatchedLecture.updateOne({ userId, lectureId }, { userId, lectureId, watchedAt: new Date() }, { upsert: true }).catch(() => {});
-
-      // Signal 1: this is the exact trigger that confirms a giveaway referral
-      // (see confirmGiveawayInviteOnFirstWatch below) — so it's the highest-value
-      // fraud target. A brand-new account marking a lecture "watched" within
-      // seconds of first opening the bot is very unlikely to be a real person
-      // actually browsing in, opening a lecture, and watching it — much more
-      // consistent with a script just hitting this endpoint to farm the referral.
-      if (!hadWatchedBefore) {
-        confirmGiveawayInviteOnFirstWatch(userId);
-        try {
-          const User = mongoose.model('User');
-          const user = await User.findOne({ userId: String(userId) }).select('firstSeen').lean();
-          if (user && user.firstSeen) {
-            const secondsSinceSignup = (Date.now() - new Date(user.firstSeen).getTime()) / 1000;
-            if (secondsSinceSignup < 90) {
-              flagSuspicious(userId, 'instant_watch_after_signup', `First lecture marked "watched" just ${Math.round(secondsSinceSignup)}s after account creation.`);
-            }
-          }
-        } catch (e) { /* non-critical — don't block the request over this */ }
-      }
-
-      // Signal 2: general bot-like bulk marking, independent of whether it's
-      // their first watch — no one genuinely watches 8+ lectures in 2 minutes.
-      const recentWatchCount = db.watchedLecture.countByUserSince(userId, Date.now() - 2 * 60 * 1000);
-      if (recentWatchCount === 8) { // fire once per burst, not on every single mark past the threshold
-        flagSuspicious(userId, 'lecture_watch_velocity', `${recentWatchCount} lectures marked "watched" within 2 minutes.`);
-      }
-      // Signal 3: general daily activity cap — independent of whether a giveaway
-      // is even running. 10+ lectures marked "watched" in a single day is well
-      // beyond normal study pace and more consistent with account sharing,
-      // scripted/bulk marking, or scraping lecture links.
-      const dailyWatchCount = db.watchedLecture.countByUserSince(userId, Date.now() - 24 * 60 * 60 * 1000);
-      if (dailyWatchCount === 10) { // fire once when the day's count first crosses the line
-        flagSuspicious(userId, 'daily_lecture_limit', `${dailyWatchCount} lectures marked "watched" in the last 24 hours.`);
-      }
+      if (!hadWatchedBefore) confirmGiveawayInviteOnFirstWatch(userId);
     }
     res.json({ success: true, lectureId, watched: watched !== false });
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -1494,77 +1396,7 @@ router.post('/coupons/validate', (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// ── Ban / abuse moderation ───────────────────────────────────────────────────
-// Manual, admin-driven bans for unusual activity (multi-accounting, farming
-// points via rapid claims, giveaway invite fraud, etc). This is deliberately
-// NOT automatic — false positives would lock out real users, so an admin
-// reviews and bans by hand from the Admin Panel's Users tab.
-
-router.post('/users/:userId/ban', verifyAdmin, async (req, res) => {
-  try {
-    const User = mongoose.model('User');
-    const reason = (req.body.reason || '').trim() || 'Unusual activity detected';
-    const user = await User.findOneAndUpdate(
-      { userId: String(req.params.userId) },
-      { banned: true, banReason: reason, bannedAt: new Date() },
-      { upsert: true, new: true }
-    );
-    SuspiciousActivity.updateMany({ userId: String(req.params.userId), reviewed: false }, { reviewed: true }).catch(() => {});
-    res.json({ success: true, userId: user.userId, banned: true, banReason: user.banReason });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-router.post('/users/:userId/unban', verifyAdmin, async (req, res) => {
-  try {
-    const User = mongoose.model('User');
-    const user = await User.findOneAndUpdate(
-      { userId: String(req.params.userId) },
-      { banned: false, banReason: '', bannedAt: null },
-      { new: true }
-    );
-    if (!user) return res.status(404).json({ error: 'User not found' });
-    res.json({ success: true, userId: user.userId, banned: false });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// List unreviewed flags (newest first) — powers the ⚠️ Suspicious Activity
-// section in the Users tab.
-router.get('/flags', verifyAdmin, async (req, res) => {
-  try {
-    const flags = await SuspiciousActivity.find({ reviewed: false }).sort({ createdAt: -1 }).limit(100).lean();
-    res.json({ flags });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// Dismiss a flag without banning — e.g. after checking and deciding it's a
-// false positive (a genuinely popular referrer, a viral moment, etc).
-router.post('/flags/:id/dismiss', verifyAdmin, async (req, res) => {
-  try {
-    await SuspiciousActivity.findByIdAndUpdate(req.params.id, { reviewed: true });
-    res.json({ success: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-router.get('/users/banned', verifyAdmin, async (req, res) => {
-  try {
-    const User = mongoose.model('User');
-    const users = await User.find({ banned: true }).select('userId firstName lastName username banReason bannedAt').sort({ bannedAt: -1 }).lean();
-    res.json({ users });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// Public — the webapp calls this on load to decide whether to show the
-// normal app or a "your account is suspended" screen.
-router.get('/user-status/:userId', async (req, res) => {
-  try {
-    const User = mongoose.model('User');
-    const user = await User.findOne({ userId: String(req.params.userId) }).select('banned banReason').lean();
-    res.json({ banned: !!(user && user.banned), reason: (user && user.banReason) || '' });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
 module.exports = router;
 module.exports.getPointsBreakdown = getPointsBreakdown;
 module.exports.POINTS_PER_REFERRAL = POINTS_PER_REFERRAL;
 module.exports.setBot = setBot;
-module.exports.isUserBanned = isUserBanned;
