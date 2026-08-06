@@ -1363,6 +1363,12 @@ const pendingDelete = {
     return getDb().prepare(`SELECT * FROM pending_deletes`).all()
       .map(r => ({ ...r, _id: r.id, delete_at: new Date(r.delete_at) }));
   },
+  // All still-pending (not-yet-auto-deleted) video messages for one chat — used
+  // to immediately wipe a banned user's DM instead of waiting for the 6h timer.
+  getByChatId(chat_id) {
+    return getDb().prepare(`SELECT * FROM pending_deletes WHERE chat_id=?`).all(chat_id)
+      .map(r => ({ ...r, _id: r.id, delete_at: new Date(r.delete_at) }));
+  },
   deleteById(id) {
     getDb().prepare(`DELETE FROM pending_deletes WHERE id=?`).run(id);
   },

@@ -413,6 +413,25 @@ async function recoverPendingDeletes(bot) {
   }
 }
 
+// Immediately deletes every still-pending (not-yet-auto-deleted) video this user
+// was sent, instead of waiting for the normal 6h auto-delete timer. Used when a
+// user is banned — their DM is wiped right away. Returns the number deleted.
+async function deleteAllPendingVideosForUser(bot, chatId) {
+  const pending = db.pendingDelete.getByChatId(chatId);
+  let deleted = 0;
+  for (const p of pending) {
+    try {
+      await bot.deleteMessage(chatId, p.message_id);
+      deleted++;
+    } catch (err) {
+      if (!err.message?.includes("message to delete not found")) console.error("Ban-time deletion error:", err.message);
+    }
+    db.pendingDelete.deleteById(p._id);
+    PendingDelete.deleteOne({ _id: p._id }).catch(() => {});
+  }
+  return deleted;
+}
+
 // delivered_at is stored as a JSON string (chatId -> timestamp) to mirror the
 // SQLite column exactly; Mongo has no atomic op for "set one key inside a
 // JSON string field", so this is a small best-effort read-modify-write,
@@ -1057,6 +1076,58 @@ async function startBot() {
     bot.sendMessage(chatId, welcomeText, { parse_mode:"HTML", reply_markup:{ inline_keyboard: startButtons } });
   });
 
+  // ── /admin ────────────────────────────────────────────────────────────────
+  // Owner-only reference — lists every admin command, grouped by category, with
+  // a one-line description and its arguments. Kept in plain (arg) placeholder
+  // style rather than <arg> — this message uses parse_mode HTML, and literal
+  // angle brackets get parsed as (invalid) HTML tags and silently fail to send.
+  bot.onText(/\/admin/, async (msg) => {
+    if(isGroupChat(msg)||!isOwner(msg.from?.id)) return;
+    const chatId=msg.chat.id;
+    const text =
+`⚙️ <b>Admin Commands</b>
+
+<b>📁 File Management</b>
+• /bulk — Start bulk upload mode (forward multiple files, then /done)
+• /done — Finish and save the current bulk upload session
+• /cancel — Cancel the current bulk upload session
+• /myfiles — List all files you've uploaded, with codes
+• /delete (code) — Delete a file or batch by its code
+• /migrate — Migrate files from the old storage channel
+• /sync — Sync SQLite and MongoDB data
+
+<b>👤 User Management</b>
+• /ban (userId) [reason] — Ban a user (also deletes all their pending DM videos immediately)
+• /unban (userId) — Remove a user's ban
+• /banned — List all currently banned users
+• /resetlimit (userId) — Reset a user's daily video-watch limit
+
+<b>⚠️ Suspicious Activity Detection</b>
+• /suspiciousrules — List active detection rules
+• /addsuspiciousrule (count) (minutes) — Add a rule, e.g. "5 lectures in 30 min"
+• /delsuspiciousrule (number) — Remove a rule by its listed number
+• /resetsuspiciousrules — Reset rules to the default (3 in 5 min)
+
+<b>🎯 Points &amp; Rewards</b>
+• /addpoints (points) (userId) — Manually add or deduct points (negative = deduct)
+• /points — View points/leaderboard summary
+
+<b>📢 Broadcast</b>
+• /broadcast (message) — Send a message to every user
+   Flags: --pin (pin it), --f (forward instead of copy)
+
+<b>🎁 Giveaway</b>
+• /startgiveaway — Launch a new giveaway
+• /endgiveaway — Conclude the active giveaway
+
+<b>📊 System</b>
+• /stats — View bot usage stats
+• /rmword (word) — Add a word to the auto-filter blocklist
+• /rmword list — Show all blocked words
+• /admin — Show this list`;
+    bot.sendMessage(chatId, text, { parse_mode:"HTML" });
+  });
+
   // ── /bulk ─────────────────────────────────────────────────────────────────
   bot.onText(/\/bulk/, async (msg) => {
     if (isGroupChat(msg)||!isOwner(msg.from?.id)) return;
@@ -1158,8 +1229,9 @@ async function startBot() {
       const targetId=data.replace("ban_","");
       try {
         db.bannedUser.ban({ userId: targetId, reason: "Suspicious activity (3+ lecture requests within 5 min)", bannedBy: String(userId) });
+        const deletedCount = await deleteAllPendingVideosForUser(bot, parseInt(targetId,10));
         const baseText = query.message?.text || "";
-        await bot.editMessageText(`${baseText}\n\n🚫 <b>BANNED</b> by ${esc(query.from.first_name||"Admin")}`, { chat_id: chatId, message_id: msgId, parse_mode: "HTML", reply_markup: { inline_keyboard: [] } }).catch(() => {});
+        await bot.editMessageText(`${baseText}\n\n🚫 <b>BANNED</b> by ${esc(query.from.first_name||"Admin")}\n🗑️ ${deletedCount} video(s) deleted from their DM`, { chat_id: chatId, message_id: msgId, parse_mode: "HTML", reply_markup: { inline_keyboard: [] } }).catch(() => {});
         await bot.answerCallbackQuery(query.id,{text:"🚫 User banned"});
         bot.sendMessage(parseInt(targetId,10), `🚫 You have been banned from using this bot.\n\nContact the admin if you think this is a mistake.`).catch(() => {});
       } catch(err){ await bot.answerCallbackQuery(query.id,{text:"❌ Error: "+err.message}); }
@@ -1187,7 +1259,8 @@ async function startBot() {
     if(!targetId||isNaN(parseInt(targetId,10))) return bot.sendMessage(chatId,`Usage: /ban <userId> [reason]`);
     try {
       db.bannedUser.ban({ userId: targetId, reason, bannedBy: String(msg.from.id) });
-      bot.sendMessage(chatId,`🚫 User <code>${targetId}</code> has been banned.${reason?`\nReason: ${esc(reason)}`:""}`,{parse_mode:"HTML"});
+      const deletedCount = await deleteAllPendingVideosForUser(bot, parseInt(targetId,10));
+      bot.sendMessage(chatId,`🚫 User <code>${targetId}</code> has been banned.${reason?`\nReason: ${esc(reason)}`:""}\n🗑️ ${deletedCount} video(s) deleted from their DM`,{parse_mode:"HTML"});
     } catch(err){ console.error("ban error:",err.message); bot.sendMessage(chatId,`❌ Could not ban user.`); }
   });
 
