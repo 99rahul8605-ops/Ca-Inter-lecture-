@@ -264,6 +264,26 @@ function _setupTables(db) {
       createdAt INTEGER DEFAULT 0
     );
     CREATE INDEX IF NOT EXISTS idx_point_adjustments_user ON point_adjustments(userId);
+
+    -- Banned users — blocks a userId from receiving lecture deliveries via the bot.
+    CREATE TABLE IF NOT EXISTS banned_users (
+      userId   TEXT PRIMARY KEY,
+      reason   TEXT DEFAULT '',
+      bannedAt INTEGER DEFAULT 0,
+      bannedBy TEXT DEFAULT ''
+    );
+
+    -- Lecture request log — one row per successful lecture/video delivery via the
+    -- bot's /start deep link. Used only to detect a burst of requests (possible
+    -- bulk-download/leak behavior) within a short rolling window; rows older than
+    -- a day are pruned periodically so this never grows unbounded.
+    CREATE TABLE IF NOT EXISTS lecture_requests (
+      id          TEXT PRIMARY KEY,
+      userId      TEXT NOT NULL,
+      code        TEXT NOT NULL,
+      requestedAt INTEGER DEFAULT 0
+    );
+    CREATE INDEX IF NOT EXISTS idx_lecture_requests_user ON lecture_requests(userId, requestedAt);
   `);
 }
 
@@ -1508,6 +1528,55 @@ const watchedLecture = {
   },
 };
 
+// ── BANNED USER Operations ──────────────────────────────────────────────────
+
+const bannedUser = {
+  isBanned(userId) {
+    return !!getDb().prepare(`SELECT 1 FROM banned_users WHERE userId=?`).get(userId);
+  },
+  ban({ userId, reason, bannedBy }) {
+    getDb().prepare(`INSERT INTO banned_users(userId,reason,bannedAt,bannedBy) VALUES(?,?,?,?)
+      ON CONFLICT(userId) DO UPDATE SET reason=excluded.reason, bannedAt=excluded.bannedAt, bannedBy=excluded.bannedBy`)
+      .run(String(userId), reason || '', Date.now(), String(bannedBy || ''));
+  },
+  // Returns true if the user was actually banned before (so callers can tell
+  // "removed" apart from "wasn't banned in the first place").
+  unban(userId) {
+    const existed = !!getDb().prepare(`SELECT 1 FROM banned_users WHERE userId=?`).get(String(userId));
+    getDb().prepare(`DELETE FROM banned_users WHERE userId=?`).run(String(userId));
+    return existed;
+  },
+  findOne(userId) {
+    const r = getDb().prepare(`SELECT * FROM banned_users WHERE userId=?`).get(String(userId));
+    return r ? { ...r, bannedAt: new Date(r.bannedAt) } : null;
+  },
+  listAll() {
+    return getDb().prepare(`SELECT * FROM banned_users ORDER BY bannedAt DESC`).all()
+      .map(r => ({ ...r, bannedAt: new Date(r.bannedAt) }));
+  },
+};
+
+// ── LECTURE REQUEST Operations (suspicious-activity / burst detection) ────────
+// One row per successful lecture/video delivery via the bot. countRecent() powers
+// the "N lectures within M minutes" burst check in server.js; pruneOlderThan()
+// is called alongside every insert so the table stays small — a 5-minute rolling
+// window never needs more than a day of history.
+
+const lectureRequest = {
+  insert({ id, userId, code, requestedAt }) {
+    getDb().prepare(`INSERT INTO lecture_requests(id,userId,code,requestedAt) VALUES(?,?,?,?)`)
+      .run(id, String(userId), code || '', requestedAt || Date.now());
+  },
+  countRecent(userId, windowMs) {
+    const since = Date.now() - windowMs;
+    return getDb().prepare(`SELECT COUNT(*) as c FROM lecture_requests WHERE userId=? AND requestedAt>=?`)
+      .get(String(userId), since).c;
+  },
+  pruneOlderThan(ms) {
+    getDb().prepare(`DELETE FROM lecture_requests WHERE requestedAt < ?`).run(Date.now() - ms);
+  },
+};
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function generateId() {
@@ -1537,5 +1606,7 @@ module.exports = {
   spinHistory,
   watchedLecture,
   pointAdjustment,
+  bannedUser,
+  lectureRequest,
   generateId,
 };

@@ -36,6 +36,11 @@ const STORAGE_CHANNEL_ID = process.env.STORAGE_CHANNEL_ID ? parseInt(process.env
 const UPI_ID = process.env.UPI_ID || "";
 const UPI_NAME = process.env.UPI_NAME || ""; // payee name shown in the UPI app (pn= param) — set this in env, else falls back to a generic name
 const PAYMENT_GROUP_ID = process.env.PAYMENT_GROUP_ID ? parseInt(process.env.PAYMENT_GROUP_ID) : null;
+// Real-time activity log group — every lecture/video call (who requested what,
+// when) is posted here as it happens. Separate from PAYMENT_GROUP_ID/OWNER_ID
+// so logs don't clutter the owner's DM or the payments group. Optional — if
+// unset, logging is silently skipped.
+const LOGS_GROUP_ID = process.env.LOGS_GROUP_ID ? parseInt(process.env.LOGS_GROUP_ID) : null;
 const CONTACT_LINK = process.env.CONTACT_LINK || "";
 
 // Ilambit DevPort — used to auto-verify UPI payments by UTR against the BharatPe
@@ -78,9 +83,72 @@ let bot = null;
 
 if (!TOKEN || !MONGO_URI || !WEB_URL || !OWNER_ID) { console.error("Missing env: BOT_TOKEN, MONGO_URI, WEB_URL, OWNER_ID are required."); process.exit(1); }
 if (!STORAGE_CHANNEL_ID) console.warn("Warning: STORAGE_CHANNEL_ID not set.");
+if (!LOGS_GROUP_ID) console.warn("Warning: LOGS_GROUP_ID not set — real-time lecture-call logs will be skipped.");
 
 function isOwner(userId) { return userId === OWNER_ID; }
 function isGroupChat(msg) { return msg.chat && (msg.chat.type === "group" || msg.chat.type === "supergroup"); }
+function formatIST(d) {
+  const parts = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Kolkata', day: 'numeric', month: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true }).formatToParts(d);
+  const get = (t) => parts.find((p) => p.type === t).value;
+  return `${get('day')}/${get('month')}/${get('year')}, ${get('hour')}:${get('minute')}:${get('second')} ${get('dayPeriod').toLowerCase()}`;
+}
+
+// ── Suspicious activity detection ───────────────────────────────────────────
+// If a (non-owner) user pulls 3+ lectures within a 5-minute window, it's a
+// pattern more consistent with bulk-scraping/leaking than normal viewing, so
+// the owner gets a one-time alert per burst with a one-tap Ban button.
+const SUSPICIOUS_WINDOW_MS = 5 * 60 * 1000;
+const SUSPICIOUS_THRESHOLD = 3;
+
+async function checkSuspiciousActivity(bot, fromUser, code) {
+  try {
+    const userId = fromUser?.id;
+    if (!userId || isOwner(userId)) return;
+    const uidStr = String(userId);
+    db.lectureRequest.insert({ id: db.generateId(), userId: uidStr, code, requestedAt: Date.now() });
+    // Housekeeping — a 5-minute window never needs more than a day of history.
+    db.lectureRequest.pruneOlderThan(24 * 60 * 60 * 1000);
+
+    const recentCount = db.lectureRequest.countRecent(uidStr, SUSPICIOUS_WINDOW_MS);
+    // Fire exactly once per burst — right when the count first crosses the
+    // threshold — so continued requests past 3 don't spam the owner repeatedly.
+    if (recentCount === SUSPICIOUS_THRESHOLD && OWNER_ID && bot) {
+      const name = fromUser.username ? `@${fromUser.username}` : (fromUser.first_name || `User ${uidStr}`);
+      const text = `⚠️ <b>Suspicious Activity Detected</b>\n\n` +
+        `User: ${esc(name)} (<code>${uidStr}</code>)\n` +
+        `Requested <b>${recentCount} lectures</b> within the last 5 minutes.\n` +
+        `Latest code: <code>${esc(code)}</code>\n\n` +
+        `This may indicate bulk-downloading/leaking. Ban if needed:`;
+      bot.sendMessage(OWNER_ID, text, {
+        parse_mode: "HTML",
+        reply_markup: { inline_keyboard: [[{ text: "🚫 Ban User", callback_data: `ban_${uidStr}` }]] }
+      }).catch(() => {});
+    }
+  } catch (err) { console.error("Suspicious activity check error:", err.message); }
+}
+
+// ── Real-time lecture activity log ──────────────────────────────────────────
+// Posts one message per lecture/file call to LOGS_GROUP_ID as it happens — who
+// requested it, what it was, and their running today-count. Fire-and-forget:
+// a logging failure must never block the actual file delivery to the user.
+function logLectureActivity(bot, fromUser, record, extra) {
+  if (!LOGS_GROUP_ID || !bot) return;
+  try {
+    const userId = fromUser?.id;
+    const uidStr = userId != null ? String(userId) : "unknown";
+    const name = fromUser?.username ? `@${fromUser.username}` : (fromUser?.first_name || `User ${uidStr}`);
+    const typeEmoji = { video:"🎬", video_note:"📹", document:"📄", photo:"🖼️", audio:"🎵", voice:"🎤" }[record.file_type] || "📎";
+    const lines = [
+      `${typeEmoji} <b>Lecture Called</b>`,
+      `👤 ${esc(name)} (<code>${uidStr}</code>)`,
+      `📁 ${esc(record.file_name || "file")}`,
+      `🔑 Code: <code>${esc(record.code || "")}</code>`,
+    ];
+    if (extra && extra.todayUsed != null) lines.push(`📊 Today: ${extra.todayUsed}/${DAILY_VIDEO_LIMIT}`);
+    lines.push(`🕐 ${formatIST(new Date())}`);
+    bot.sendMessage(LOGS_GROUP_ID, lines.join("\n"), { parse_mode: "HTML" }).catch(() => {});
+  } catch (err) { console.error("Lecture log error:", err.message); }
+}
 
 // ── MongoDB Schemas (for backup writes only) ──────────────────────────────────
 const fileSchema = new mongoose.Schema({ code: { type: String, required: true, unique: true }, file_id: { type: String, required: true }, file_type: { type: String, required: true }, file_name: { type: String, default: "file" }, uploaded_by: Number, expires_at: { type: Date, default: null }, delivered_to: [Number], delivered_at: { type: String, default: '{}' }, created_at: { type: Date, default: Date.now }, channel_msg_id: { type: Number, default: null } });
@@ -801,6 +869,13 @@ async function startBot() {
     const param = (match[1] || "").trim();
     const isNewUser = userId ? !db.user.findOne(String(userId)) : false;
 
+    // Banned users get a short refusal and nothing else — no lecture delivery,
+    // no referral/giveaway processing. Owner can never be banned by this check
+    // since isOwner() is excluded below.
+    if (userId && !isOwner(userId) && db.bannedUser.isBanned(String(userId))) {
+      return bot.sendMessage(chatId, `🚫 You have been banned from using this bot.\n\nContact the admin if you think this is a mistake.`);
+    }
+
     if (userId) {
       db.user.upsert({ userId: String(userId), firstName: msg.from.first_name||"", lastName: msg.from.last_name||"", username: msg.from.username||"", firstSeen: new Date(), lastSeen: new Date() });
       User.findOneAndUpdate({ userId: String(userId) }, { userId: String(userId), firstName: msg.from.first_name||"", lastName: msg.from.last_name||"", username: msg.from.username||"", lastSeen: new Date() }, { upsert: true }).catch(() => {});
@@ -887,6 +962,7 @@ async function startBot() {
               continue;
             }
             if ((f.file_type==="video"||f.file_type==="video_note") && sentMsg) { hasVideo=true; await scheduleDelete(bot,chatId,sentMsg.message_id,new Date(Date.now()+6*60*60*1000)); }
+            if (sentMsg) logLectureActivity(bot, msg.from, { file_type: f.file_type, file_name: f.file_name, code: param });
           }
           if (hasVideo) await bot.sendMessage(chatId, `⚠️ Videos will auto-delete after 6 hours.`);
           if (failedCount > 0) await bot.sendMessage(chatId, `⚠️ ${failedCount} file(s) in this batch couldn't be delivered (owner needs to re-upload them).`);
@@ -910,6 +986,8 @@ async function startBot() {
           FileRecord.updateOne({ code:record.code },{ $addToSet:{ delivered_to:chatId } }).catch(() => {});
           stampMongoDeliveredAt(record.id, chatId, Date.now());
           await scheduleUndeliver(record.id, record.code, chatId, new Date(Date.now()+6*60*60*1000));
+          checkSuspiciousActivity(bot, msg.from, record.code);
+          logLectureActivity(bot, msg.from, record, { todayUsed: lim.used });
           const lines=[`⚠️ This video auto-deletes in 6 hours.`,``,`📊 <b>Today:</b> ${lim.used}/${DAILY_VIDEO_LIMIT} videos`];
           if(lim.remaining===0) lines.push(`🚫 Limit reached for today!`);
           else if(lim.remaining<=3) lines.push(`⚠️ Only <b>${lim.remaining}</b> left today!`);
@@ -917,6 +995,7 @@ async function startBot() {
           return;
         }
         const sentMsg = await sendFile(bot, chatId, record);
+        logLectureActivity(bot, msg.from, record, null);
         if (isVideo) {
           await scheduleDelete(bot,chatId,sentMsg.message_id,new Date(Date.now()+6*60*60*1000));
           db.fileRecord.addDeliveredTo(record.id,chatId);
@@ -1062,6 +1141,16 @@ async function startBot() {
     if(query.message&&isGroupChat(query.message)) return bot.answerCallbackQuery(query.id);
     if(!isOwner(userId)) return bot.answerCallbackQuery(query.id);
     if(data.startsWith("myfiles_page_")){const page=parseInt(data.replace("myfiles_page_",""),10);await sendMyFilesPage(query.message.chat.id,userId,page,msgId);await bot.answerCallbackQuery(query.id);}
+    if(data.startsWith("ban_")){
+      const targetId=data.replace("ban_","");
+      try {
+        db.bannedUser.ban({ userId: targetId, reason: "Suspicious activity (3+ lecture requests within 5 min)", bannedBy: String(userId) });
+        const baseText = query.message?.text || "";
+        await bot.editMessageText(`${baseText}\n\n🚫 <b>BANNED</b> by ${esc(query.from.first_name||"Admin")}`, { chat_id: chatId, message_id: msgId, parse_mode: "HTML", reply_markup: { inline_keyboard: [] } }).catch(() => {});
+        await bot.answerCallbackQuery(query.id,{text:"🚫 User banned"});
+        bot.sendMessage(parseInt(targetId,10), `🚫 You have been banned from using this bot.\n\nContact the admin if you think this is a mistake.`).catch(() => {});
+      } catch(err){ await bot.answerCallbackQuery(query.id,{text:"❌ Error: "+err.message}); }
+    }
   });
 
   // ── /delete ───────────────────────────────────────────────────────────────
@@ -1073,6 +1162,43 @@ async function startBot() {
       if(db.bulkBatch.deleteByCode(code,msg.from.id)){BulkBatch.deleteOne({batch_code:{$regex:new RegExp(`^${code}$`,"i")},user_id:msg.from.id}).catch(()=>{});return bot.sendMessage(chatId,`✅ Batch deleted!`);}
       bot.sendMessage(chatId,`Code not found.`);
     } catch(_){bot.sendMessage(chatId,`Deletion failed.`);}
+  });
+
+  // ── /ban <userId> [reason] ───────────────────────────────────────────────
+  bot.onText(/\/ban (.+)/, async (msg,match) => {
+    if(isGroupChat(msg)||!isOwner(msg.from?.id)) return;
+    const chatId=msg.chat.id;
+    const parts=match[1].trim().split(/\s+/);
+    const targetId=parts.shift();
+    const reason=parts.join(" ");
+    if(!targetId||isNaN(parseInt(targetId,10))) return bot.sendMessage(chatId,`Usage: /ban <userId> [reason]`);
+    try {
+      db.bannedUser.ban({ userId: targetId, reason, bannedBy: String(msg.from.id) });
+      bot.sendMessage(chatId,`🚫 User <code>${targetId}</code> has been banned.${reason?`\nReason: ${esc(reason)}`:""}`,{parse_mode:"HTML"});
+    } catch(err){ console.error("ban error:",err.message); bot.sendMessage(chatId,`❌ Could not ban user.`); }
+  });
+
+  // ── /unban <userId> ──────────────────────────────────────────────────────
+  bot.onText(/\/unban (.+)/, async (msg,match) => {
+    if(isGroupChat(msg)||!isOwner(msg.from?.id)) return;
+    const chatId=msg.chat.id;
+    const targetId=match[1].trim();
+    try {
+      const removed=db.bannedUser.unban(targetId);
+      bot.sendMessage(chatId, removed ? `✅ User <code>${targetId}</code> has been unbanned.` : `User <code>${targetId}</code> was not banned.`, {parse_mode:"HTML"});
+    } catch(err){ console.error("unban error:",err.message); bot.sendMessage(chatId,`❌ Could not unban user.`); }
+  });
+
+  // ── /banned ───────────────────────────────────────────────────────────────
+  bot.onText(/\/banned/, async (msg) => {
+    if(isGroupChat(msg)||!isOwner(msg.from?.id)) return;
+    const chatId=msg.chat.id;
+    try {
+      const list=db.bannedUser.listAll();
+      if(!list.length) return bot.sendMessage(chatId,`No banned users.`);
+      const text=`🚫 <b>Banned Users</b> (${list.length})\n\n`+list.map(b=>`• <code>${b.userId}</code>${b.reason?` — ${esc(b.reason)}`:""} (${formatIST(b.bannedAt)})`).join("\n");
+      bot.sendMessage(chatId,text,{parse_mode:"HTML"});
+    } catch(err){ console.error("banned list error:",err.message); bot.sendMessage(chatId,`❌ Could not load banned users.`); }
   });
 
   // ── /resetlimit <userId> ─────────────────────────────────────────────────
@@ -1472,11 +1598,6 @@ async function startBot() {
   });
 
   // ── /stats ────────────────────────────────────────────────────────────────
-  function formatIST(d) {
-    const parts = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Kolkata', day: 'numeric', month: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true }).formatToParts(d);
-    const get = (t) => parts.find((p) => p.type === t).value;
-    return `${get('day')}/${get('month')}/${get('year')}, ${get('hour')}:${get('minute')}:${get('second')} ${get('dayPeriod').toLowerCase()}`;
-  }
   const nf = (n) => Number(n || 0).toLocaleString('en-IN');
 
   bot.onText(/\/stats/, async (msg) => {
