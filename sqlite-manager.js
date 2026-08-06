@@ -284,6 +284,15 @@ function _setupTables(db) {
       requestedAt INTEGER DEFAULT 0
     );
     CREATE INDEX IF NOT EXISTS idx_lecture_requests_user ON lecture_requests(userId, requestedAt);
+
+    -- Generic key/value settings store (JSON-encoded values). Currently used for
+    -- the configurable suspicious-activity rules (see settings.get/set below),
+    -- but written as a generic table so future admin-tunable settings can reuse
+    -- it without another migration.
+    CREATE TABLE IF NOT EXISTS bot_settings (
+      key   TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
   `);
 }
 
@@ -1577,6 +1586,21 @@ const lectureRequest = {
   },
 };
 
+// ── SETTINGS Operations (generic JSON-encoded key/value store) ────────────────
+
+const settings = {
+  get(key, fallback) {
+    const r = getDb().prepare(`SELECT value FROM bot_settings WHERE key=?`).get(key);
+    if (!r) return fallback;
+    try { return JSON.parse(r.value); } catch (e) { return fallback; }
+  },
+  set(key, value) {
+    getDb().prepare(`INSERT INTO bot_settings(key,value) VALUES(?,?)
+      ON CONFLICT(key) DO UPDATE SET value=excluded.value`)
+      .run(key, JSON.stringify(value));
+  },
+};
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function generateId() {
@@ -1608,5 +1632,6 @@ module.exports = {
   pointAdjustment,
   bannedUser,
   lectureRequest,
+  settings,
   generateId,
 };

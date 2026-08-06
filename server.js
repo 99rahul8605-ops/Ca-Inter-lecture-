@@ -94,11 +94,17 @@ function formatIST(d) {
 }
 
 // ── Suspicious activity detection ───────────────────────────────────────────
-// If a (non-owner) user pulls 3+ lectures within a 5-minute window, it's a
-// pattern more consistent with bulk-scraping/leaking than normal viewing, so
-// the owner gets a one-time alert per burst with a one-tap Ban button.
-const SUSPICIOUS_WINDOW_MS = 5 * 60 * 1000;
-const SUSPICIOUS_THRESHOLD = 3;
+// If a (non-owner) user's lecture pulls match any configured rule (e.g. "3+
+// within 5 minutes"), it's a pattern more consistent with bulk-scraping/leaking
+// than normal viewing, so the owner gets a one-time alert per rule-crossing
+// with a one-tap Ban button. Rules are stored in bot_settings (JSON), so the
+// owner can tune or add more of them live via /suspiciousrules commands —
+// no redeploy needed. Falls back to a single default rule if none configured.
+const DEFAULT_SUSPICIOUS_RULES = [{ count: 3, windowMinutes: 5 }];
+function getSuspiciousRules() {
+  const rules = db.settings.get('suspicious_rules', DEFAULT_SUSPICIOUS_RULES);
+  return Array.isArray(rules) && rules.length ? rules : DEFAULT_SUSPICIOUS_RULES;
+}
 
 async function checkSuspiciousActivity(bot, fromUser, code) {
   try {
@@ -106,23 +112,30 @@ async function checkSuspiciousActivity(bot, fromUser, code) {
     if (!userId || isOwner(userId)) return;
     const uidStr = String(userId);
     db.lectureRequest.insert({ id: db.generateId(), userId: uidStr, code, requestedAt: Date.now() });
-    // Housekeeping — a 5-minute window never needs more than a day of history.
-    db.lectureRequest.pruneOlderThan(24 * 60 * 60 * 1000);
+    const rules = getSuspiciousRules();
+    // Housekeeping — retain at least as long as the widest configured window
+    // (plus an hour of buffer), so a long custom rule never loses its own data.
+    const maxWindowMs = Math.max(24 * 60 * 60 * 1000, ...rules.map(r => (Number(r.windowMinutes) || 5) * 60 * 1000 + 60 * 60 * 1000));
+    db.lectureRequest.pruneOlderThan(maxWindowMs);
 
-    const recentCount = db.lectureRequest.countRecent(uidStr, SUSPICIOUS_WINDOW_MS);
-    // Fire exactly once per burst — right when the count first crosses the
-    // threshold — so continued requests past 3 don't spam the owner repeatedly.
-    if (recentCount === SUSPICIOUS_THRESHOLD && OWNER_ID && bot) {
-      const name = fromUser.username ? `@${fromUser.username}` : (fromUser.first_name || `User ${uidStr}`);
-      const text = `⚠️ <b>Suspicious Activity Detected</b>\n\n` +
-        `User: ${esc(name)} (<code>${uidStr}</code>)\n` +
-        `Requested <b>${recentCount} lectures</b> within the last 5 minutes.\n` +
-        `Latest code: <code>${esc(code)}</code>\n\n` +
-        `This may indicate bulk-downloading/leaking. Ban if needed:`;
-      bot.sendMessage(OWNER_ID, text, {
-        parse_mode: "HTML",
-        reply_markup: { inline_keyboard: [[{ text: "🚫 Ban User", callback_data: `ban_${uidStr}` }]] }
-      }).catch(() => {});
+    for (const rule of rules) {
+      const windowMs = Math.max(1, Number(rule.windowMinutes) || 5) * 60 * 1000;
+      const threshold = Math.max(1, Number(rule.count) || 3);
+      const recentCount = db.lectureRequest.countRecent(uidStr, windowMs);
+      // Fire exactly once per burst — right when the count first crosses this
+      // rule's threshold — so continued requests don't spam the owner repeatedly.
+      if (recentCount === threshold && OWNER_ID && bot) {
+        const name = fromUser.username ? `@${fromUser.username}` : (fromUser.first_name || `User ${uidStr}`);
+        const text = `⚠️ <b>Suspicious Activity Detected</b>\n\n` +
+          `User: ${esc(name)} (<code>${uidStr}</code>)\n` +
+          `Requested <b>${recentCount} lectures</b> within the last ${rule.windowMinutes} minute(s).\n` +
+          `Latest code: <code>${esc(code)}</code>\n\n` +
+          `This may indicate bulk-downloading/leaking. Ban if needed:`;
+        bot.sendMessage(OWNER_ID, text, {
+          parse_mode: "HTML",
+          reply_markup: { inline_keyboard: [[{ text: "🚫 Ban User", callback_data: `ban_${uidStr}` }]] }
+        }).catch(() => {});
+      }
     }
   } catch (err) { console.error("Suspicious activity check error:", err.message); }
 }
@@ -1199,6 +1212,60 @@ async function startBot() {
       const text=`🚫 <b>Banned Users</b> (${list.length})\n\n`+list.map(b=>`• <code>${b.userId}</code>${b.reason?` — ${esc(b.reason)}`:""} (${formatIST(b.bannedAt)})`).join("\n");
       bot.sendMessage(chatId,text,{parse_mode:"HTML"});
     } catch(err){ console.error("banned list error:",err.message); bot.sendMessage(chatId,`❌ Could not load banned users.`); }
+  });
+
+  // ── Suspicious-activity rules ────────────────────────────────────────────
+  // /suspiciousrules              — list current rules with their index
+  // /addsuspiciousrule <count> <minutes> — add a new rule, e.g. "5 lectures in 30 min"
+  // /delsuspiciousrule <index>    — remove a rule by its listed number
+  // /resetsuspiciousrules         — restore the single default rule (3 in 5 min)
+  bot.onText(/\/suspiciousrules/, async (msg) => {
+    if(isGroupChat(msg)||!isOwner(msg.from?.id)) return;
+    const chatId=msg.chat.id;
+    try {
+      const rules=getSuspiciousRules();
+      const text=`⚙️ <b>Suspicious Activity Rules</b>\n\n`+
+        rules.map((r,i)=>`${i+1}. ${r.count}+ lectures within ${r.windowMinutes} minute(s)`).join("\n")+
+        `\n\nAdd: /addsuspiciousrule <count> <minutes>\nRemove: /delsuspiciousrule <number>\nReset: /resetsuspiciousrules`;
+      bot.sendMessage(chatId,text,{parse_mode:"HTML"});
+    } catch(err){ console.error("suspiciousrules error:",err.message); bot.sendMessage(chatId,`❌ Could not load rules.`); }
+  });
+
+  bot.onText(/\/addsuspiciousrule (.+)/, async (msg,match) => {
+    if(isGroupChat(msg)||!isOwner(msg.from?.id)) return;
+    const chatId=msg.chat.id;
+    const parts=match[1].trim().split(/\s+/);
+    const count=parseInt(parts[0],10); const windowMinutes=parseInt(parts[1],10);
+    if(!count||count<1||!windowMinutes||windowMinutes<1) return bot.sendMessage(chatId,`Usage: /addsuspiciousrule <count> <minutes>\ne.g. /addsuspiciousrule 5 30`);
+    try {
+      const rules=getSuspiciousRules().slice();
+      rules.push({ count, windowMinutes });
+      db.settings.set('suspicious_rules', rules);
+      bot.sendMessage(chatId,`✅ Rule added: <b>${count}+</b> lectures within <b>${windowMinutes}</b> minute(s).\n\nUse /suspiciousrules to see all rules.`,{parse_mode:"HTML"});
+    } catch(err){ console.error("addsuspiciousrule error:",err.message); bot.sendMessage(chatId,`❌ Could not add rule.`); }
+  });
+
+  bot.onText(/\/delsuspiciousrule (.+)/, async (msg,match) => {
+    if(isGroupChat(msg)||!isOwner(msg.from?.id)) return;
+    const chatId=msg.chat.id;
+    const idx=parseInt(match[1].trim(),10)-1;
+    try {
+      const rules=getSuspiciousRules().slice();
+      if(isNaN(idx)||idx<0||idx>=rules.length) return bot.sendMessage(chatId,`Invalid rule number. Use /suspiciousrules to see valid numbers.`);
+      if(rules.length===1) return bot.sendMessage(chatId,`⚠️ Can't remove the last remaining rule. Add a new one first, or use /resetsuspiciousrules.`);
+      const removed=rules.splice(idx,1)[0];
+      db.settings.set('suspicious_rules', rules);
+      bot.sendMessage(chatId,`🗑️ Removed rule: ${removed.count}+ lectures within ${removed.windowMinutes} minute(s).`);
+    } catch(err){ console.error("delsuspiciousrule error:",err.message); bot.sendMessage(chatId,`❌ Could not remove rule.`); }
+  });
+
+  bot.onText(/\/resetsuspiciousrules/, async (msg) => {
+    if(isGroupChat(msg)||!isOwner(msg.from?.id)) return;
+    const chatId=msg.chat.id;
+    try {
+      db.settings.set('suspicious_rules', DEFAULT_SUSPICIOUS_RULES);
+      bot.sendMessage(chatId,`✅ Rules reset to default: ${DEFAULT_SUSPICIOUS_RULES[0].count}+ lectures within ${DEFAULT_SUSPICIOUS_RULES[0].windowMinutes} minute(s).`);
+    } catch(err){ console.error("resetsuspiciousrules error:",err.message); bot.sendMessage(chatId,`❌ Could not reset rules.`); }
   });
 
   // ── /resetlimit <userId> ─────────────────────────────────────────────────
