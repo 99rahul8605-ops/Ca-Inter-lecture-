@@ -1226,7 +1226,7 @@ async function startBot() {
       const rules=getSuspiciousRules();
       const text=`⚙️ <b>Suspicious Activity Rules</b>\n\n`+
         rules.map((r,i)=>`${i+1}. ${r.count}+ lectures within ${r.windowMinutes} minute(s)`).join("\n")+
-        `\n\nAdd: /addsuspiciousrule <count> <minutes>\nRemove: /delsuspiciousrule <number>\nReset: /resetsuspiciousrules`;
+        `\n\nAdd: /addsuspiciousrule (count) (minutes)\nRemove: /delsuspiciousrule (number)\nReset: /resetsuspiciousrules`;
       bot.sendMessage(chatId,text,{parse_mode:"HTML"});
     } catch(err){ console.error("suspiciousrules error:",err.message); bot.sendMessage(chatId,`❌ Could not load rules.`); }
   });
@@ -1236,7 +1236,7 @@ async function startBot() {
     const chatId=msg.chat.id;
     const parts=match[1].trim().split(/\s+/);
     const count=parseInt(parts[0],10); const windowMinutes=parseInt(parts[1],10);
-    if(!count||count<1||!windowMinutes||windowMinutes<1) return bot.sendMessage(chatId,`Usage: /addsuspiciousrule <count> <minutes>\ne.g. /addsuspiciousrule 5 30`);
+    if(!count||count<1||!windowMinutes||windowMinutes<1) return bot.sendMessage(chatId,`Usage: /addsuspiciousrule (count) (minutes)\ne.g. /addsuspiciousrule 5 30`);
     try {
       const rules=getSuspiciousRules().slice();
       rules.push({ count, windowMinutes });
