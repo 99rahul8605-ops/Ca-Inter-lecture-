@@ -392,6 +392,14 @@ body.ready{transition:none}
 .fj-verify-btn:disabled{opacity:0.5;cursor:not-allowed}
 .fj-err{font-size:12px;color:var(--red);margin-top:10px;min-height:18px}
 
+/* ── Ban Gate (shown instead of the app for banned users) ───────────────── */
+#banGate{position:fixed;inset:0;background:var(--bg);z-index:99998;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;text-align:center}
+#banGate.hidden{display:none}
+.ban-logo{width:72px;height:72px;background:linear-gradient(135deg,#e24b4a,#a32d2d);border-radius:18px;display:flex;align-items:center;justify-content:center;font-size:34px;margin:0 auto 20px;box-shadow:0 8px 24px rgba(226,75,74,0.35)}
+.ban-title{font-size:20px;font-weight:700;margin-bottom:8px;color:var(--text)}
+.ban-sub{font-size:13px;color:var(--text2);line-height:1.6;margin-bottom:8px;max-width:320px}
+.ban-reason{font-size:12px;color:var(--red);background:rgba(226,75,74,0.08);border:1px solid rgba(226,75,74,0.25);border-radius:var(--radius-sm);padding:10px 14px;margin:8px 0 24px;max-width:320px}
+
 /* ── Verifying Screen ───────────────────────────────── */
 #verifyingScreen{position:fixed;inset:0;background:var(--bg);z-index:99999;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:32px 24px;text-align:center;transition:opacity 0.35s ease}
 #verifyingScreen.vs-hide{opacity:0;pointer-events:none}
@@ -464,6 +472,20 @@ body.ready{transition:none}
     <i class="ti ti-check"></i> I've Joined — Verify
   </button>
   <div class="fj-err" id="fjErr"></div>
+</div>
+
+<!-- BAN GATE (shown instead of the app for banned users) -->
+<div id="banGate" class="hidden">
+  <div class="ban-logo">🚫</div>
+  <div class="ban-title">Account Banned</div>
+  <div class="ban-sub">You have been banned from using this bot and can no longer access lectures or content.</div>
+  <div class="ban-reason" id="banReason" style="display:none"></div>
+  <div style="margin-top:8px;text-align:center">
+    <div style="font-size:11px;color:var(--text3);margin-bottom:10px">Think this is a mistake? Contact us</div>
+    <button onclick="var _cl=window._contactLink||('https://t.me/'+(window._botUsername||''));if(tg&&/^https?:\/\/t\.me\//i.test(_cl)&&typeof tg.openTelegramLink==='function'){tg.openTelegramLink(_cl);}else if(tg){tg.openLink(_cl,{try_instant_view:false});}else{window.open(_cl,'_blank');}" style="display:inline-flex;align-items:center;gap:7px;background:var(--surface2);border:1px solid var(--border);color:var(--text2);padding:9px 18px;border-radius:20px;font-size:13px;font-weight:600;cursor:pointer;">
+      📩 Contact Support
+    </button>
+  </div>
 </div>
 
 <!-- PAGE: Home (Batches) -->
@@ -4095,11 +4117,39 @@ async function verifyForceJoin() {
 function _animateVsBar(){var f=document.getElementById('vsFill');if(!f)return;setTimeout(function(){f.style.width='38%'},60);setTimeout(function(){f.style.width='72%'},700);setTimeout(function(){f.style.width='86%'},1400)}
 function _hideVS(cb){var el=document.getElementById('verifyingScreen');if(!el||el.classList.contains('vs-gone')){if(cb)cb();return}var f=document.getElementById('vsFill');if(f)f.style.width='100%';setTimeout(function(){el.classList.add('vs-hide');setTimeout(function(){el.classList.add('vs-gone');if(cb)cb()},350)},180)}
 
+async function checkBanStatus() {
+  // Owner is never banned by this check — skip the network round-trip.
+  if (isAdmin) return false;
+  try {
+    var data = await apiFetch('/api/banned/me');
+    if (data && data.banned) {
+      var reasonEl = document.getElementById('banReason');
+      if (reasonEl) {
+        if (data.reason) { reasonEl.textContent = 'Reason: ' + data.reason; reasonEl.style.display = ''; }
+        else { reasonEl.style.display = 'none'; }
+      }
+      document.getElementById('banGate').classList.remove('hidden');
+      return true;
+    }
+    return false;
+  } catch (e) {
+    console.error('Ban check failed:', e);
+    // On error, don't block a legitimate user because of a server hiccup
+    return false;
+  }
+}
+
 async function init() {
   initTheme();
   _loadWatchedLectures();
   _animateVsBar();
   await checkAdminAccess();
+
+  var banned = await checkBanStatus();
+  if (banned) {
+    _hideVS();
+    return;
+  }
 
   var passed = await checkForceJoin();
   if (!passed) {
