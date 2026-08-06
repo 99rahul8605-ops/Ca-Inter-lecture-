@@ -1119,13 +1119,16 @@ async function confirmGiveawayInviteOnFirstWatch(userId) {
 
 // GET — is the current user (identified via verified initData) banned?
 // Uses getRequestUserId (verified initData), not a raw :userId param, so a user
-// can't probe someone else's ban status by guessing IDs.
+// can't probe someone else's ban status by guessing IDs. Deliberately does NOT
+// return the ban reason — that's internal admin context (e.g. "3+ requests in
+// 5 min") and telling a banned user the exact detection rule just teaches them
+// how to stay under it next time.
 router.get('/banned/me', (req, res) => {
   try {
     const userId = getRequestUserId(req);
     if (!userId) return res.json({ banned: false });
-    const info = db.bannedUser.findOne(userId);
-    res.json({ banned: !!info, reason: info ? (info.reason || '') : '' });
+    const banned = db.bannedUser.isBanned(userId);
+    res.json({ banned });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
