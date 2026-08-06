@@ -1117,6 +1117,18 @@ async function confirmGiveawayInviteOnFirstWatch(userId) {
   } catch (e) { console.error('Giveaway confirm error:', e.message); }
 }
 
+// GET — is the current user (identified via verified initData) banned?
+// Uses getRequestUserId (verified initData), not a raw :userId param, so a user
+// can't probe someone else's ban status by guessing IDs.
+router.get('/banned/me', (req, res) => {
+  try {
+    const userId = getRequestUserId(req);
+    if (!userId) return res.json({ banned: false });
+    const info = db.bannedUser.findOne(userId);
+    res.json({ banned: !!info, reason: info ? (info.reason || '') : '' });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // GET — full list of lectureIds this user has marked watched
 router.get('/watched/:userId', (req, res) => {
   try {
