@@ -293,6 +293,21 @@ function _setupTables(db) {
       key   TEXT PRIMARY KEY,
       value TEXT NOT NULL
     );
+
+    -- Device/IP sightings — one row per app-open, used only to spot the same
+    -- browser fingerprint or IP being used across multiple different Telegram
+    -- userIds (a heuristic for multi-accounting), never for anything else.
+    -- Rows older than the correlation window are pruned periodically.
+    CREATE TABLE IF NOT EXISTS device_sightings (
+      id          TEXT PRIMARY KEY,
+      userId      TEXT NOT NULL,
+      fingerprint TEXT DEFAULT '',
+      ip          TEXT DEFAULT '',
+      seenAt      INTEGER DEFAULT 0
+    );
+    CREATE INDEX IF NOT EXISTS idx_device_sightings_fp ON device_sightings(fingerprint);
+    CREATE INDEX IF NOT EXISTS idx_device_sightings_ip ON device_sightings(ip);
+    CREATE INDEX IF NOT EXISTS idx_device_sightings_user ON device_sightings(userId);
   `);
 }
 
@@ -1607,6 +1622,34 @@ const settings = {
   },
 };
 
+// ── DEVICE SIGHTING Operations (multi-account / shared-device detection) ──────
+
+const deviceSighting = {
+  insert({ id, userId, fingerprint, ip, seenAt }) {
+    getDb().prepare(`INSERT INTO device_sightings(id,userId,fingerprint,ip,seenAt) VALUES(?,?,?,?,?)`)
+      .run(id, String(userId), fingerprint || '', ip || '', seenAt || Date.now());
+  },
+  // Distinct userIds seen with this fingerprint within the window, most-recent first.
+  distinctUsersForFingerprint(fingerprint, windowMs) {
+    if (!fingerprint) return [];
+    const since = Date.now() - windowMs;
+    return getDb().prepare(`SELECT userId, MAX(seenAt) as lastSeen FROM device_sightings
+      WHERE fingerprint=? AND seenAt>=? GROUP BY userId ORDER BY lastSeen DESC`)
+      .all(fingerprint, since);
+  },
+  // Same, but by IP address instead of fingerprint.
+  distinctUsersForIp(ip, windowMs) {
+    if (!ip) return [];
+    const since = Date.now() - windowMs;
+    return getDb().prepare(`SELECT userId, MAX(seenAt) as lastSeen FROM device_sightings
+      WHERE ip=? AND seenAt>=? GROUP BY userId ORDER BY lastSeen DESC`)
+      .all(ip, since);
+  },
+  pruneOlderThan(ms) {
+    getDb().prepare(`DELETE FROM device_sightings WHERE seenAt < ?`).run(Date.now() - ms);
+  },
+};
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function generateId() {
@@ -1639,5 +1682,6 @@ module.exports = {
   bannedUser,
   lectureRequest,
   settings,
+  deviceSighting,
   generateId,
 };

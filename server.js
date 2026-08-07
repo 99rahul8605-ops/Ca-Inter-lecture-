@@ -668,6 +668,13 @@ async function verifyPaytmPayment(orderId) {
 
 // ── Express ───────────────────────────────────────────────────────────────────
 const app = express();
+// Trust the first hop reverse proxy (nginx/ALB/etc.) so req.ip resolves to the
+// real client IP from X-Forwarded-For instead of the proxy's own address —
+// needed for the multi-account (same-IP) detection in course.js. If this app
+// is ever exposed directly to the internet (no proxy in front), this should
+// be removed/changed, since trusting X-Forwarded-For without a proxy lets a
+// client spoof its own IP.
+app.set("trust proxy", true);
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 
