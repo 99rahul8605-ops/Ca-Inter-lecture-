@@ -126,10 +126,12 @@ async function checkSuspiciousActivity(bot, fromUser, code) {
       // rule's threshold — so continued requests don't spam the owner repeatedly.
       if (recentCount === threshold && OWNER_ID && bot) {
         const name = fromUser.username ? `@${fromUser.username}` : (fromUser.first_name || `User ${uidStr}`);
+        const ctx = getLectureContext(code);
         const text = `⚠️ <b>Suspicious Activity Detected</b>\n\n` +
           `User: ${esc(name)} (<code>${uidStr}</code>)\n` +
           `Requested <b>${recentCount} lectures</b> within the last ${rule.windowMinutes} minute(s).\n` +
-          `Latest code: <code>${esc(code)}</code>\n\n` +
+          `Latest code: <code>${esc(code)}</code>` +
+          (ctx ? ` (${esc(ctx.batchName)}${ctx.subjectName ? ` › ${esc(ctx.subjectName)}` : ""})` : "") + `\n\n` +
           `This may indicate bulk-downloading/leaking. Ban if needed:`;
         bot.sendMessage(OWNER_ID, text, {
           parse_mode: "HTML",
@@ -140,10 +142,55 @@ async function checkSuspiciousActivity(bot, fromUser, code) {
   } catch (err) { console.error("Suspicious activity check error:", err.message); }
 }
 
+// ── Lecture context lookup (batch / subject / chapter / unit / lecture name) ─
+// The bot only knows a bare `code` at delivery time — the actual course
+// structure (which batch/subject/chapter this code belongs to) lives in the
+// `batches` JSON documents (see course.js). We build a code → context index
+// once and cache it briefly, rather than walking every batch on every single
+// lecture delivery, since batches are read-heavy and change infrequently.
+let _lectureIndexCache = { builtAt: 0, map: null };
+const LECTURE_INDEX_TTL_MS = 2 * 60 * 1000;
+
+function _indexLectures(lectures, ctx, map) {
+  for (const l of lectures || []) {
+    if (l && l.link) map.set(l.link, { ...ctx, lectureName: l.name || "" });
+  }
+}
+
+function buildLectureIndex() {
+  const map = new Map();
+  try {
+    for (const b of db.batch.getAll()) {
+      const batchName = b.name || "Unknown Batch";
+      for (const s of b.subjects || []) {
+        const subjectName = s.name || "";
+        for (const c of s.chapters || []) {
+          const chapterName = c.name || "";
+          _indexLectures(c.lectures, { batchName, subjectName, chapterName, unitName: "" }, map);
+          for (const u of c.units || []) {
+            _indexLectures(u.lectures, { batchName, subjectName, chapterName, unitName: u.name || "" }, map);
+          }
+        }
+      }
+    }
+  } catch (err) { console.error("buildLectureIndex error:", err.message); }
+  return map;
+}
+
+function getLectureContext(code) {
+  if (!code) return null;
+  const now = Date.now();
+  if (!_lectureIndexCache.map || now - _lectureIndexCache.builtAt > LECTURE_INDEX_TTL_MS) {
+    _lectureIndexCache = { builtAt: now, map: buildLectureIndex() };
+  }
+  return _lectureIndexCache.map.get(code) || null;
+}
+
 // ── Real-time lecture activity log ──────────────────────────────────────────
 // Posts one message per lecture/file call to LOGS_GROUP_ID as it happens — who
-// requested it, what it was, and their running today-count. Fire-and-forget:
-// a logging failure must never block the actual file delivery to the user.
+// requested it, what it was (including which batch/subject/chapter it belongs
+// to), and their running today-count. Fire-and-forget: a logging failure must
+// never block the actual file delivery to the user.
 function logLectureActivity(bot, fromUser, record, extra) {
   if (!LOGS_GROUP_ID || !bot) return;
   try {
@@ -151,12 +198,19 @@ function logLectureActivity(bot, fromUser, record, extra) {
     const uidStr = userId != null ? String(userId) : "unknown";
     const name = fromUser?.username ? `@${fromUser.username}` : (fromUser?.first_name || `User ${uidStr}`);
     const typeEmoji = { video:"🎬", video_note:"📹", document:"📄", photo:"🖼️", audio:"🎵", voice:"🎤" }[record.file_type] || "📎";
+    const ctx = getLectureContext(record.code);
     const lines = [
       `${typeEmoji} <b>Lecture Called</b>`,
       `👤 ${esc(name)} (<code>${uidStr}</code>)`,
       `📁 ${esc(record.file_name || "file")}`,
-      `🔑 Code: <code>${esc(record.code || "")}</code>`,
     ];
+    if (ctx) {
+      lines.push(`🎓 Batch: ${esc(ctx.batchName)}`);
+      if (ctx.subjectName) lines.push(`📘 Subject: ${esc(ctx.subjectName)}`);
+      if (ctx.chapterName) lines.push(`📖 Chapter: ${esc(ctx.chapterName)}${ctx.unitName ? ` › ${esc(ctx.unitName)}` : ""}`);
+      if (ctx.lectureName) lines.push(`🏷️ Lecture: ${esc(ctx.lectureName)}`);
+    }
+    lines.push(`🔑 Code: <code>${esc(record.code || "")}</code>`);
     if (extra && extra.todayUsed != null) lines.push(`📊 Today: ${extra.todayUsed}/${DAILY_VIDEO_LIMIT}`);
     lines.push(`🕐 ${formatIST(new Date())}`);
     bot.sendMessage(LOGS_GROUP_ID, lines.join("\n"), { parse_mode: "HTML" }).catch(() => {});
