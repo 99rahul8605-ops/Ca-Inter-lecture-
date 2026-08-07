@@ -11,6 +11,7 @@ const OWNER_ID = parseInt(process.env.OWNER_ID || "0");
 // so giveaway confirmation/reversal notifications can be sent from here.
 let _bot = null;
 function setBot(botInstance) { _bot = botInstance; }
+const esc = (s) => String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
 // ── Admin verification ────────────────────────────────────────────────────────
 function verifyAdmin(req, res, next) {
@@ -1116,6 +1117,80 @@ async function confirmGiveawayInviteOnFirstWatch(userId) {
     }
   } catch (e) { console.error('Giveaway confirm error:', e.message); }
 }
+
+// ── Multi-account (shared device/IP) detection ──────────────────────────────
+// Telegram's Bot API never exposes device info or IP to the bot side — this
+// signal only exists because the Mini App talks to our own server over HTTP,
+// so every /device-check call legitimately carries the caller's real IP
+// (given app.set('trust proxy', true) in server.js) plus a browser fingerprint
+// the frontend computes locally. Fingerprint match = high confidence (same
+// physical device/browser); IP-only match = lower confidence (could just be
+// shared WiFi/hostel/college NAT) — the alert says which one fired so the
+// owner can judge for themselves. This is a heuristic for manual review, not
+// an auto-ban trigger.
+const DEVICE_CORRELATION_WINDOW_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+const DEVICE_RETENTION_MS = 45 * 24 * 60 * 60 * 1000; // prune buffer
+
+function checkMultiAccount(userId, fingerprint, ip, fromUser) {
+  try {
+    const uidStr = String(userId);
+    const beforeFp = fingerprint ? db.deviceSighting.distinctUsersForFingerprint(fingerprint, DEVICE_CORRELATION_WINDOW_MS) : [];
+    const beforeIp = ip ? db.deviceSighting.distinctUsersForIp(ip, DEVICE_CORRELATION_WINDOW_MS) : [];
+    const wasNewToFp = fingerprint && !beforeFp.some(r => r.userId === uidStr);
+    const wasNewToIp = ip && !beforeIp.some(r => r.userId === uidStr);
+
+    db.deviceSighting.insert({ id: db.generateId(), userId: uidStr, fingerprint, ip, seenAt: Date.now() });
+    db.deviceSighting.pruneOlderThan(DEVICE_RETENTION_MS);
+
+    if (!OWNER_ID || !_bot) return;
+
+    // Only alert when THIS request is what makes the cluster newly cross 2+
+    // distinct accounts — not on every subsequent open by the same pair.
+    if (fingerprint && wasNewToFp) {
+      const afterFp = db.deviceSighting.distinctUsersForFingerprint(fingerprint, DEVICE_CORRELATION_WINDOW_MS);
+      if (afterFp.length >= 2) sendMultiAccountAlert("device", fingerprint, afterFp, fromUser);
+    }
+    if (ip && wasNewToIp) {
+      const afterIp = db.deviceSighting.distinctUsersForIp(ip, DEVICE_CORRELATION_WINDOW_MS);
+      if (afterIp.length >= 2) sendMultiAccountAlert("ip", ip, afterIp, fromUser);
+    }
+  } catch (err) { console.error("Multi-account check error:", err.message); }
+}
+
+function sendMultiAccountAlert(kind, key, accounts, fromUser) {
+  try {
+    const rows = accounts.slice(0, 10).map(a => {
+      const u = db.user.findOne(a.userId);
+      const label = u ? ([u.firstName, u.lastName].filter(Boolean).join(' ').trim() || `User ${a.userId}`) + (u.username ? ` (@${u.username})` : '') : `User ${a.userId}`;
+      return `• ${esc(label)} — <code>${a.userId}</code>`;
+    }).join("\n");
+    const confidence = kind === "device" ? "🔴 High confidence — same browser/device" : "🟡 Medium confidence — same IP (could be shared WiFi/network)";
+    const text = `👥 <b>Possible Multi-Account Detected</b>\n\n` +
+      `${confidence}\n` +
+      `${accounts.length} accounts sharing this ${kind === "device" ? "device" : "IP address"}:\n\n${rows}` +
+      (accounts.length > 10 ? `\n…and ${accounts.length - 10} more` : "");
+    _bot.sendMessage(OWNER_ID, text, { parse_mode: "HTML" }).catch(() => {});
+  } catch (err) { console.error("Multi-account alert error:", err.message); }
+}
+
+// POST — called once per app session by the frontend with a computed device
+// fingerprint. Records this sighting (userId + fingerprint + real IP) and
+// alerts the owner if it newly links this account to another one on the same
+// device or IP. Always responds 200 even on internal failure — this must
+// never block the app from loading for the user.
+router.post('/device-check', (req, res) => {
+  try {
+    const userId = getRequestUserId(req);
+    if (!userId) return res.json({ ok: false });
+    const fingerprint = String(req.body?.fingerprint || '').slice(0, 128);
+    // req.ip resolves the real client IP from X-Forwarded-For because
+    // server.js sets app.set('trust proxy', true).
+    const ip = String(req.ip || req.connection?.remoteAddress || '').slice(0, 64);
+    const u = db.user.findOne(userId);
+    checkMultiAccount(userId, fingerprint, ip, { id: userId, username: u?.username, first_name: u?.firstName });
+    res.json({ ok: true });
+  } catch (e) { res.json({ ok: false }); }
+});
 
 // GET — is the current user (identified via verified initData) banned?
 // Uses getRequestUserId (verified initData), not a raw :userId param, so a user
