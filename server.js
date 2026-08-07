@@ -151,9 +151,23 @@ async function checkSuspiciousActivity(bot, fromUser, code) {
 let _lectureIndexCache = { builtAt: 0, map: null };
 const LECTURE_INDEX_TTL_MS = 2 * 60 * 1000;
 
+// l.link can be stored either as a bare code ("RbZUHU") or as a full legacy
+// t.me deep link ("https://t.me/OldBotName?start=RbZUHU") — same dual format
+// the frontend's openLecLink() already handles. Extract just the code so it
+// matches record.code (what actually gets logged/delivered) either way.
+function extractLectureCode(link) {
+  if (!link) return "";
+  if (link.startsWith("http")) {
+    const m = link.match(/[?&]start=([^&]+)/);
+    return m ? m[1] : link;
+  }
+  return link;
+}
+
 function _indexLectures(lectures, ctx, map) {
   for (const l of lectures || []) {
-    if (l && l.link) map.set(l.link, { ...ctx, lectureName: l.name || "" });
+    const code = extractLectureCode(l && l.link);
+    if (code) map.set(code, { ...ctx, lectureName: l.name || "" });
   }
 }
 
