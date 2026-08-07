@@ -4132,11 +4132,57 @@ async function checkBanStatus() {
   }
 }
 
+// Computes a lightweight browser fingerprint from stable device/browser
+// signals (no permissions requested, nothing invasive) — used only to help
+// the owner spot the same device being used to run multiple Telegram
+// accounts. Never blocks app load; failures are silently ignored.
+async function _computeDeviceFingerprint() {
+  try {
+    var parts = [
+      navigator.userAgent || '',
+      navigator.language || '',
+      navigator.platform || '',
+      String(navigator.hardwareConcurrency || ''),
+      String(screen.width) + 'x' + String(screen.height),
+      String(screen.colorDepth || ''),
+      (Intl.DateTimeFormat().resolvedOptions().timeZone || ''),
+    ];
+    try {
+      var canvas = document.createElement('canvas');
+      var cctx = canvas.getContext('2d');
+      cctx.textBaseline = 'top';
+      cctx.font = '14px Arial';
+      cctx.fillText('fp-' + navigator.userAgent, 2, 2);
+      parts.push(canvas.toDataURL());
+    } catch (e) { /* canvas unavailable — fingerprint just has fewer signals */ }
+
+    var raw = parts.join('|');
+    if (window.crypto && window.crypto.subtle) {
+      var enc = new TextEncoder().encode(raw);
+      var hashBuf = await window.crypto.subtle.digest('SHA-256', enc);
+      var hashArr = Array.from(new Uint8Array(hashBuf));
+      return hashArr.map(function(b){ return b.toString(16).padStart(2,'0'); }).join('');
+    }
+    var h = 0;
+    for (var i = 0; i < raw.length; i++) { h = ((h << 5) - h + raw.charCodeAt(i)) | 0; }
+    return 'fh_' + Math.abs(h).toString(16);
+  } catch (e) { return ''; }
+}
+
+async function reportDeviceFingerprint() {
+  try {
+    var fp = await _computeDeviceFingerprint();
+    if (!fp) return;
+    await apiFetch('/api/device-check', 'POST', { fingerprint: fp });
+  } catch (e) { /* never let this affect the app */ }
+}
+
 async function init() {
   initTheme();
   _loadWatchedLectures();
   _animateVsBar();
   await checkAdminAccess();
+  if (!isAdmin) reportDeviceFingerprint(); // fire-and-forget, never blocks app load
 
   var banned = await checkBanStatus();
   if (banned) {
