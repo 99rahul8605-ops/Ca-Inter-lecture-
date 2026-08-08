@@ -731,7 +731,7 @@ pointAdjustmentSchema.index({ userId: 1 });
 const PointAdjustment = mongoose.models.PointAdjustment || mongoose.model('PointAdjustment', pointAdjustmentSchema);
 
 // Manual per-user daily spin-limit adjustments (admin /addspins command).
-// Net sum for a user is added on top of SPIN_DAILY_LIMIT — see getSpinStatus.
+// Net sum for a user is added on top of the global daily spin limit — see getSpinStatus.
 const spinAdjustmentSchema = new mongoose.Schema({
   userId: { type: String, required: true },
   delta: { type: Number, required: true },
@@ -749,7 +749,13 @@ const SpinAdjustment = mongoose.models.SpinAdjustment || mongoose.model('SpinAdj
 const POINTS_PER_REFERRAL = 5;
 
 // Spin & Earn tab configuration
-const SPIN_DAILY_LIMIT = 5;
+// Daily spin limit is admin-configurable (via /setspinlimit in server.js) —
+// stored in bot_settings so it persists across restarts, defaulting to 5 if
+// never set. Read fresh each time rather than cached, since it can change at
+// any moment from a bot command while the server keeps running.
+function getSpinDailyLimit() {
+  return db.settings.get('spin_daily_limit', 5);
+}
 const SPIN_COOLDOWN_MS = 10 * 1000;
 const SPIN_AD_WATCH_SECONDS = 2; // NOTE: lower than access/claim's 15s on purpose — that flow has a manual
 // "Claim" button tap AFTER the ad finishes (adding natural delay on top of ad duration), but spins
@@ -989,7 +995,7 @@ function getSpinStatus(userId) {
   // Admin-adjustable on top of the global default (see /addspins in server.js) —
   // e.g. a user with +3 gets 8 spins/day, one with -2 gets 3/day, floor 0.
   const netAdjustment = db.spinAdjustment.netForUser(userId);
-  const maxSpins = Math.max(0, SPIN_DAILY_LIMIT + netAdjustment);
+  const maxSpins = Math.max(0, getSpinDailyLimit() + netAdjustment);
   const spinsLeft = Math.max(0, maxSpins - spinsToday);
   const last = db.spinHistory.lastSpinAt(userId);
   const cooldownRemainingMs = last ? Math.max(0, SPIN_COOLDOWN_MS - (Date.now() - last.getTime())) : 0;
@@ -1519,3 +1525,4 @@ module.exports.getPointsBreakdown = getPointsBreakdown;
 module.exports.POINTS_PER_REFERRAL = POINTS_PER_REFERRAL;
 module.exports.setBot = setBot;
 module.exports.getSpinStatus = getSpinStatus;
+module.exports.getSpinDailyLimit = getSpinDailyLimit;
