@@ -1191,7 +1191,8 @@ async function startBot() {
 
 <b>🎯 Points &amp; Rewards</b>
 • /addpoints (points) (userId) — Manually add or deduct points (negative = deduct)
-• /addspins (count) (userId) — Increase or decrease a user's daily spin limit (negative = decrease)
+• /setspinlimit (count) — Change the GLOBAL daily spin limit for all users
+• /addspins (count) (userId) — Adjust one specific user's daily spin limit on top of the global default
 • /points — View points/leaderboard summary
 
 <b>📢 Broadcast</b>
@@ -1642,6 +1643,28 @@ async function startBot() {
         { parse_mode: "HTML" });
     } catch (err) {
       console.error("addspins error:", err.message);
+      bot.sendMessage(chatId, `❌ Failed: ${esc(err.message)}`, { parse_mode: "HTML" }).catch(() => {});
+    }
+  });
+
+  // ── /setspinlimit <count> ────────────────────────────────────────────────
+  // Changes the GLOBAL default daily spin limit for every user (not one
+  // specific person — see /addspins for that). Persisted in bot_settings, so
+  // it survives restarts. Per-user /addspins adjustments still stack on top
+  // of whatever this global default is.
+  bot.onText(/\/setspinlimit(?:\s+(\d+))?/, async (msg, match) => {
+    if (isGroupChat(msg) || !isOwner(msg.from?.id)) return;
+    const chatId = msg.chat.id;
+    const count = match[1] ? parseInt(match[1], 10) : NaN;
+    if (isNaN(count) || count < 0) {
+      const current = courseRoutes.getSpinDailyLimit();
+      return bot.sendMessage(chatId, `Current global daily spin limit: <b>${current}</b>\n\nUsage: <code>/setspinlimit &lt;count&gt;</code>\ne.g. <code>/setspinlimit 8</code>\n\nThis changes the default for ALL users. To adjust just one person on top of this, use /addspins instead.`, { parse_mode: "HTML" });
+    }
+    try {
+      db.settings.set('spin_daily_limit', count);
+      await bot.sendMessage(chatId, `✅ Global daily spin limit set to <b>${count}</b> for all users.\n\nUsers with a personal /addspins adjustment will still get that on top of this new number.`, { parse_mode: "HTML" });
+    } catch (err) {
+      console.error("setspinlimit error:", err.message);
       bot.sendMessage(chatId, `❌ Failed: ${esc(err.message)}`, { parse_mode: "HTML" }).catch(() => {});
     }
   });
