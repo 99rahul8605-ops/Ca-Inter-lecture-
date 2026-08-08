@@ -5,7 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>EduBot</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
-<script src='/mn-sdk.js' data-zone='11011844' data-sdk='show_11011844'></script>
+<!-- Monetag SDK is loaded dynamically (see loadMonetagSdk() in the main script)
+     using the zone ID from /api/config (MONETAG_ZONE_ID env var), instead of
+     being hardcoded here — the SDK's global function name is derived from the
+     zone (show_<zone>), so hardcoding it here would break if the zone changes. -->
 <!-- HilltopAds Popunder (zone #7287365) — served through our own /hta-code-7287365.js
      proxy (server.js) instead of directly from HilltopAds' domain. Ad-blockers that
      match by hostname can't tell this apart from any other same-origin script. -->
@@ -2040,7 +2043,7 @@ function spinWheelTo(number) {
 async function startSpin() {
   if (_spinInProgress) return;
   if (!spinStatus) { toast('Thoda ruko, loading...', 'error'); return; }
-  if (spinStatus.spinsLeft <= 0) { toast('Aaj ke saare 5 spins ho gaye! Kal wapas aao. 🕐', 'error'); return; }
+  if (spinStatus.spinsLeft <= 0) { toast('Aaj ke saare ' + (spinStatus.maxSpins || 5) + ' spins ho gaye! Kal wapas aao. 🕐', 'error'); return; }
   if (spinStatus.cooldownRemainingMs > 0) { toast('Thoda ruko, ' + Math.ceil(spinStatus.cooldownRemainingMs / 1000) + 's baad try karo!', 'error'); return; }
 
   var formats = ['rewarded', 'pop', 'interstitial'];
@@ -2067,7 +2070,7 @@ async function startSpin() {
     return;
   }
 
-  if (typeof show_11011844 === 'undefined') {
+  if (!_monetagReady()) {
     _spinToken = null;
     toast('Ad load nahi hua. Ad blocker band karo aur try karo.', 'error');
     _spinInProgress = false;
@@ -2077,9 +2080,9 @@ async function startSpin() {
 
   var tgUid = tg && tg.initDataUnsafe && tg.initDataUnsafe.user ? String(tg.initDataUnsafe.user.id) : 'unknown';
   var adPromise;
-  if (format === 'pop') adPromise = show_11011844('pop');
-  else if (format === 'interstitial') adPromise = show_11011844();
-  else adPromise = show_11011844({ ymid: tgUid });
+  if (format === 'pop') adPromise = _monetagShow('pop');
+  else if (format === 'interstitial') adPromise = _monetagShow();
+  else adPromise = _monetagShow({ ymid: tgUid });
 
   try {
     await adPromise;
@@ -2170,6 +2173,34 @@ function handlePic(input) {
 }
 
 // ── Admin ─────────────────────────────────────────────────────────────────────
+// Loads the Monetag SDK script with the zone ID from /api/config (instead of a
+// hardcoded <script> tag in <head>) so the ad zone can be changed via the
+// MONETAG_ZONE_ID env var without touching this file. The SDK's global show
+// function is named show_<zone>, so we can't hardcode that name either — every
+// ad call site uses the _monetagShow()/_monetagReady() wrappers below instead.
+var _monetagZoneId = null;
+var _monetagSdkPromise = null;
+function loadMonetagSdk(zoneId) {
+  if (_monetagSdkPromise) return _monetagSdkPromise;
+  _monetagZoneId = zoneId;
+  _monetagSdkPromise = new Promise(function(resolve) {
+    var s = document.createElement('script');
+    s.src = '/mn-sdk.js';
+    s.setAttribute('data-zone', zoneId);
+    s.setAttribute('data-sdk', 'show_' + zoneId);
+    s.onload = function() { resolve(true); };
+    s.onerror = function() { resolve(false); };
+    document.head.appendChild(s);
+  });
+  return _monetagSdkPromise;
+}
+function _monetagReady() {
+  return !!_monetagZoneId && typeof window['show_' + _monetagZoneId] === 'function';
+}
+function _monetagShow(arg) {
+  return window['show_' + _monetagZoneId](arg);
+}
+
 async function checkAdminAccess() {
   try {
     var config = await (await fetch('/api/config')).json();
@@ -2181,6 +2212,7 @@ async function checkAdminAccess() {
     window._paymentProvider = config.paymentProvider || 'bharatpe';
     // Store force-join requirement
     _fjRequired = !!config.forceJoinRequired;
+    loadMonetagSdk(config.monetagZoneId || '11011844'); // fire-and-forget, don't block init()
     if (!ownerId) return;
     var tgUser = tg && tg.initDataUnsafe && tg.initDataUnsafe.user;
     var curId = tgUser ? tgUser.id : null;
@@ -3848,7 +3880,7 @@ async function watchAd() {
 
   _adActuallyShown = false;
 
-  if (typeof show_11011844 === 'undefined') {
+  if (!_monetagReady()) {
     _adToken = null;
     toast('Ad load nahi hua. Ad blocker band karo aur try karo.', 'error');
     _adWatching = false;
@@ -3861,11 +3893,11 @@ async function watchAd() {
   // Pick Monetag ad format
   var adPromise;
   if (format === 'pop') {
-    adPromise = show_11011844('pop');          // Rewarded Popup
+    adPromise = _monetagShow('pop');          // Rewarded Popup
   } else if (format === 'interstitial') {
-    adPromise = show_11011844();               // Rewarded Interstitial
+    adPromise = _monetagShow();               // Rewarded Interstitial
   } else {
-    adPromise = show_11011844({ ymid: uid }); // Original Rewarded
+    adPromise = _monetagShow({ ymid: uid }); // Original Rewarded
   }
 
   adPromise
