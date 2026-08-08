@@ -265,6 +265,20 @@ function _setupTables(db) {
     );
     CREATE INDEX IF NOT EXISTS idx_point_adjustments_user ON point_adjustments(userId);
 
+    -- Manual spin-limit adjustments (admin /addspins command). Same signed-ledger
+    -- pattern as point_adjustments: the net sum for a user is added on top of the
+    -- global SPIN_DAILY_LIMIT to get that user's effective daily spin limit — so
+    -- an admin can grant bonus spins (positive) or cap a user down (negative)
+    -- without ever touching the base config or overwriting a raw balance.
+    CREATE TABLE IF NOT EXISTS spin_adjustments (
+      id        TEXT PRIMARY KEY,
+      userId    TEXT NOT NULL,
+      delta     INTEGER NOT NULL,     -- can be negative
+      note      TEXT DEFAULT '',
+      createdAt INTEGER DEFAULT 0
+    );
+    CREATE INDEX IF NOT EXISTS idx_spin_adjustments_user ON spin_adjustments(userId);
+
     -- Banned users — blocks a userId from receiving lecture deliveries via the bot.
     CREATE TABLE IF NOT EXISTS banned_users (
       userId   TEXT PRIMARY KEY,
@@ -1080,6 +1094,23 @@ const pointAdjustment = {
   },
 };
 
+const spinAdjustment = {
+  insert({ id, userId, delta, note, createdAt }) {
+    getDb().prepare(`INSERT INTO spin_adjustments(id,userId,delta,note,createdAt) VALUES(?,?,?,?,?)`)
+      .run(id, String(userId), delta, note||'', new Date(createdAt||Date.now()).getTime());
+  },
+  // Net manual adjustment for one user — added on top of SPIN_DAILY_LIMIT to
+  // get their effective daily spin limit (see getSpinStatus in course.js).
+  netForUser(userId) {
+    return getDb().prepare(`SELECT COALESCE(SUM(delta),0) as total FROM spin_adjustments WHERE userId=?`).get(String(userId)).total;
+  },
+  history(userId, limit) {
+    return getDb().prepare(`SELECT * FROM spin_adjustments WHERE userId=? ORDER BY createdAt DESC LIMIT ?`)
+      .all(String(userId), limit || 20)
+      .map(r => ({ ...r, createdAt: new Date(r.createdAt) }));
+  },
+};
+
 // ── ANNOUNCEMENT Operations ───────────────────────────────────────────────────
 
 const announcement = {
@@ -1679,6 +1710,7 @@ module.exports = {
   spinHistory,
   watchedLecture,
   pointAdjustment,
+  spinAdjustment,
   bannedUser,
   lectureRequest,
   settings,

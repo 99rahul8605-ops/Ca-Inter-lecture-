@@ -41,6 +41,12 @@ const PAYMENT_GROUP_ID = process.env.PAYMENT_GROUP_ID ? parseInt(process.env.PAY
 // so logs don't clutter the owner's DM or the payments group. Optional — if
 // unset, logging is silently skipped.
 const LOGS_GROUP_ID = process.env.LOGS_GROUP_ID ? parseInt(process.env.LOGS_GROUP_ID) : null;
+// Monetag ad zone — kept as an env var (not hardcoded in index.html) so it can
+// be swapped without touching frontend code. Defaults to the zone already live
+// in production. The Monetag SDK creates a global function named `show_<zone>`,
+// so the frontend reads this from /api/config and builds that function name
+// dynamically rather than hardcoding it — see _monetagShow() in index.html.
+const MONETAG_ZONE_ID = process.env.MONETAG_ZONE_ID || "11011844";
 const CONTACT_LINK = process.env.CONTACT_LINK || "";
 
 // Ilambit DevPort — used to auto-verify UPI payments by UTR against the BharatPe
@@ -681,7 +687,7 @@ app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 app.get("/health", (req, res) => res.json({ status: "ok", uptime: process.uptime(), mongo: mongoose.connection.readyState===1?"connected":"disconnected", sqlite: "active" }));
 app.get("/api/config", (req, res) => {
   const fj = (process.env.FORCE_JOIN_CHANNELS||"").split(",").map(s=>s.trim()).filter(Boolean);
-  res.json({ ownerId: OWNER_ID, botUsername: BOT_USERNAME||"", forceJoinRequired: fj.length>0, upiId: UPI_ID||"", upiName: UPI_NAME||"", contactLink: CONTACT_LINK||`https://t.me/${BOT_USERNAME}`, paymentProvider: PAYMENT_PROVIDER });
+  res.json({ ownerId: OWNER_ID, botUsername: BOT_USERNAME||"", forceJoinRequired: fj.length>0, upiId: UPI_ID||"", upiName: UPI_NAME||"", contactLink: CONTACT_LINK||`https://t.me/${BOT_USERNAME}`, paymentProvider: PAYMENT_PROVIDER, monetagZoneId: MONETAG_ZONE_ID });
 });
 
 // Generates the payment UPI QR server-side (so it's a real, shareable/downloadable HTTPS
@@ -1185,6 +1191,7 @@ async function startBot() {
 
 <b>🎯 Points &amp; Rewards</b>
 • /addpoints (points) (userId) — Manually add or deduct points (negative = deduct)
+• /addspins (count) (userId) — Increase or decrease a user's daily spin limit (negative = decrease)
 • /points — View points/leaderboard summary
 
 <b>📢 Broadcast</b>
@@ -1605,6 +1612,36 @@ async function startBot() {
         { parse_mode: "HTML" });
     } catch (err) {
       console.error("addpoints error:", err.message);
+      bot.sendMessage(chatId, `❌ Failed: ${esc(err.message)}`, { parse_mode: "HTML" }).catch(() => {});
+    }
+  });
+
+  bot.onText(/\/addspins(?:\s+(-?\d+)\s+(\S+))?/, async (msg, match) => {
+    if (isGroupChat(msg) || !isOwner(msg.from?.id)) return;
+    const chatId = msg.chat.id;
+    const delta = match[1] ? parseInt(match[1], 10) : NaN;
+    const userId = match[2];
+    if (!userId || isNaN(delta) || delta === 0) {
+      return bot.sendMessage(chatId, `Usage: <code>/addspins &lt;count&gt; &lt;user_id&gt;</code>\ne.g. <code>/addspins 3 123456789</code>\n\nUse a negative number to reduce their daily limit, e.g. <code>/addspins -2 123456789</code>.\n\nThis permanently changes their daily spin limit (on top of the default) until adjusted again.`, { parse_mode: "HTML" });
+    }
+    try {
+      const u = db.user.findOne(userId);
+      if (!u) return bot.sendMessage(chatId, `⚠️ No user found with ID <code>${esc(userId)}</code> (they must have started the bot at least once).`, { parse_mode: "HTML" });
+
+      const record = { id: db.generateId(), userId: String(userId), delta, note: `Manual ${delta > 0 ? 'increase' : 'decrease'} by admin`, createdAt: new Date() };
+      db.spinAdjustment.insert(record); // SQLite first (source of truth)
+      mongoose.model("SpinAdjustment").create(record).catch(() => {}); // Mongo backup, fire-and-forget
+
+      const newStatus = courseRoutes.getSpinStatus(String(userId));
+      const displayName = [u.firstName, u.lastName].filter(Boolean).join(' ').trim() || 'Unknown';
+      const usernameStr = u.username ? ` (@${u.username})` : '';
+      await bot.sendMessage(chatId,
+        `✅ ${delta > 0 ? 'Increased' : 'Decreased'} daily spin limit by <b>${Math.abs(delta)}</b> for ${esc(displayName)}${esc(usernameStr)}\n` +
+        `🆔 <code>${esc(userId)}</code>\n` +
+        `🎯 New daily limit: <b>${newStatus.maxSpins}</b> (${newStatus.spinsLeft} left today)`,
+        { parse_mode: "HTML" });
+    } catch (err) {
+      console.error("addspins error:", err.message);
       bot.sendMessage(chatId, `❌ Failed: ${esc(err.message)}`, { parse_mode: "HTML" }).catch(() => {});
     }
   });
