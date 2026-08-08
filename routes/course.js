@@ -730,6 +730,17 @@ const pointAdjustmentSchema = new mongoose.Schema({
 pointAdjustmentSchema.index({ userId: 1 });
 const PointAdjustment = mongoose.models.PointAdjustment || mongoose.model('PointAdjustment', pointAdjustmentSchema);
 
+// Manual per-user daily spin-limit adjustments (admin /addspins command).
+// Net sum for a user is added on top of SPIN_DAILY_LIMIT — see getSpinStatus.
+const spinAdjustmentSchema = new mongoose.Schema({
+  userId: { type: String, required: true },
+  delta: { type: Number, required: true },
+  note: { type: String, default: '' },
+  createdAt: { type: Date, default: Date.now },
+});
+spinAdjustmentSchema.index({ userId: 1 });
+const SpinAdjustment = mongoose.models.SpinAdjustment || mongoose.model('SpinAdjustment', spinAdjustmentSchema);
+
 // Reward catalog — single source of truth for cost + duration of every reward.
 // To add a new reward in future, just add an entry here (and a matching branch
 // in the redeem handler below if it needs special grant logic).
@@ -975,12 +986,16 @@ function _todayMidnightMs() {
 // Single source of truth for "can this user spin right now" — used by all 3 endpoints below
 function getSpinStatus(userId) {
   const spinsToday = db.spinHistory.countSince(userId, _todayMidnightMs());
-  const spinsLeft = Math.max(0, SPIN_DAILY_LIMIT - spinsToday);
+  // Admin-adjustable on top of the global default (see /addspins in server.js) —
+  // e.g. a user with +3 gets 8 spins/day, one with -2 gets 3/day, floor 0.
+  const netAdjustment = db.spinAdjustment.netForUser(userId);
+  const maxSpins = Math.max(0, SPIN_DAILY_LIMIT + netAdjustment);
+  const spinsLeft = Math.max(0, maxSpins - spinsToday);
   const last = db.spinHistory.lastSpinAt(userId);
   const cooldownRemainingMs = last ? Math.max(0, SPIN_COOLDOWN_MS - (Date.now() - last.getTime())) : 0;
   const nextResetAt = new Date(_todayMidnightMs() + 24 * 60 * 60 * 1000);
   return {
-    spinsToday, spinsLeft, maxSpins: SPIN_DAILY_LIMIT,
+    spinsToday, spinsLeft, maxSpins,
     cooldownRemainingMs, canSpin: spinsLeft > 0 && cooldownRemainingMs <= 0,
     nextResetAt,
   };
@@ -998,7 +1013,7 @@ router.post('/spin/token/:userId', (req, res) => {
     const userId = req.params.userId;
     const status = getSpinStatus(userId);
     if (!status.canSpin) {
-      if (status.spinsLeft <= 0) return res.status(429).json({ error: 'Aaj ke saare 5 spins ho gaye! Kal wapas aao.', ...status });
+      if (status.spinsLeft <= 0) return res.status(429).json({ error: `Aaj ke saare ${status.maxSpins} spins ho gaye! Kal wapas aao.`, ...status });
       return res.status(429).json({ error: `Thoda ruko! Agla spin ${Math.ceil(status.cooldownRemainingMs / 1000)}s mein.`, ...status });
     }
 
@@ -1034,7 +1049,7 @@ router.post('/spin/claim/:userId', (req, res) => {
     const status = getSpinStatus(userId);
     if (!status.canSpin) {
       db.spinToken.deleteById(record.id);
-      if (status.spinsLeft <= 0) return res.status(429).json({ error: 'Aaj ke saare 5 spins ho gaye! Kal wapas aao.', ...status });
+      if (status.spinsLeft <= 0) return res.status(429).json({ error: `Aaj ke saare ${status.maxSpins} spins ho gaye! Kal wapas aao.`, ...status });
       return res.status(429).json({ error: `Thoda ruko! Agla spin ${Math.ceil(status.cooldownRemainingMs / 1000)}s mein.`, ...status });
     }
 
@@ -1143,33 +1158,46 @@ function checkMultiAccount(userId, fingerprint, ip, fromUser) {
     db.deviceSighting.pruneOlderThan(DEVICE_RETENTION_MS);
 
     if (!OWNER_ID || !_bot) return;
+    // Nothing new to report — this exact userId was already part of both
+    // clusters before this request, so re-alerting would just be noise.
+    if (!wasNewToFp && !wasNewToIp) return;
 
-    // Only alert when THIS request is what makes the cluster newly cross 2+
-    // distinct accounts — not on every subsequent open by the same pair.
-    if (fingerprint && wasNewToFp) {
-      const afterFp = db.deviceSighting.distinctUsersForFingerprint(fingerprint, DEVICE_CORRELATION_WINDOW_MS);
-      if (afterFp.length >= 2) sendMultiAccountAlert("device", fingerprint, afterFp, fromUser);
-    }
-    if (ip && wasNewToIp) {
-      const afterIp = db.deviceSighting.distinctUsersForIp(ip, DEVICE_CORRELATION_WINDOW_MS);
-      if (afterIp.length >= 2) sendMultiAccountAlert("ip", ip, afterIp, fromUser);
-    }
+    // Re-fetch AFTER the insert so the lists below include this request too.
+    const afterFp = wasNewToFp ? db.deviceSighting.distinctUsersForFingerprint(fingerprint, DEVICE_CORRELATION_WINDOW_MS) : null;
+    const afterIp = wasNewToIp ? db.deviceSighting.distinctUsersForIp(ip, DEVICE_CORRELATION_WINDOW_MS) : null;
+    const fpQualifies = afterFp && afterFp.length >= 2;
+    const ipQualifies = afterIp && afterIp.length >= 2;
+    if (!fpQualifies && !ipQualifies) return;
+
+    sendMultiAccountAlert(fpQualifies ? afterFp : null, ipQualifies ? afterIp : null);
   } catch (err) { console.error("Multi-account check error:", err.message); }
 }
 
-function sendMultiAccountAlert(kind, key, accounts, fromUser) {
+// Formats the FULL member list for a cluster (every account currently sharing
+// that device/IP, not just the newest one) — name, username, and userId each.
+function _formatAccountList(accounts) {
+  const rows = accounts.slice(0, 15).map(a => {
+    const u = db.user.findOne(a.userId);
+    const label = u ? ([u.firstName, u.lastName].filter(Boolean).join(' ').trim() || `User ${a.userId}`) + (u.username ? ` (@${u.username})` : '') : `User ${a.userId}`;
+    return `• ${esc(label)} — <code>${a.userId}</code>`;
+  });
+  if (accounts.length > 15) rows.push(`…and ${accounts.length - 15} more`);
+  return rows.join("\n");
+}
+
+// One combined message per event — clearly separated "Same Device" and "Same
+// IP" sections (never mixed into one list), each listing every account
+// currently in that cluster so the owner sees the full picture at a glance.
+function sendMultiAccountAlert(deviceAccounts, ipAccounts) {
   try {
-    const rows = accounts.slice(0, 10).map(a => {
-      const u = db.user.findOne(a.userId);
-      const label = u ? ([u.firstName, u.lastName].filter(Boolean).join(' ').trim() || `User ${a.userId}`) + (u.username ? ` (@${u.username})` : '') : `User ${a.userId}`;
-      return `• ${esc(label)} — <code>${a.userId}</code>`;
-    }).join("\n");
-    const confidence = kind === "device" ? "🔴 High confidence — same browser/device" : "🟡 Medium confidence — same IP (could be shared WiFi/network)";
-    const text = `👥 <b>Possible Multi-Account Detected</b>\n\n` +
-      `${confidence}\n` +
-      `${accounts.length} accounts sharing this ${kind === "device" ? "device" : "IP address"}:\n\n${rows}` +
-      (accounts.length > 10 ? `\n…and ${accounts.length - 10} more` : "");
-    _bot.sendMessage(OWNER_ID, text, { parse_mode: "HTML" }).catch(() => {});
+    let text = `👥 <b>Possible Multi-Account Detected</b>\n\n`;
+    if (deviceAccounts) {
+      text += `🔴 <b>Same Device</b> — ${deviceAccounts.length} accounts:\n${_formatAccountList(deviceAccounts)}\n\n`;
+    }
+    if (ipAccounts) {
+      text += `🟡 <b>Same IP Address</b> — ${ipAccounts.length} accounts (could be shared WiFi/network):\n${_formatAccountList(ipAccounts)}\n\n`;
+    }
+    _bot.sendMessage(OWNER_ID, text.trim(), { parse_mode: "HTML" }).catch(() => {});
   } catch (err) { console.error("Multi-account alert error:", err.message); }
 }
 
@@ -1490,3 +1518,4 @@ module.exports = router;
 module.exports.getPointsBreakdown = getPointsBreakdown;
 module.exports.POINTS_PER_REFERRAL = POINTS_PER_REFERRAL;
 module.exports.setBot = setBot;
+module.exports.getSpinStatus = getSpinStatus;
