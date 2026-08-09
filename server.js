@@ -47,6 +47,10 @@ const LOGS_GROUP_ID = process.env.LOGS_GROUP_ID ? parseInt(process.env.LOGS_GROU
 // so the frontend reads this from /api/config and builds that function name
 // dynamically rather than hardcoding it — see _monetagShow() in index.html.
 const MONETAG_ZONE_ID = process.env.MONETAG_ZONE_ID || "11011844";
+// Separate zone for Monetag's popunder placement (replaces the old HilltopAds
+// popunder). This one doesn't need the show_<zone> dance — it's a fire-and-forget
+// tag that Monetag's own script self-triggers, so the frontend just needs the ID.
+const MONETAG_POPUNDER_ZONE_ID = process.env.MONETAG_POPUNDER_ZONE_ID || "11541413";
 const CONTACT_LINK = process.env.CONTACT_LINK || "";
 
 // Ilambit DevPort — used to auto-verify UPI payments by UTR against the BharatPe
@@ -687,7 +691,7 @@ app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 app.get("/health", (req, res) => res.json({ status: "ok", uptime: process.uptime(), mongo: mongoose.connection.readyState===1?"connected":"disconnected", sqlite: "active" }));
 app.get("/api/config", (req, res) => {
   const fj = (process.env.FORCE_JOIN_CHANNELS||"").split(",").map(s=>s.trim()).filter(Boolean);
-  res.json({ ownerId: OWNER_ID, botUsername: BOT_USERNAME||"", forceJoinRequired: fj.length>0, upiId: UPI_ID||"", upiName: UPI_NAME||"", contactLink: CONTACT_LINK||`https://t.me/${BOT_USERNAME}`, paymentProvider: PAYMENT_PROVIDER, monetagZoneId: MONETAG_ZONE_ID });
+  res.json({ ownerId: OWNER_ID, botUsername: BOT_USERNAME||"", forceJoinRequired: fj.length>0, upiId: UPI_ID||"", upiName: UPI_NAME||"", contactLink: CONTACT_LINK||`https://t.me/${BOT_USERNAME}`, paymentProvider: PAYMENT_PROVIDER, monetagZoneId: MONETAG_ZONE_ID, monetagPopunderZoneId: MONETAG_POPUNDER_ZONE_ID });
 });
 
 // Generates the payment UPI QR server-side (so it's a real, shareable/downloadable HTTPS
@@ -870,48 +874,6 @@ app.post("/api/paytm/callback", async (req, res) => {
   }
 });
 
-// ── HilltopAds Anti-AdBlock proxy ───────────────────────────────────────────
-// Ports HilltopAds' server-to-server PHP proxy to Node. Serving the popunder
-// script from OUR OWN domain (instead of a third-party ad domain) means
-// hostname-based ad-blocker rules can't identify or block it — the browser
-// just sees a same-origin script request like any other JS file on the page.
-// Response is cached in memory for 5 minutes (same TTL the original PHP used)
-// so we're not hitting HilltopAds' API on every single page load.
-const HTA_ZONE_ID = "7287365-7287369"; // desktop-mobile pair, same as the provided PHP
-const HTA_KEY = "8KkmJD5CPIS0VyxejQTktY9StWnV12tyErGag3xPWPIMY2NFDuFqOidgFMekyyLh";
-const HTA_CACHE = {}; // keyed by resolved zoneId -> { code, fetchedAt }
-const HTA_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes, matches the PHP version's 300s file cache
-
-function htaResolveZoneId(userAgent) {
-  const parts = HTA_ZONE_ID.split("-");
-  if (parts.length !== 2) return HTA_ZONE_ID;
-  const ua = (userAgent || "").toLowerCase();
-  const isMobile = ["mobi", "ipad", "iphone", "blackberry", "android"].some(k => ua.includes(k));
-  return isMobile ? parts[1] : parts[0];
-}
-
-app.get("/hta-code-7287365.js", async (req, res) => {
-  res.set("Content-Type", "application/javascript");
-  try {
-    const zoneId = htaResolveZoneId(req.headers["user-agent"]);
-    const cached = HTA_CACHE[zoneId];
-    if (cached && Date.now() - cached.fetchedAt < HTA_CACHE_TTL_MS) {
-      return res.send(cached.code);
-    }
-    const params = new URLSearchParams({ zoneId, key: HTA_KEY, version: "1.0", transport: "node" });
-    const upstream = await fetch(`https://api.hilltopads.com/publisher/antiAdBlock?${params.toString()}`, {
-      headers: { "User-Agent": "HilltopAds Anti-AdBlock Client/1.0" },
-    });
-    const data = await upstream.json();
-    const code = (data && data.result && data.result.code) || "";
-    if (code) HTA_CACHE[zoneId] = { code, fetchedAt: Date.now() };
-    res.send(code);
-  } catch (err) {
-    console.error("HilltopAds anti-adblock proxy error:", err.message);
-    res.send(""); // fail quiet — an empty script just means no popunder that request, not a broken page
-  }
-});
-
 // ── Monetag SDK proxy ────────────────────────────────────────────────────────
 // Monetag doesn't offer a signed server-to-server API like HilltopAds does —
 // this is a plain reverse-proxy of their static sdk.js file. Same idea though:
@@ -942,8 +904,25 @@ app.get("/mn-sdk.js", async (req, res) => {
   }
 });
 
-app.use(express.static(path.join(__dirname, "public")));
-app.get("*", (req, res) => res.sendFile(path.join(__dirname, "public", "index.html")));
+// index.html is templated (not served as a raw static file) so the Monetag
+// popunder <script> tag can be injected statically, right after <head>, with
+// the zone ID from env — matching Monetag's own installation instructions
+// exactly ("paste this after the <head> tag"). Their installation-check and
+// the popunder's own reliability both depend on the tag being present in the
+// initial HTML source, not injected later by our own JS at runtime like the
+// rewarded-ad SDK is (that one's fine dynamic since it has no such requirement).
+let _indexHtmlCache = null;
+function renderIndexHtml() {
+  if (!_indexHtmlCache) _indexHtmlCache = fs.readFileSync(path.join(__dirname, "public", "index.html"), "utf-8");
+  const popunderTag = `<script>(function(s){s.dataset.zone='${MONETAG_POPUNDER_ZONE_ID}',s.src='https://al5sm.com/tag.min.js'})([document.documentElement, document.body].filter(Boolean).pop().appendChild(document.createElement('script')))</script>`;
+  return _indexHtmlCache.replace("<!--MONETAG_POPUNDER_SCRIPT-->", popunderTag);
+}
+
+// { index: false } stops express.static from auto-serving the raw index.html
+// file for "/" — every request for it must go through renderIndexHtml() above
+// so the popunder tag actually gets injected, instead of silently bypassing it.
+app.use(express.static(path.join(__dirname, "public"), { index: false }));
+app.get("*", (req, res) => res.type("html").send(renderIndexHtml()));
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
 
 // ── Bulk sessions ─────────────────────────────────────────────────────────────
