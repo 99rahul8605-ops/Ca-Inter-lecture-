@@ -46,7 +46,7 @@ const LOGS_GROUP_ID = process.env.LOGS_GROUP_ID ? parseInt(process.env.LOGS_GROU
 // in production. The Monetag SDK creates a global function named `show_<zone>`,
 // so the frontend reads this from /api/config and builds that function name
 // dynamically rather than hardcoding it — see _monetagShow() in index.html.
-const MONETAG_ZONE_ID = process.env.MONETAG_ZONE_ID || "11011844";
+const MONETAG_ZONE_ID = process.env.MONETAG_ZONE_ID || "11502469";
 // Separate zone for Monetag's popunder placement (replaces the old HilltopAds
 // popunder). This one doesn't need the show_<zone> dance — it's a fire-and-forget
 // tag that Monetag's own script self-triggers, so the frontend just needs the ID.

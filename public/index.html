@@ -2214,7 +2214,7 @@ async function checkAdminAccess() {
     window._paymentProvider = config.paymentProvider || 'bharatpe';
     // Store force-join requirement
     _fjRequired = !!config.forceJoinRequired;
-    loadMonetagSdk(config.monetagZoneId || '11011844'); // fire-and-forget, don't block init()
+    loadMonetagSdk(config.monetagZoneId || '11502469'); // fire-and-forget, don't block init()
     if (!ownerId) return;
     var tgUser = tg && tg.initDataUnsafe && tg.initDataUnsafe.user;
     var curId = tgUser ? tgUser.id : null;
