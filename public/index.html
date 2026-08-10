@@ -4,7 +4,6 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>EduBot</title>
-<script src="https://5gvci.com/act/files/tag.min.js?z=11544916" data-cfasync="false" async></script>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <!-- Monetag SDK is loaded dynamically (see loadMonetagSdk() in the main script)
      using the zone ID from /api/config (MONETAG_ZONE_ID env var), instead of
@@ -2036,9 +2035,7 @@ async function startSpin() {
   if (spinStatus.spinsLeft <= 0) { toast('Aaj ke saare ' + (spinStatus.maxSpins || 5) + ' spins ho gaye! Kal wapas aao. 🕐', 'error'); return; }
   if (spinStatus.cooldownRemainingMs > 0) { toast('Thoda ruko, ' + Math.ceil(spinStatus.cooldownRemainingMs / 1000) + 's baad try karo!', 'error'); return; }
 
-  var formats = ['rewarded', 'pop', 'interstitial'];
-  var format = formats[Math.floor(Math.random() * formats.length)];
-
+  // Rewarded Popup only — no random rewarded/interstitial mix
   _spinInProgress = true;
   var btn = document.getElementById('spinBtn');
   var resultEl = document.getElementById('spinResultText');
@@ -2068,11 +2065,7 @@ async function startSpin() {
     return;
   }
 
-  var tgUid = tg && tg.initDataUnsafe && tg.initDataUnsafe.user ? String(tg.initDataUnsafe.user.id) : 'unknown';
-  var adPromise;
-  if (format === 'pop') adPromise = _monetagShow('pop');
-  else if (format === 'interstitial') adPromise = _monetagShow();
-  else adPromise = _monetagShow({ ymid: tgUid });
+  var adPromise = _monetagShow('pop');
 
   try {
     await adPromise;
@@ -3840,9 +3833,7 @@ var _adToken = null;
 var _adActuallyShown = false;
 
 async function watchAd() {
-  // Randomly pick one of three Monetag formats
-  var formats = ['rewarded', 'pop', 'interstitial'];
-  var format = formats[Math.floor(Math.random() * formats.length)];
+  // Rewarded Popup only — no random rewarded/interstitial mix
 
   if (_adWatching) return; // already playing an ad
   if (claimsToday >= 3) {
@@ -3878,17 +3869,8 @@ async function watchAd() {
     return;
   }
 
-  var uid = tg && tg.initDataUnsafe && tg.initDataUnsafe.user ? String(tg.initDataUnsafe.user.id) : 'unknown';
-
-  // Pick Monetag ad format
-  var adPromise;
-  if (format === 'pop') {
-    adPromise = _monetagShow('pop');          // Rewarded Popup
-  } else if (format === 'interstitial') {
-    adPromise = _monetagShow();               // Rewarded Interstitial
-  } else {
-    adPromise = _monetagShow({ ymid: uid }); // Original Rewarded
-  }
+  // Rewarded Popup
+  var adPromise = _monetagShow('pop');
 
   adPromise
     .then(function() {
