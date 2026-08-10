@@ -47,10 +47,11 @@ const LOGS_GROUP_ID = process.env.LOGS_GROUP_ID ? parseInt(process.env.LOGS_GROU
 // so the frontend reads this from /api/config and builds that function name
 // dynamically rather than hardcoding it — see _monetagShow() in index.html.
 const MONETAG_ZONE_ID = process.env.MONETAG_ZONE_ID || "11502469";
-// Separate zone for Monetag's popunder placement (replaces the old HilltopAds
-// popunder). This one doesn't need the show_<zone> dance — it's a fire-and-forget
-// tag that Monetag's own script self-triggers, so the frontend just needs the ID.
-const MONETAG_POPUNDER_ZONE_ID = process.env.MONETAG_POPUNDER_ZONE_ID || "11541413";
+// Vignette Banner — full-screen ad shown during page/section transitions, with
+// Monetag's own auto-appearing skip button after a few seconds. Same
+// self-triggering pattern as the popunder (own script src, own zone), just a
+// different Monetag product — so it gets its own zone + its own static tag.
+const MONETAG_VIGNETTE_ZONE_ID = process.env.MONETAG_VIGNETTE_ZONE_ID || "11541416";
 const CONTACT_LINK = process.env.CONTACT_LINK || "";
 
 // Ilambit DevPort — used to auto-verify UPI payments by UTR against the BharatPe
@@ -691,7 +692,7 @@ app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 app.get("/health", (req, res) => res.json({ status: "ok", uptime: process.uptime(), mongo: mongoose.connection.readyState===1?"connected":"disconnected", sqlite: "active" }));
 app.get("/api/config", (req, res) => {
   const fj = (process.env.FORCE_JOIN_CHANNELS||"").split(",").map(s=>s.trim()).filter(Boolean);
-  res.json({ ownerId: OWNER_ID, botUsername: BOT_USERNAME||"", forceJoinRequired: fj.length>0, upiId: UPI_ID||"", upiName: UPI_NAME||"", contactLink: CONTACT_LINK||`https://t.me/${BOT_USERNAME}`, paymentProvider: PAYMENT_PROVIDER, monetagZoneId: MONETAG_ZONE_ID, monetagPopunderZoneId: MONETAG_POPUNDER_ZONE_ID });
+  res.json({ ownerId: OWNER_ID, botUsername: BOT_USERNAME||"", forceJoinRequired: fj.length>0, upiId: UPI_ID||"", upiName: UPI_NAME||"", contactLink: CONTACT_LINK||`https://t.me/${BOT_USERNAME}`, paymentProvider: PAYMENT_PROVIDER, monetagZoneId: MONETAG_ZONE_ID });
 });
 
 // Generates the payment UPI QR server-side (so it's a real, shareable/downloadable HTTPS
@@ -914,8 +915,8 @@ app.get("/mn-sdk.js", async (req, res) => {
 let _indexHtmlCache = null;
 function renderIndexHtml() {
   if (!_indexHtmlCache) _indexHtmlCache = fs.readFileSync(path.join(__dirname, "public", "index.html"), "utf-8");
-  const popunderTag = `<script>(function(s){s.dataset.zone='${MONETAG_POPUNDER_ZONE_ID}',s.src='https://al5sm.com/tag.min.js'})([document.documentElement, document.body].filter(Boolean).pop().appendChild(document.createElement('script')))</script>`;
-  return _indexHtmlCache.replace("<!--MONETAG_POPUNDER_SCRIPT-->", popunderTag);
+  const vignetteTag = `<script>(function(s){s.dataset.zone='${MONETAG_VIGNETTE_ZONE_ID}',s.src='https://n6wxm.com/vignette.min.js'})([document.documentElement, document.body].filter(Boolean).pop().appendChild(document.createElement('script')))</script>`;
+  return _indexHtmlCache.replace("<!--MONETAG_VIGNETTE_SCRIPT-->", vignetteTag);
 }
 
 // { index: false } stops express.static from auto-serving the raw index.html
