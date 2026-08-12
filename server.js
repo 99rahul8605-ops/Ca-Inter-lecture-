@@ -430,38 +430,50 @@ async function saveToStorageChannel(bot, fileInfo) {
 }
 
 async function sendFile(bot, chatId, record) {
-  // No filename in the caption anymore — full context (batch/subject/chapter/
-  // lecture name) is available on tap via the Details button instead, which
-  // looks it up through getLectureContext(record.code) at click time.
-  const caption = fileTypeEmoji(record.file_type) + " Lecture";
-  const detailsKeyboard = { inline_keyboard: [[{ text: "📋 Details", callback_data: `lecdetails_${record.code}` }]] };
+  // Caption shows full lecture context (batch/subject/chapter/lecture name)
+  // instead of the raw file_name — looked up via getLectureContext(record.code),
+  // the same index used for the logs-group messages.
+  const caption = buildLectureCaption(record);
   // Forward-restriction (protect_content) should only apply to videos — other file types
   // (photo, audio, voice, document) must stay freely forwardable even for non-owners.
   const isVideoType = record.file_type === "video" || record.file_type === "video_note";
   const protect = isVideoType && !isOwner(chatId);
   try {
     switch(record.file_type) {
-      case "photo":      return await bot.sendPhoto(chatId, record.file_id, { caption, protect_content: protect, reply_markup: detailsKeyboard });
-      case "video":      return await bot.sendVideo(chatId, record.file_id, { caption, protect_content: protect, reply_markup: detailsKeyboard });
-      case "audio":      return await bot.sendAudio(chatId, record.file_id, { caption, protect_content: protect, reply_markup: detailsKeyboard });
-      case "voice":      return await bot.sendVoice(chatId, record.file_id, { caption, protect_content: protect, reply_markup: detailsKeyboard });
-      case "video_note": return await bot.sendVideoNote(chatId, record.file_id, { protect_content: protect, reply_markup: detailsKeyboard });
-      default:           return await bot.sendDocument(chatId, record.file_id, { caption, filename: record.file_name, protect_content: protect, reply_markup: detailsKeyboard });
+      case "photo":      return await bot.sendPhoto(chatId, record.file_id, { caption, parse_mode: "HTML", protect_content: protect });
+      case "video":      return await bot.sendVideo(chatId, record.file_id, { caption, parse_mode: "HTML", protect_content: protect });
+      case "audio":      return await bot.sendAudio(chatId, record.file_id, { caption, parse_mode: "HTML", protect_content: protect });
+      case "voice":      return await bot.sendVoice(chatId, record.file_id, { caption, parse_mode: "HTML", protect_content: protect });
+      case "video_note": return await bot.sendVideoNote(chatId, record.file_id, { protect_content: protect }); // video notes don't support captions at all
+      default:           return await bot.sendDocument(chatId, record.file_id, { caption, parse_mode: "HTML", filename: record.file_name, protect_content: protect });
     }
   } catch (err) {
     // file_id can go bad (e.g. after switching to a new bot token, since a
     // Telegram file_id is only valid for the bot that issued it). Fall back to
     // copying the mirrored message from the storage channel — but force our own
     // caption, otherwise Telegram keeps whatever caption was on that channel
-    // message originally (old filename / promo text) instead of our generic one.
+    // message originally (old filename / promo text) instead of our own.
     if (STORAGE_CHANNEL_ID && record.channel_msg_id) {
-      try { return await bot.copyMessage(chatId, STORAGE_CHANNEL_ID, record.channel_msg_id, { caption, protect_content: protect, reply_markup: detailsKeyboard }); } catch (_) {}
+      try { return await bot.copyMessage(chatId, STORAGE_CHANNEL_ID, record.channel_msg_id, { caption, parse_mode: "HTML", protect_content: protect }); } catch (_) {}
     }
     throw err;
   }
 }
 function fileTypeEmoji(type) {
   return { video:"🎬", video_note:"📹", document:"📄", photo:"🖼️", audio:"🎵", voice:"🎤" }[type] || "📎";
+}
+// Builds the "🎬 Lecture Details" caption shown on every delivered file —
+// batch/subject/chapter/lecture name via getLectureContext(record.code), with
+// a graceful fallback to just the emoji + file_name when no context is found
+// (e.g. an older/orphan code not tied to any course batch).
+function buildLectureCaption(record) {
+  const ctx = getLectureContext(record.code);
+  if (!ctx) return `${fileTypeEmoji(record.file_type)} ${esc(record.file_name || "file")}`;
+  const lines = [`${fileTypeEmoji(record.file_type)} <b>Lecture Details</b>`, `🎓 Batch: ${esc(ctx.batchName)}`];
+  if (ctx.subjectName) lines.push(`📘 Subject: ${esc(ctx.subjectName)}`);
+  if (ctx.chapterName) lines.push(`📖 Chapter: ${esc(ctx.chapterName)}${ctx.unitName ? ` › ${esc(ctx.unitName)}` : ""}`);
+  if (ctx.lectureName) lines.push(`🏷️ Lecture: ${esc(ctx.lectureName)}`);
+  return lines.join("\n");
 }
 
 let rmWords = [];
@@ -1289,25 +1301,6 @@ async function startBot() {
         bot.sendMessage(parseInt(targetUserId),`❌ <b>Payment Rejected</b>\n\nPlease contact support.`,{parse_mode:"HTML"}).catch(()=>{});
         await bot.editMessageCaption(`${query.message.caption||""}\n\n❌ <b>REJECTED</b>`,{chat_id:chatId,message_id:msgId,parse_mode:"HTML",reply_markup:{inline_keyboard:[]}}).catch(()=>bot.editMessageText(`${query.message.text||""}\n\n❌ <b>REJECTED</b>`,{chat_id:chatId,message_id:msgId,parse_mode:"HTML",reply_markup:{inline_keyboard:[]}}).catch(()=>{}));
         await bot.answerCallbackQuery(query.id,{text:"❌ Rejected"});
-      }
-      return;
-    }
-    if (data.startsWith("lecdetails_")) {
-      const code = data.replace("lecdetails_", "");
-      try {
-        const ctx = getLectureContext(code);
-        if (!ctx) {
-          await bot.answerCallbackQuery(query.id, { text: "Details not available for this lecture.", show_alert: true }).catch(() => {});
-        } else {
-          const lines = [`📋 <b>Lecture Details</b>`, `🎓 Batch: ${esc(ctx.batchName)}`];
-          if (ctx.subjectName) lines.push(`📘 Subject: ${esc(ctx.subjectName)}`);
-          if (ctx.chapterName) lines.push(`📖 Chapter: ${esc(ctx.chapterName)}${ctx.unitName ? ` › ${esc(ctx.unitName)}` : ""}`);
-          if (ctx.lectureName) lines.push(`🏷️ Lecture: ${esc(ctx.lectureName)}`);
-          await bot.sendMessage(chatId, lines.join("\n"), { parse_mode: "HTML", reply_to_message_id: msgId }).catch(() => {});
-          await bot.answerCallbackQuery(query.id).catch(() => {});
-        }
-      } catch (err) {
-        await bot.answerCallbackQuery(query.id, { text: "❌ Error loading details" }).catch(() => {});
       }
       return;
     }
