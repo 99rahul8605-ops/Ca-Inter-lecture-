@@ -2035,7 +2035,9 @@ async function startSpin() {
   if (spinStatus.spinsLeft <= 0) { toast('Aaj ke saare ' + (spinStatus.maxSpins || 5) + ' spins ho gaye! Kal wapas aao. 🕐', 'error'); return; }
   if (spinStatus.cooldownRemainingMs > 0) { toast('Thoda ruko, ' + Math.ceil(spinStatus.cooldownRemainingMs / 1000) + 's baad try karo!', 'error'); return; }
 
-  // Rewarded Popup only — no random rewarded/interstitial mix
+  var formats = ['rewarded', 'pop', 'interstitial'];
+  var format = formats[Math.floor(Math.random() * formats.length)];
+
   _spinInProgress = true;
   var btn = document.getElementById('spinBtn');
   var resultEl = document.getElementById('spinResultText');
@@ -2065,7 +2067,11 @@ async function startSpin() {
     return;
   }
 
-  var adPromise = _monetagShow('pop');
+  var tgUid = tg && tg.initDataUnsafe && tg.initDataUnsafe.user ? String(tg.initDataUnsafe.user.id) : 'unknown';
+  var adPromise;
+  if (format === 'pop') adPromise = _monetagShow('pop');
+  else if (format === 'interstitial') adPromise = _monetagShow();
+  else adPromise = _monetagShow({ ymid: tgUid });
 
   try {
     await adPromise;
@@ -3833,7 +3839,9 @@ var _adToken = null;
 var _adActuallyShown = false;
 
 async function watchAd() {
-  // Rewarded Popup only — no random rewarded/interstitial mix
+  // Randomly pick one of three Monetag formats
+  var formats = ['rewarded', 'pop', 'interstitial'];
+  var format = formats[Math.floor(Math.random() * formats.length)];
 
   if (_adWatching) return; // already playing an ad
   if (claimsToday >= 3) {
@@ -3869,8 +3877,17 @@ async function watchAd() {
     return;
   }
 
-  // Rewarded Popup
-  var adPromise = _monetagShow('pop');
+  var uid = tg && tg.initDataUnsafe && tg.initDataUnsafe.user ? String(tg.initDataUnsafe.user.id) : 'unknown';
+
+  // Pick Monetag ad format
+  var adPromise;
+  if (format === 'pop') {
+    adPromise = _monetagShow('pop');          // Rewarded Popup
+  } else if (format === 'interstitial') {
+    adPromise = _monetagShow();               // Rewarded Interstitial
+  } else {
+    adPromise = _monetagShow({ ymid: uid }); // Original Rewarded
+  }
 
   adPromise
     .then(function() {
