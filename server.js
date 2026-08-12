@@ -222,7 +222,7 @@ function logLectureActivity(bot, fromUser, record, extra) {
     const userId = fromUser?.id;
     const uidStr = userId != null ? String(userId) : "unknown";
     const name = fromUser?.username ? `@${fromUser.username}` : (fromUser?.first_name || `User ${uidStr}`);
-    const typeEmoji = { video:"🎬", video_note:"📹", document:"📄", photo:"🖼️", audio:"🎵", voice:"🎤" }[record.file_type] || "📎";
+    const typeEmoji = fileTypeEmoji(record.file_type);
     const ctx = getLectureContext(record.code);
     const lines = [
       `${typeEmoji} <b>Lecture Called</b>`,
@@ -430,31 +430,38 @@ async function saveToStorageChannel(bot, fileInfo) {
 }
 
 async function sendFile(bot, chatId, record) {
-  const caption = `📎 ${record.file_name}`;
+  // No filename in the caption anymore — full context (batch/subject/chapter/
+  // lecture name) is available on tap via the Details button instead, which
+  // looks it up through getLectureContext(record.code) at click time.
+  const caption = fileTypeEmoji(record.file_type) + " Lecture";
+  const detailsKeyboard = { inline_keyboard: [[{ text: "📋 Details", callback_data: `lecdetails_${record.code}` }]] };
   // Forward-restriction (protect_content) should only apply to videos — other file types
   // (photo, audio, voice, document) must stay freely forwardable even for non-owners.
   const isVideoType = record.file_type === "video" || record.file_type === "video_note";
   const protect = isVideoType && !isOwner(chatId);
   try {
     switch(record.file_type) {
-      case "photo":      return await bot.sendPhoto(chatId, record.file_id, { caption, protect_content: protect });
-      case "video":      return await bot.sendVideo(chatId, record.file_id, { caption, protect_content: protect });
-      case "audio":      return await bot.sendAudio(chatId, record.file_id, { caption, protect_content: protect });
-      case "voice":      return await bot.sendVoice(chatId, record.file_id, { caption, protect_content: protect });
-      case "video_note": return await bot.sendVideoNote(chatId, record.file_id, { protect_content: protect });
-      default:           return await bot.sendDocument(chatId, record.file_id, { caption, filename: record.file_name, protect_content: protect });
+      case "photo":      return await bot.sendPhoto(chatId, record.file_id, { caption, protect_content: protect, reply_markup: detailsKeyboard });
+      case "video":      return await bot.sendVideo(chatId, record.file_id, { caption, protect_content: protect, reply_markup: detailsKeyboard });
+      case "audio":      return await bot.sendAudio(chatId, record.file_id, { caption, protect_content: protect, reply_markup: detailsKeyboard });
+      case "voice":      return await bot.sendVoice(chatId, record.file_id, { caption, protect_content: protect, reply_markup: detailsKeyboard });
+      case "video_note": return await bot.sendVideoNote(chatId, record.file_id, { protect_content: protect, reply_markup: detailsKeyboard });
+      default:           return await bot.sendDocument(chatId, record.file_id, { caption, filename: record.file_name, protect_content: protect, reply_markup: detailsKeyboard });
     }
   } catch (err) {
     // file_id can go bad (e.g. after switching to a new bot token, since a
     // Telegram file_id is only valid for the bot that issued it). Fall back to
     // copying the mirrored message from the storage channel — but force our own
     // caption, otherwise Telegram keeps whatever caption was on that channel
-    // message originally (old filename / promo text) instead of record.file_name.
+    // message originally (old filename / promo text) instead of our generic one.
     if (STORAGE_CHANNEL_ID && record.channel_msg_id) {
-      try { return await bot.copyMessage(chatId, STORAGE_CHANNEL_ID, record.channel_msg_id, { caption, protect_content: protect }); } catch (_) {}
+      try { return await bot.copyMessage(chatId, STORAGE_CHANNEL_ID, record.channel_msg_id, { caption, protect_content: protect, reply_markup: detailsKeyboard }); } catch (_) {}
     }
     throw err;
   }
+}
+function fileTypeEmoji(type) {
+  return { video:"🎬", video_note:"📹", document:"📄", photo:"🖼️", audio:"🎵", voice:"🎤" }[type] || "📎";
 }
 
 let rmWords = [];
@@ -1282,6 +1289,25 @@ async function startBot() {
         bot.sendMessage(parseInt(targetUserId),`❌ <b>Payment Rejected</b>\n\nPlease contact support.`,{parse_mode:"HTML"}).catch(()=>{});
         await bot.editMessageCaption(`${query.message.caption||""}\n\n❌ <b>REJECTED</b>`,{chat_id:chatId,message_id:msgId,parse_mode:"HTML",reply_markup:{inline_keyboard:[]}}).catch(()=>bot.editMessageText(`${query.message.text||""}\n\n❌ <b>REJECTED</b>`,{chat_id:chatId,message_id:msgId,parse_mode:"HTML",reply_markup:{inline_keyboard:[]}}).catch(()=>{}));
         await bot.answerCallbackQuery(query.id,{text:"❌ Rejected"});
+      }
+      return;
+    }
+    if (data.startsWith("lecdetails_")) {
+      const code = data.replace("lecdetails_", "");
+      try {
+        const ctx = getLectureContext(code);
+        if (!ctx) {
+          await bot.answerCallbackQuery(query.id, { text: "Details not available for this lecture.", show_alert: true }).catch(() => {});
+        } else {
+          const lines = [`📋 <b>Lecture Details</b>`, `🎓 Batch: ${esc(ctx.batchName)}`];
+          if (ctx.subjectName) lines.push(`📘 Subject: ${esc(ctx.subjectName)}`);
+          if (ctx.chapterName) lines.push(`📖 Chapter: ${esc(ctx.chapterName)}${ctx.unitName ? ` › ${esc(ctx.unitName)}` : ""}`);
+          if (ctx.lectureName) lines.push(`🏷️ Lecture: ${esc(ctx.lectureName)}`);
+          await bot.sendMessage(chatId, lines.join("\n"), { parse_mode: "HTML", reply_to_message_id: msgId }).catch(() => {});
+          await bot.answerCallbackQuery(query.id).catch(() => {});
+        }
+      } catch (err) {
+        await bot.answerCallbackQuery(query.id, { text: "❌ Error loading details" }).catch(() => {});
       }
       return;
     }
