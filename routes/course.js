@@ -7,11 +7,27 @@ const db = require("../sqlite-manager");
 
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const OWNER_ID = parseInt(process.env.OWNER_ID || "0");
+// Real-time activity log group — same one server.js posts lecture-call logs
+// to. Referral events get logged here too (see /refer/record below).
+const LOGS_GROUP_ID = process.env.LOGS_GROUP_ID ? parseInt(process.env.LOGS_GROUP_ID) : null;
 // Set by server.js once the bot is initialized (bot doesn't exist yet at require-time),
 // so giveaway confirmation/reversal notifications can be sent from here.
 let _bot = null;
 function setBot(botInstance) { _bot = botInstance; }
 const esc = (s) => String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+function formatIST(d) {
+  const parts = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Kolkata', day: 'numeric', month: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true }).formatToParts(d);
+  const get = (t) => parts.find((p) => p.type === t).value;
+  return `${get('day')}/${get('month')}/${get('year')}, ${get('hour')}:${get('minute')}:${get('second')} ${get('dayPeriod').toLowerCase()}`;
+}
+// Formats "Name (@username)" or a fallback "User <id>" — same pattern used for
+// the multi-account and suspicious-activity alerts, kept consistent here too.
+function formatUserLabel(userId) {
+  const u = db.user.findOne(String(userId));
+  if (!u) return `User ${userId}`;
+  const name = [u.firstName, u.lastName].filter(Boolean).join(' ').trim() || `User ${userId}`;
+  return name + (u.username ? ` (@${u.username})` : '');
+}
 
 // ── Admin verification ────────────────────────────────────────────────────────
 function verifyAdmin(req, res, next) {
@@ -682,6 +698,15 @@ router.post('/refer/record', async (req, res) => {
     db.referral.insert({ id, referrerId, referredId });
     // MongoDB backup
     Referral.create({ referrerId, referredId }).catch(() => {});
+
+    if (LOGS_GROUP_ID && _bot) {
+      const text = `🎉 <b>New Referral</b>\n\n` +
+        `👤 Referrer: ${esc(formatUserLabel(referrerId))} (<code>${referrerId}</code>)\n` +
+        `➕ Referred: ${esc(formatUserLabel(referredId))} (<code>${referredId}</code>)\n` +
+        `🕐 ${formatIST(new Date())}`;
+      _bot.sendMessage(LOGS_GROUP_ID, text, { parse_mode: "HTML" }).catch(() => {});
+    }
+
     res.json({ success: true, isNew: true });
   } catch (e) {
     if (e.code === 11000) return res.json({ success: false, reason: 'Already referred' });
