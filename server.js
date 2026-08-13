@@ -765,6 +765,7 @@ const GiveawayInvite = mongoose.model("GiveawayInvite"); // schema lives in rout
 app.use("/api", courseRoutes);
 const autoLectureSession = courseRoutes.autoLectureSession;
 const autoAddLecture = courseRoutes.autoAddLecture;
+const autoSetLectureNotes = courseRoutes.autoSetLectureNotes;
 
 app.post("/api/pay-request", async (req, res) => {
   try {
@@ -1706,6 +1707,28 @@ async function startBot() {
     }
   });
   const TG_LINK_RE=/https?:\/\/t\.me\/(c\/(\d+)|([a-zA-Z][a-zA-Z0-9_]{3,}))\/(\d+)/;
+
+  // Shared by both auto-save entry points (t.me-link forward and direct
+  // upload) below. Videos/video-notes/photos/audio always become a NEW
+  // lecture, as before. A document (PDF/notes file) is special-cased: if it
+  // arrives right after a video in the same session, it's attached as THAT
+  // lecture's notes link instead of becoming its own separate lecture entry —
+  // this is what lets "video then PDF" pairs auto-save as one lecture.
+  async function handleAutoLectureFile(bot, chatId, stored, code, link) {
+    if (stored.file_type === "document" && autoLectureSession.lastLectureId) {
+      await autoSetLectureNotes({ batchId: autoLectureSession.batchId, subjectId: autoLectureSession.subjectId, chapterId: autoLectureSession.chapterId, unitId: autoLectureSession.unitId, lectureId: autoLectureSession.lastLectureId, notes: code });
+      const loc = autoLectureSession.unitName ? `${autoLectureSession.subjectName} › ${autoLectureSession.chapterName} › ${autoLectureSession.unitName}` : `${autoLectureSession.subjectName} › ${autoLectureSession.chapterName}`;
+      await bot.sendMessage(chatId, `📎 <b>Notes Attached!</b>\n📖 Lecture ${autoLectureSession.lectureCount}\n📁 ${stored.file_name}\n📍 ${loc}\n🔗 <code>${link}</code>\n\n📨 Send the next video for <b>Lecture ${autoLectureSession.lectureCount + 1}</b>`, { parse_mode: "HTML" });
+    } else {
+      const lNum = autoLectureSession.lectureCount + 1; const lName = `Lecture ${lNum}`;
+      const lecId = await autoAddLecture({ batchId: autoLectureSession.batchId, subjectId: autoLectureSession.subjectId, chapterId: autoLectureSession.chapterId, unitId: autoLectureSession.unitId, name: lName, link: code });
+      autoLectureSession.lectureCount = lNum; autoLectureSession.lastLectureId = lecId; courseRoutes.saveAutoSession && courseRoutes.saveAutoSession();
+      const loc = autoLectureSession.unitName ? `${autoLectureSession.subjectName} › ${autoLectureSession.chapterName} › ${autoLectureSession.unitName}` : `${autoLectureSession.subjectName} › ${autoLectureSession.chapterName}`;
+      const hint = stored.file_type === "document" ? "" : "📎 Send a PDF next to attach it as this lecture's notes, or ";
+      await bot.sendMessage(chatId, `✅ <b>Auto-Saved!</b>\n📖 <b>${lName}</b>\n📁 ${stored.file_name}\n📍 ${loc}\n🔗 <code>${link}</code>\n\n${hint}📨 Send the next video for <b>Lecture ${lNum + 1}</b>`, { parse_mode: "HTML" });
+    }
+  }
+
   const fileQueues=new Map();
   function enqueueFile(userId,task){const prev=fileQueues.get(userId)||Promise.resolve();const next=prev.then(task).catch(()=>{});fileQueues.set(userId,next);next.finally(()=>{if(fileQueues.get(userId)===next)fileQueues.delete(userId);});}
 
@@ -1731,11 +1754,7 @@ async function startBot() {
         await bot.deleteMessage(chatId,processing.message_id);
         if(autoLectureSession&&autoLectureSession.active){
           try{
-            const lNum=autoLectureSession.lectureCount+1; const lName=`Lecture ${lNum}`;
-            await autoAddLecture({batchId:autoLectureSession.batchId,subjectId:autoLectureSession.subjectId,chapterId:autoLectureSession.chapterId,unitId:autoLectureSession.unitId,name:lName,link:code});
-            autoLectureSession.lectureCount=lNum; courseRoutes.saveAutoSession&&courseRoutes.saveAutoSession();
-            const loc=autoLectureSession.unitName?`${autoLectureSession.subjectName} › ${autoLectureSession.chapterName} › ${autoLectureSession.unitName}`:`${autoLectureSession.subjectName} › ${autoLectureSession.chapterName}`;
-            await bot.sendMessage(chatId,`✅ <b>Auto-Saved!</b>\n📖 <b>${lName}</b>\n📁 ${stored.file_name}\n📍 ${loc}\n🔗 <code>${link}</code>\n\n📨 Send next video for <b>Lecture ${lNum+1}</b>`,{parse_mode:"HTML"});
+            await handleAutoLectureFile(bot, chatId, stored, code, link);
           }catch(err){await bot.sendMessage(chatId,`⚠️ File saved but auto-lecture failed: ${err.message}\n🔗 <code>${link}</code>`,{parse_mode:"HTML"});}
         } else {
           await bot.sendMessage(chatId,`✅ ${stored.file_name}\n\n🔗 Link:\n<code>${link}</code>`,{parse_mode:"HTML",reply_markup:{inline_keyboard:[[{text:"📥 File Lo",url:link}]]}});
@@ -1805,11 +1824,7 @@ async function startBot() {
         await bot.deleteMessage(chatId,processing.message_id);
         if(autoLectureSession&&autoLectureSession.active){
           try{
-            const lNum=autoLectureSession.lectureCount+1; const lName=`Lecture ${lNum}`;
-            await autoAddLecture({batchId:autoLectureSession.batchId,subjectId:autoLectureSession.subjectId,chapterId:autoLectureSession.chapterId,unitId:autoLectureSession.unitId,name:lName,link:code});
-            autoLectureSession.lectureCount=lNum; courseRoutes.saveAutoSession&&courseRoutes.saveAutoSession();
-            const loc=autoLectureSession.unitName?`${autoLectureSession.subjectName} › ${autoLectureSession.chapterName} › ${autoLectureSession.unitName}`:`${autoLectureSession.subjectName} › ${autoLectureSession.chapterName}`;
-            await bot.sendMessage(chatId,`✅ <b>Auto-Saved!</b>\n📖 <b>${lName}</b>\n📁 ${stored.file_name}\n📍 ${loc}\n🔗 <code>${link}</code>\n\n📨 Send next video for <b>Lecture ${lNum+1}</b>`,{parse_mode:"HTML"});
+            await handleAutoLectureFile(bot, chatId, stored, code, link);
           }catch(err){await bot.sendMessage(chatId,`⚠️ Saved but auto-lecture failed: ${err.message}\n🔗 <code>${link}</code>`,{parse_mode:"HTML"});}
         } else {
           await bot.sendMessage(chatId,`✅ ${stored.file_name}\n\n🔗 Link:\n<code>${link}</code>`,{parse_mode:"HTML",reply_markup:{inline_keyboard:[[{text:"📥 Get File",url:link}]]}});

@@ -56,6 +56,15 @@ function _setupTables(db) {
     }
   } catch (e) { /* table doesn't exist yet — CREATE TABLE below will make it fresh */ }
 
+  // Same story for auto_lec_session — add lastLectureId to existing deployments
+  // instead of dropping the table (which would lose an in-progress session).
+  try {
+    const alsCols = db.prepare(`PRAGMA table_info(auto_lec_session)`).all().map(c => c.name);
+    if (alsCols.length && !alsCols.includes('lastLectureId')) {
+      db.exec(`ALTER TABLE auto_lec_session ADD COLUMN lastLectureId TEXT`);
+    }
+  } catch (e) { /* table doesn't exist yet — CREATE TABLE below will make it fresh */ }
+
   db.exec(`
     -- Batches (full document stored as JSON blob for simplicity)
     CREATE TABLE IF NOT EXISTS batches (
@@ -133,7 +142,11 @@ function _setupTables(db) {
       batchName    TEXT DEFAULT '',
       subjectName  TEXT DEFAULT '',
       chapterName  TEXT DEFAULT '',
-      unitName     TEXT DEFAULT ''
+      unitName     TEXT DEFAULT '',
+      -- id of the most-recently auto-added lecture in this session. When a
+      -- PDF/document arrives right after a video, it gets attached as THIS
+      -- lecture's notes instead of becoming its own separate lecture entry.
+      lastLectureId TEXT
     );
 
     -- File records
@@ -855,6 +868,7 @@ async function syncToMongo(mongoose, getPointsBreakdown) {
           active: s.active === 1, batchId: s.batchId, subjectId: s.subjectId, chapterId: s.chapterId,
           unitId: s.unitId, lectureCount: s.lectureCount||0, batchName: s.batchName||'',
           subjectName: s.subjectName||'', chapterName: s.chapterName||'', unitName: s.unitName||'',
+          lastLectureId: s.lastLectureId||null,
         }, { upsert: true });
         summary.autoLecSession = 1;
         console.log(`  ✅ AutoLecSession synced`);
@@ -1252,19 +1266,21 @@ function _couponRow(r) {
 const autoLec = {
   load() {
     const r = getDb().prepare(`SELECT * FROM auto_lec_session WHERE id='singleton'`).get();
-    if (!r) return { active:false, batchId:null, subjectId:null, chapterId:null, unitId:null, lectureCount:0, batchName:'', subjectName:'', chapterName:'', unitName:'' };
+    if (!r) return { active:false, batchId:null, subjectId:null, chapterId:null, unitId:null, lectureCount:0, batchName:'', subjectName:'', chapterName:'', unitName:'', lastLectureId:null };
     return { ...r, active: r.active===1 };
   },
   save(session) {
-    getDb().prepare(`INSERT INTO auto_lec_session(id,active,batchId,subjectId,chapterId,unitId,lectureCount,batchName,subjectName,chapterName,unitName)
-      VALUES('singleton',?,?,?,?,?,?,?,?,?,?)
+    getDb().prepare(`INSERT INTO auto_lec_session(id,active,batchId,subjectId,chapterId,unitId,lectureCount,batchName,subjectName,chapterName,unitName,lastLectureId)
+      VALUES('singleton',?,?,?,?,?,?,?,?,?,?,?)
       ON CONFLICT(id) DO UPDATE SET active=excluded.active,batchId=excluded.batchId,
       subjectId=excluded.subjectId,chapterId=excluded.chapterId,unitId=excluded.unitId,
       lectureCount=excluded.lectureCount,batchName=excluded.batchName,
-      subjectName=excluded.subjectName,chapterName=excluded.chapterName,unitName=excluded.unitName`)
+      subjectName=excluded.subjectName,chapterName=excluded.chapterName,unitName=excluded.unitName,
+      lastLectureId=excluded.lastLectureId`)
       .run(session.active?1:0, session.batchId||null, session.subjectId||null,
         session.chapterId||null, session.unitId||null, session.lectureCount||0,
-        session.batchName||'', session.subjectName||'', session.chapterName||'', session.unitName||'');
+        session.batchName||'', session.subjectName||'', session.chapterName||'', session.unitName||'',
+        session.lastLectureId||null);
   },
 };
 
