@@ -2926,7 +2926,7 @@ function openDemoModal(bid) {
           <div class="lec-sub" style="font-size:10px;color:var(--text2);margin-top:2px">${l._subj} · ${l._chap}${l._unit ? ' · ' + l._unit : ''}</div>
           <div class="lec-mini-btns" style="margin-top:6px">
             ${l.link ? `<button class="lec-mini-btn lec-mini-watch" data-lid="${l._id}" onclick="markLectureWatched('${l._id}');openLecLink('${l.link}','lecture')"><i class="ti ti-player-play-filled"></i> Watch</button>` : ''}
-            ${l.notes ? `<button class="lec-mini-btn lec-mini-notes" onclick="openLink('${l.notes}','notes')"><i class="ti ti-notes"></i> Notes</button>` : ''}
+            ${l.notes ? `<button class="lec-mini-btn lec-mini-notes" onclick="openLecLink('${l.notes}','notes')"><i class="ti ti-notes"></i> Notes</button>` : ''}
           </div>
         </div>
         <button class="lec-watched-check${watched ? ' watched' : ''}" data-lid="${l._id}" onclick="event.stopPropagation();toggleLectureWatched('${l._id}')" title="${watched ? 'Mark as unwatched' : 'Mark as watched'}"><i class="ti ti-check"></i></button>
@@ -3510,7 +3510,7 @@ function _lecRowHtml(l, i) {
     : `<div class="lec-mini-btns">
         ${l.isDemo ? '<span class="demo-badge" style="margin-right:4px">DEMO</span>' : ''}
         ${l.link ? `<button class="lec-mini-btn lec-mini-watch" data-lid="${l._id}" onclick="markLectureWatched(this.dataset.lid);openLecLink(_popupLectures[this.dataset.lid].link,'lecture')"><i class="ti ti-player-play-filled"></i> Lecture</button>` : ''}
-        ${l.notes ? `<button class="lec-mini-btn lec-mini-notes" data-lid="${l._id}" onclick="openLink(_popupLectures[this.dataset.lid].notes,'notes')"><i class="ti ti-notes"></i> Notes</button>` : ''}
+        ${l.notes ? `<button class="lec-mini-btn lec-mini-notes" data-lid="${l._id}" onclick="openLecLink(_popupLectures[this.dataset.lid].notes,'notes')"><i class="ti ti-notes"></i> Notes</button>` : ''}
       </div>`;
   return `
     <div class="lec-row${watched ? ' lec-watched' : ''}">
