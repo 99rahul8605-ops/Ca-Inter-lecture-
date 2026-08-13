@@ -766,6 +766,7 @@ app.use("/api", courseRoutes);
 const autoLectureSession = courseRoutes.autoLectureSession;
 const autoAddLecture = courseRoutes.autoAddLecture;
 const autoSetLectureNotes = courseRoutes.autoSetLectureNotes;
+const autoDeleteLecture = courseRoutes.autoDeleteLecture;
 
 app.post("/api/pay-request", async (req, res) => {
   try {
@@ -1177,6 +1178,10 @@ async function startBot() {
 • /migrate — Migrate files from the old storage channel
 • /sync — Sync SQLite and MongoDB data
 
+<b>🎬 Auto-Save Mode</b> (start/stop from the app)
+• /undo — Revert the last auto-saved lecture or notes attach
+• /nextchapter — Move to the next chapter without stopping the session
+
 <b>👤 User Management</b>
 • /ban (userId) [reason] — Ban a user (also deletes all their pending DM videos immediately)
 • /unban (userId) — Remove a user's ban
@@ -1209,6 +1214,69 @@ async function startBot() {
 • /rmword list — Show all blocked words
 • /admin — Show this list`;
     bot.sendMessage(chatId, text, { parse_mode:"HTML" });
+  });
+
+  // ── /undo ─────────────────────────────────────────────────────────────────
+  // Reverts the single most recent auto-save action — either deletes the
+  // lecture that was just created, or clears the notes that were just
+  // attached — whichever happened last. Only one level deep by design (no
+  // action history stack), so a second /undo right after says "nothing to undo".
+  bot.onText(/\/undo/, async (msg) => {
+    if (isGroupChat(msg) || !isOwner(msg.from?.id)) return;
+    const chatId = msg.chat.id;
+    if (!autoLectureSession.active) return bot.sendMessage(chatId, `⚠️ Auto-save mode isn't active right now.`);
+    if (!autoLectureSession.lastLectureId || !autoLectureSession.lastActionType) return bot.sendMessage(chatId, `Nothing to undo — no action recorded yet this session.`);
+    try {
+      if (autoLectureSession.lastActionType === "notes") {
+        await autoSetLectureNotes({ batchId: autoLectureSession.batchId, subjectId: autoLectureSession.subjectId, chapterId: autoLectureSession.chapterId, unitId: autoLectureSession.unitId, lectureId: autoLectureSession.lastLectureId, notes: "" });
+        await bot.sendMessage(chatId, `↩️ <b>Undone</b> — notes removed from Lecture ${autoLectureSession.lectureCount}.`, { parse_mode: "HTML" });
+      } else {
+        const removedName = await autoDeleteLecture({ batchId: autoLectureSession.batchId, subjectId: autoLectureSession.subjectId, chapterId: autoLectureSession.chapterId, unitId: autoLectureSession.unitId, lectureId: autoLectureSession.lastLectureId });
+        autoLectureSession.lectureCount = Math.max(0, autoLectureSession.lectureCount - 1);
+        await bot.sendMessage(chatId, `↩️ <b>Undone</b> — deleted "${esc(removedName || "last lecture")}". Next video will be saved as <b>Lecture ${autoLectureSession.lectureCount + 1}</b> again.`, { parse_mode: "HTML" });
+      }
+      autoLectureSession.lastLectureId = null; autoLectureSession.lastActionType = null;
+      courseRoutes.saveAutoSession && courseRoutes.saveAutoSession();
+    } catch (err) {
+      console.error("undo error:", err.message);
+      bot.sendMessage(chatId, `❌ Couldn't undo: ${esc(err.message)}`, { parse_mode: "HTML" });
+    }
+  });
+
+  // ── /nextchapter ──────────────────────────────────────────────────────────
+  // Advances the active auto-save session to the next chapter in the SAME
+  // subject (by chapter order), without stopping the session — so a long
+  // upload run can move through a whole subject's chapters back-to-back.
+  // Resets unit to none, lecture numbering to whatever already exists in that
+  // chapter, and clears the undo pointer (nothing to undo across a switch).
+  bot.onText(/\/nextchapter/, async (msg) => {
+    if (isGroupChat(msg) || !isOwner(msg.from?.id)) return;
+    const chatId = msg.chat.id;
+    if (!autoLectureSession.active) return bot.sendMessage(chatId, `⚠️ Auto-save mode isn't active right now. Start it from the app first.`);
+    try {
+      const batchData = db.batch.getOne(autoLectureSession.batchId);
+      const subj = batchData && (batchData.subjects || []).find(s => String(s._id) === autoLectureSession.subjectId);
+      if (!subj) return bot.sendMessage(chatId, `❌ Couldn't find the current subject.`);
+      const chapters = [...(subj.chapters || [])].sort((a, b) => (a.order || 0) - (b.order || 0));
+      const curIdx = chapters.findIndex(c => String(c._id) === autoLectureSession.chapterId);
+      if (curIdx === -1) return bot.sendMessage(chatId, `❌ Couldn't find the current chapter.`);
+      const next = chapters[curIdx + 1];
+      if (!next) return bot.sendMessage(chatId, `📭 No more chapters after "${esc(autoLectureSession.chapterName)}" in this subject. Add one from the app, or /done to stop auto mode.`, { parse_mode: "HTML" });
+
+      autoLectureSession.chapterId = String(next._id);
+      autoLectureSession.chapterName = next.name || "";
+      autoLectureSession.unitId = null;
+      autoLectureSession.unitName = "";
+      autoLectureSession.lectureCount = (next.lectures || []).length;
+      autoLectureSession.lastLectureId = null;
+      autoLectureSession.lastActionType = null;
+      courseRoutes.saveAutoSession && courseRoutes.saveAutoSession();
+
+      await bot.sendMessage(chatId, `➡️ <b>Switched to next chapter</b>\n📍 ${esc(autoLectureSession.subjectName)} › ${esc(autoLectureSession.chapterName)}\n\n📨 Send video for <b>Lecture ${autoLectureSession.lectureCount + 1}</b>`, { parse_mode: "HTML" });
+    } catch (err) {
+      console.error("nextchapter error:", err.message);
+      bot.sendMessage(chatId, `❌ Couldn't switch chapter: ${esc(err.message)}`, { parse_mode: "HTML" });
+    }
   });
 
   // ── /bulk ─────────────────────────────────────────────────────────────────
@@ -1716,16 +1784,17 @@ async function startBot() {
   // this is what lets "video then PDF" pairs auto-save as one lecture.
   async function handleAutoLectureFile(bot, chatId, stored, code, link) {
     if (stored.file_type === "document" && autoLectureSession.lastLectureId) {
-      await autoSetLectureNotes({ batchId: autoLectureSession.batchId, subjectId: autoLectureSession.subjectId, chapterId: autoLectureSession.chapterId, unitId: autoLectureSession.unitId, lectureId: autoLectureSession.lastLectureId, notes: code });
+      await autoSetLectureNotes({ batchId: autoLectureSession.batchId, subjectId: autoLectureSession.subjectId, chapterId: autoLectureSession.chapterId, unitId: autoLectureSession.unitId, lectureId: autoLectureSession.lastLectureId, notes: link });
+      autoLectureSession.lastActionType = "notes"; courseRoutes.saveAutoSession && courseRoutes.saveAutoSession();
       const loc = autoLectureSession.unitName ? `${autoLectureSession.subjectName} › ${autoLectureSession.chapterName} › ${autoLectureSession.unitName}` : `${autoLectureSession.subjectName} › ${autoLectureSession.chapterName}`;
-      await bot.sendMessage(chatId, `📎 <b>Notes Attached!</b>\n📖 Lecture ${autoLectureSession.lectureCount}\n📁 ${stored.file_name}\n📍 ${loc}\n🔗 <code>${link}</code>\n\n📨 Send the next video for <b>Lecture ${autoLectureSession.lectureCount + 1}</b>`, { parse_mode: "HTML" });
+      await bot.sendMessage(chatId, `📎 <b>Notes Attached!</b>\n📖 Lecture ${autoLectureSession.lectureCount}\n📁 ${stored.file_name}\n📍 ${loc}\n🔗 <code>${link}</code>\n\n📨 Send the next video for <b>Lecture ${autoLectureSession.lectureCount + 1}</b> (or /undo if this was a mistake)`, { parse_mode: "HTML" });
     } else {
       const lNum = autoLectureSession.lectureCount + 1; const lName = `Lecture ${lNum}`;
       const lecId = await autoAddLecture({ batchId: autoLectureSession.batchId, subjectId: autoLectureSession.subjectId, chapterId: autoLectureSession.chapterId, unitId: autoLectureSession.unitId, name: lName, link: code });
-      autoLectureSession.lectureCount = lNum; autoLectureSession.lastLectureId = lecId; courseRoutes.saveAutoSession && courseRoutes.saveAutoSession();
+      autoLectureSession.lectureCount = lNum; autoLectureSession.lastLectureId = lecId; autoLectureSession.lastActionType = "lecture"; courseRoutes.saveAutoSession && courseRoutes.saveAutoSession();
       const loc = autoLectureSession.unitName ? `${autoLectureSession.subjectName} › ${autoLectureSession.chapterName} › ${autoLectureSession.unitName}` : `${autoLectureSession.subjectName} › ${autoLectureSession.chapterName}`;
       const hint = stored.file_type === "document" ? "" : "📎 Send a PDF next to attach it as this lecture's notes, or ";
-      await bot.sendMessage(chatId, `✅ <b>Auto-Saved!</b>\n📖 <b>${lName}</b>\n📁 ${stored.file_name}\n📍 ${loc}\n🔗 <code>${link}</code>\n\n${hint}📨 Send the next video for <b>Lecture ${lNum + 1}</b>`, { parse_mode: "HTML" });
+      await bot.sendMessage(chatId, `✅ <b>Auto-Saved!</b>\n📖 <b>${lName}</b>\n📁 ${stored.file_name}\n📍 ${loc}\n🔗 <code>${link}</code>\n\n${hint}📨 Send the next video for <b>Lecture ${lNum + 1}</b> (or /undo if this was a mistake)`, { parse_mode: "HTML" });
     }
   }
 
