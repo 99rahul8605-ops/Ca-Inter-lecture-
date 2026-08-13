@@ -160,15 +160,57 @@ async function autoAddLecture({ batchId, subjectId, chapterId, unitId, name, lin
   // Write to SQLite
   db.batch.upsert(batchData);
 
-  // Write to MongoDB (source of truth backup)
+  // Write to MongoDB (source of truth backup) — reuse the SAME _id generated
+  // above so the SQLite and Mongo copies of this lecture stay addressable by
+  // the same id (needed so autoSetLectureNotes can find it in both later).
   const mongoBatch = await Batch.findById(batchId);
   if (mongoBatch) {
     const ms = mongoBatch.subjects.id(subjectId);
     const mc = ms && ms.chapters.id(chapterId);
     if (mc) {
-      if (unitId) { const mu = mc.units.id(unitId); if (mu) mu.lectures.push({ name, link, notes: '', order: mu.lectures.length, isDemo: false }); }
-      else mc.lectures.push({ name, link, notes: '', order: mc.lectures.length, isDemo: false });
+      if (unitId) { const mu = mc.units.id(unitId); if (mu) mu.lectures.push({ _id: newLec._id, name, link, notes: '', order: mu.lectures.length, isDemo: false }); }
+      else mc.lectures.push({ _id: newLec._id, name, link, notes: '', order: mc.lectures.length, isDemo: false });
       await mongoBatch.save();
+    }
+  }
+
+  return newLec._id;
+}
+
+// Attaches a notes link to an ALREADY-EXISTING lecture (found by id), instead
+// of creating a new lecture entry. Used by auto-save mode in server.js: when a
+// PDF/document is sent right after a video, it gets paired as that lecture's
+// notes rather than becoming its own separate lecture.
+async function autoSetLectureNotes({ batchId, subjectId, chapterId, unitId, lectureId, notes }) {
+  const batchData = db.batch.getOne(batchId);
+  if (!batchData) throw new Error('Batch not found');
+  const subj = (batchData.subjects||[]).find(s => String(s._id) === subjectId);
+  if (!subj) throw new Error('Subject not found');
+  const chap = (subj.chapters||[]).find(c => String(c._id) === chapterId);
+  if (!chap) throw new Error('Chapter not found');
+
+  let lec;
+  if (unitId) {
+    const unit = (chap.units||[]).find(u => String(u._id) === unitId);
+    if (!unit) throw new Error('Unit not found');
+    lec = (unit.lectures||[]).find(l => String(l._id) === lectureId);
+  } else {
+    lec = (chap.lectures||[]).find(l => String(l._id) === lectureId);
+  }
+  if (!lec) throw new Error('Lecture not found (may have been deleted/edited since)');
+  lec.notes = notes;
+
+  db.batch.upsert(batchData);
+
+  const mongoBatch = await Batch.findById(batchId);
+  if (mongoBatch) {
+    const ms = mongoBatch.subjects.id(subjectId);
+    const mc = ms && ms.chapters.id(chapterId);
+    if (mc) {
+      let mlec;
+      if (unitId) { const mu = mc.units.id(unitId); mlec = mu && mu.lectures.id(lectureId); }
+      else { mlec = mc.lectures.id(lectureId); }
+      if (mlec) { mlec.notes = notes; await mongoBatch.save(); }
     }
   }
 }
@@ -1382,7 +1424,10 @@ router.post('/auto-lecture/start', verifyAdmin, async (req, res) => {
     const chap = subj && (subj.chapters||[]).find(c => String(c._id)===chapterId);
     if (!chap) return res.status(404).json({ error: 'Chapter not found' });
     let existingCount = unitId ? ((chap.units||[]).find(u => String(u._id)===unitId)?.lectures||[]).length : (chap.lectures||[]).length;
-    Object.assign(autoLectureSession, { active: true, batchId, subjectId, chapterId, unitId: unitId||null, lectureCount: existingCount, batchName: batchName||'', subjectName: subjectName||'', chapterName: chapterName||'', unitName: unitName||'' });
+    // lastLectureId always resets to null on a fresh start — otherwise a PDF
+    // sent before any video in this new session could attach itself to a
+    // stale lecture left over from a previous session/chapter.
+    Object.assign(autoLectureSession, { active: true, batchId, subjectId, chapterId, unitId: unitId||null, lectureCount: existingCount, batchName: batchName||'', subjectName: subjectName||'', chapterName: chapterName||'', unitName: unitName||'', lastLectureId: null });
     await _saveAutoSession();
     res.json({ success: true, session: autoLectureSession });
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -1390,13 +1435,14 @@ router.post('/auto-lecture/start', verifyAdmin, async (req, res) => {
 
 router.post('/auto-lecture/stop', verifyAdmin, async (req, res) => {
   const totalAdded = autoLectureSession.lectureCount;
-  Object.assign(autoLectureSession, { active: false, batchId: null, subjectId: null, chapterId: null, unitId: null, lectureCount: 0, batchName: '', subjectName: '', chapterName: '', unitName: '' });
+  Object.assign(autoLectureSession, { active: false, batchId: null, subjectId: null, chapterId: null, unitId: null, lectureCount: 0, batchName: '', subjectName: '', chapterName: '', unitName: '', lastLectureId: null });
   await _saveAutoSession();
   res.json({ success: true, totalAdded });
 });
 
 router.autoLectureSession = autoLectureSession;
 router.autoAddLecture = autoAddLecture;
+router.autoSetLectureNotes = autoSetLectureNotes;
 router.saveAutoSession = _saveAutoSession;
 
 // ── Stats ─────────────────────────────────────────────────────────────────────
