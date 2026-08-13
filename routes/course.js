@@ -215,6 +215,48 @@ async function autoSetLectureNotes({ batchId, subjectId, chapterId, unitId, lect
   }
 }
 
+// Removes a lecture entirely by id — used by /undo in server.js when the most
+// recent auto action was "created a new lecture" (as opposed to "attached
+// notes to an existing one", which autoSetLectureNotes with notes:'' handles
+// instead). Returns the removed lecture's name for the confirmation message.
+async function autoDeleteLecture({ batchId, subjectId, chapterId, unitId, lectureId }) {
+  const batchData = db.batch.getOne(batchId);
+  if (!batchData) throw new Error('Batch not found');
+  const subj = (batchData.subjects||[]).find(s => String(s._id) === subjectId);
+  if (!subj) throw new Error('Subject not found');
+  const chap = (subj.chapters||[]).find(c => String(c._id) === chapterId);
+  if (!chap) throw new Error('Chapter not found');
+
+  let removedName = null;
+  if (unitId) {
+    const unit = (chap.units||[]).find(u => String(u._id) === unitId);
+    if (!unit) throw new Error('Unit not found');
+    const idx = (unit.lectures||[]).findIndex(l => String(l._id) === lectureId);
+    if (idx === -1) throw new Error('Lecture not found (may already be removed)');
+    removedName = unit.lectures[idx].name;
+    unit.lectures.splice(idx, 1);
+  } else {
+    const idx = (chap.lectures||[]).findIndex(l => String(l._id) === lectureId);
+    if (idx === -1) throw new Error('Lecture not found (may already be removed)');
+    removedName = chap.lectures[idx].name;
+    chap.lectures.splice(idx, 1);
+  }
+
+  db.batch.upsert(batchData);
+
+  const mongoBatch = await Batch.findById(batchId);
+  if (mongoBatch) {
+    const ms = mongoBatch.subjects.id(subjectId);
+    const mc = ms && ms.chapters.id(chapterId);
+    if (mc) {
+      if (unitId) { const mu = mc.units.id(unitId); if (mu) mu.lectures.pull(lectureId); }
+      else { mc.lectures.pull(lectureId); }
+      await mongoBatch.save();
+    }
+  }
+  return removedName;
+}
+
 // ── Batches ───────────────────────────────────────────────────────────────────
 
 router.get("/batches", async (req, res) => {
@@ -1427,7 +1469,7 @@ router.post('/auto-lecture/start', verifyAdmin, async (req, res) => {
     // lastLectureId always resets to null on a fresh start — otherwise a PDF
     // sent before any video in this new session could attach itself to a
     // stale lecture left over from a previous session/chapter.
-    Object.assign(autoLectureSession, { active: true, batchId, subjectId, chapterId, unitId: unitId||null, lectureCount: existingCount, batchName: batchName||'', subjectName: subjectName||'', chapterName: chapterName||'', unitName: unitName||'', lastLectureId: null });
+    Object.assign(autoLectureSession, { active: true, batchId, subjectId, chapterId, unitId: unitId||null, lectureCount: existingCount, batchName: batchName||'', subjectName: subjectName||'', chapterName: chapterName||'', unitName: unitName||'', lastLectureId: null, lastActionType: null });
     await _saveAutoSession();
     res.json({ success: true, session: autoLectureSession });
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -1435,7 +1477,7 @@ router.post('/auto-lecture/start', verifyAdmin, async (req, res) => {
 
 router.post('/auto-lecture/stop', verifyAdmin, async (req, res) => {
   const totalAdded = autoLectureSession.lectureCount;
-  Object.assign(autoLectureSession, { active: false, batchId: null, subjectId: null, chapterId: null, unitId: null, lectureCount: 0, batchName: '', subjectName: '', chapterName: '', unitName: '', lastLectureId: null });
+  Object.assign(autoLectureSession, { active: false, batchId: null, subjectId: null, chapterId: null, unitId: null, lectureCount: 0, batchName: '', subjectName: '', chapterName: '', unitName: '', lastLectureId: null, lastActionType: null });
   await _saveAutoSession();
   res.json({ success: true, totalAdded });
 });
@@ -1443,6 +1485,7 @@ router.post('/auto-lecture/stop', verifyAdmin, async (req, res) => {
 router.autoLectureSession = autoLectureSession;
 router.autoAddLecture = autoAddLecture;
 router.autoSetLectureNotes = autoSetLectureNotes;
+router.autoDeleteLecture = autoDeleteLecture;
 router.saveAutoSession = _saveAutoSession;
 
 // ── Stats ─────────────────────────────────────────────────────────────────────
