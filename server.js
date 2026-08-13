@@ -1784,7 +1784,7 @@ async function startBot() {
   // this is what lets "video then PDF" pairs auto-save as one lecture.
   async function handleAutoLectureFile(bot, chatId, stored, code, link) {
     if (stored.file_type === "document" && autoLectureSession.lastLectureId) {
-      await autoSetLectureNotes({ batchId: autoLectureSession.batchId, subjectId: autoLectureSession.subjectId, chapterId: autoLectureSession.chapterId, unitId: autoLectureSession.unitId, lectureId: autoLectureSession.lastLectureId, notes: link });
+      await autoSetLectureNotes({ batchId: autoLectureSession.batchId, subjectId: autoLectureSession.subjectId, chapterId: autoLectureSession.chapterId, unitId: autoLectureSession.unitId, lectureId: autoLectureSession.lastLectureId, notes: code });
       autoLectureSession.lastActionType = "notes"; courseRoutes.saveAutoSession && courseRoutes.saveAutoSession();
       const loc = autoLectureSession.unitName ? `${autoLectureSession.subjectName} › ${autoLectureSession.chapterName} › ${autoLectureSession.unitName}` : `${autoLectureSession.subjectName} › ${autoLectureSession.chapterName}`;
       await bot.sendMessage(chatId, `📎 <b>Notes Attached!</b>\n📖 Lecture ${autoLectureSession.lectureCount}\n📁 ${stored.file_name}\n📍 ${loc}\n🔗 <code>${link}</code>\n\n📨 Send the next video for <b>Lecture ${autoLectureSession.lectureCount + 1}</b> (or /undo if this was a mistake)`, { parse_mode: "HTML" });
