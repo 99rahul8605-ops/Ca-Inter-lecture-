@@ -1181,6 +1181,7 @@ async function startBot() {
 <b>🎬 Auto-Save Mode</b> (start/stop from the app)
 • /undo — Revert the last auto-saved lecture or notes attach
 • /nextchapter — Move to the next chapter without stopping the session
+• /nextunit — Move to the next unit within the current chapter
 
 <b>👤 User Management</b>
 • /ban (userId) [reason] — Ban a user (also deletes all their pending DM videos immediately)
@@ -1276,6 +1277,47 @@ async function startBot() {
     } catch (err) {
       console.error("nextchapter error:", err.message);
       bot.sendMessage(chatId, `❌ Couldn't switch chapter: ${esc(err.message)}`, { parse_mode: "HTML" });
+    }
+  });
+
+  // ── /nextunit ─────────────────────────────────────────────────────────────
+  // Same idea as /nextchapter, one level down — advances to the next unit
+  // within the CURRENT chapter, without stopping the session. If the session
+  // is currently at chapter-level (no unit selected), this moves to the
+  // chapter's first unit rather than a "next" one.
+  bot.onText(/\/nextunit/, async (msg) => {
+    if (isGroupChat(msg) || !isOwner(msg.from?.id)) return;
+    const chatId = msg.chat.id;
+    if (!autoLectureSession.active) return bot.sendMessage(chatId, `⚠️ Auto-save mode isn't active right now. Start it from the app first.`);
+    try {
+      const batchData = db.batch.getOne(autoLectureSession.batchId);
+      const subj = batchData && (batchData.subjects || []).find(s => String(s._id) === autoLectureSession.subjectId);
+      if (!subj) return bot.sendMessage(chatId, `❌ Couldn't find the current subject.`);
+      const chap = (subj.chapters || []).find(c => String(c._id) === autoLectureSession.chapterId);
+      if (!chap) return bot.sendMessage(chatId, `❌ Couldn't find the current chapter.`);
+      const units = [...(chap.units || [])].sort((a, b) => (a.order || 0) - (b.order || 0));
+      if (!units.length) return bot.sendMessage(chatId, `📭 "${esc(autoLectureSession.chapterName)}" has no units. Add one from the app, or /nextchapter to move on.`, { parse_mode: "HTML" });
+
+      let next;
+      if (!autoLectureSession.unitId) {
+        next = units[0]; // currently at chapter-level — first unit is the "next" step
+      } else {
+        const curIdx = units.findIndex(u => String(u._id) === autoLectureSession.unitId);
+        next = units[curIdx + 1];
+      }
+      if (!next) return bot.sendMessage(chatId, `📭 No more units after "${esc(autoLectureSession.unitName)}" in this chapter. Add one from the app, or /nextchapter to move on.`, { parse_mode: "HTML" });
+
+      autoLectureSession.unitId = String(next._id);
+      autoLectureSession.unitName = next.name || "";
+      autoLectureSession.lectureCount = (next.lectures || []).length;
+      autoLectureSession.lastLectureId = null;
+      autoLectureSession.lastActionType = null;
+      courseRoutes.saveAutoSession && courseRoutes.saveAutoSession();
+
+      await bot.sendMessage(chatId, `➡️ <b>Switched to next unit</b>\n📍 ${esc(autoLectureSession.subjectName)} › ${esc(autoLectureSession.chapterName)} › ${esc(autoLectureSession.unitName)}\n\n📨 Send video for <b>Lecture ${autoLectureSession.lectureCount + 1}</b>`, { parse_mode: "HTML" });
+    } catch (err) {
+      console.error("nextunit error:", err.message);
+      bot.sendMessage(chatId, `❌ Couldn't switch unit: ${esc(err.message)}`, { parse_mode: "HTML" });
     }
   });
 
@@ -1787,14 +1829,14 @@ async function startBot() {
       await autoSetLectureNotes({ batchId: autoLectureSession.batchId, subjectId: autoLectureSession.subjectId, chapterId: autoLectureSession.chapterId, unitId: autoLectureSession.unitId, lectureId: autoLectureSession.lastLectureId, notes: code });
       autoLectureSession.lastActionType = "notes"; courseRoutes.saveAutoSession && courseRoutes.saveAutoSession();
       const loc = autoLectureSession.unitName ? `${autoLectureSession.subjectName} › ${autoLectureSession.chapterName} › ${autoLectureSession.unitName}` : `${autoLectureSession.subjectName} › ${autoLectureSession.chapterName}`;
-      await bot.sendMessage(chatId, `📎 <b>Notes Attached!</b>\n📖 Lecture ${autoLectureSession.lectureCount}\n📁 ${stored.file_name}\n📍 ${loc}\n🔗 <code>${link}</code>\n\n📨 Send the next video for <b>Lecture ${autoLectureSession.lectureCount + 1}</b> (or /undo if this was a mistake)`, { parse_mode: "HTML" });
+      await bot.sendMessage(chatId, `📎 <b>Notes Attached!</b>\n📖 Lecture ${autoLectureSession.lectureCount}\n📁 ${stored.file_name}\n📍 ${loc}\n🔗 <code>${link}</code>\n\n📨 Send the next video for <b>Lecture ${autoLectureSession.lectureCount + 1}</b>\n↩️ /undo — if this was a mistake\n➡️ /nextchapter — move to next chapter\n➡️ /nextunit — move to next unit`, { parse_mode: "HTML" });
     } else {
       const lNum = autoLectureSession.lectureCount + 1; const lName = `Lecture ${lNum}`;
       const lecId = await autoAddLecture({ batchId: autoLectureSession.batchId, subjectId: autoLectureSession.subjectId, chapterId: autoLectureSession.chapterId, unitId: autoLectureSession.unitId, name: lName, link: code });
       autoLectureSession.lectureCount = lNum; autoLectureSession.lastLectureId = lecId; autoLectureSession.lastActionType = "lecture"; courseRoutes.saveAutoSession && courseRoutes.saveAutoSession();
       const loc = autoLectureSession.unitName ? `${autoLectureSession.subjectName} › ${autoLectureSession.chapterName} › ${autoLectureSession.unitName}` : `${autoLectureSession.subjectName} › ${autoLectureSession.chapterName}`;
       const hint = stored.file_type === "document" ? "" : "📎 Send a PDF next to attach it as this lecture's notes, or ";
-      await bot.sendMessage(chatId, `✅ <b>Auto-Saved!</b>\n📖 <b>${lName}</b>\n📁 ${stored.file_name}\n📍 ${loc}\n🔗 <code>${link}</code>\n\n${hint}📨 Send the next video for <b>Lecture ${lNum + 1}</b> (or /undo if this was a mistake)`, { parse_mode: "HTML" });
+      await bot.sendMessage(chatId, `✅ <b>Auto-Saved!</b>\n📖 <b>${lName}</b>\n📁 ${stored.file_name}\n📍 ${loc}\n🔗 <code>${link}</code>\n\n${hint}📨 Send the next video for <b>Lecture ${lNum + 1}</b>\n↩️ /undo — if this was a mistake\n➡️ /nextchapter — move to next chapter\n➡️ /nextunit — move to next unit`, { parse_mode: "HTML" });
     }
   }
 
