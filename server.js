@@ -47,6 +47,11 @@ const LOGS_GROUP_ID = process.env.LOGS_GROUP_ID ? parseInt(process.env.LOGS_GROU
 // so the frontend reads this from /api/config and builds that function name
 // dynamically rather than hardcoding it — see _monetagShow() in index.html.
 const MONETAG_ZONE_ID = process.env.MONETAG_ZONE_ID || "11502469";
+// Vignette Banner — full-screen ad shown during page/section transitions, with
+// Monetag's own auto-appearing skip button after a few seconds. Same
+// self-triggering pattern as the popunder (own script src, own zone), just a
+// different Monetag product — so it gets its own zone + its own static tag.
+const MONETAG_VIGNETTE_ZONE_ID = process.env.MONETAG_VIGNETTE_ZONE_ID || "11541416";
 const CONTACT_LINK = process.env.CONTACT_LINK || "";
 
 // Ilambit DevPort — used to auto-verify UPI payments by UTR against the BharatPe
@@ -578,11 +583,16 @@ const esc = (s) => String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").repl
 async function wait(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 // ── BharatPe payment verification (via Ilambit DevPort) ────────────────────────
-// In-memory guard against the same UTR being submitted twice and auto-approved
-// twice. Resets on restart — if you need this to survive restarts, persist UTRs
-// used against a batch/user in SQLite/Mongo instead (e.g. a column on FileRecord-
-// style payment log) and check that table here too.
-const usedUTRs = new Set();
+// Persistent guard against the same UTR being submitted twice and auto-approved
+// twice. Stored in SQLite so it survives restarts.
+async function isUtrUsed(utr) {
+  const row = db.getDb().prepare(`SELECT 1 FROM used_utrs WHERE utr = ?`).get(utr);
+  return !!row;
+}
+
+async function markUtrUsed(utr) {
+  db.getDb().prepare(`INSERT OR IGNORE INTO used_utrs (utr, used_at) VALUES (?, ?)`).run(utr, Date.now());
+}
 
 async function verifyBharatPePayment(utr) {
   if (!DEVPORT_API_KEY) return { ok: false, reason: "not_configured" };
@@ -703,10 +713,70 @@ app.set("trust proxy", true);
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 
+// Security headers
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('X-XSS-Protection', '1; mode=block');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  
+  // CORS - restrict to Telegram WebApp origin
+  const allowedOrigin = process.env.WEB_URL || '*';
+  res.setHeader('Access-Control-Allow-Origin', allowedOrigin);
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-TG-Init-Data');
+  res.setHeader('Access-Control-Max-Age', '86400');
+  
+  if (req.method === 'OPTIONS') {
+    return res.status(204).end();
+  }
+  next();
+});
+
+// Rate limiting
+const rateLimitMap = new Map();
+function rateLimit(maxRequests = 100, windowMs = 60000) {
+  return (req, res, next) => {
+    const ip = req.ip || req.connection.remoteAddress;
+    const now = Date.now();
+    const key = `${ip}:${req.path}`;
+    const record = rateLimitMap.get(key) || { count: 0, resetTime: now + windowMs };
+    
+    if (now > record.resetTime) {
+      record.count = 0;
+      record.resetTime = now + windowMs;
+    }
+    
+    record.count++;
+    rateLimitMap.set(key, record);
+    
+    res.setHeader('X-RateLimit-Limit', maxRequests);
+    res.setHeader('X-RateLimit-Remaining', Math.max(0, maxRequests - record.count));
+    res.setHeader('X-RateLimit-Reset', Math.ceil(record.resetTime / 1000));
+    
+    if (record.count > maxRequests) {
+      return res.status(429).json({ error: 'Too many requests, please try again later' });
+    }
+    next();
+  };
+}
+
+app.use(rateLimit(100, 60000));
+
+// Periodic cleanup for rateLimitMap to prevent memory leaks
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, record] of rateLimitMap.entries()) {
+    if (now > record.resetTime) {
+      rateLimitMap.delete(key);
+    }
+  }
+}, 5 * 60 * 1000); // Clean up every 5 minutes
+
 app.get("/health", (req, res) => res.json({ status: "ok", uptime: process.uptime(), mongo: mongoose.connection.readyState===1?"connected":"disconnected", sqlite: "active" }));
 app.get("/api/config", (req, res) => {
   const fj = (process.env.FORCE_JOIN_CHANNELS||"").split(",").map(s=>s.trim()).filter(Boolean);
-  res.json({ ownerId: OWNER_ID, botUsername: BOT_USERNAME||"", forceJoinRequired: fj.length>0, upiId: UPI_ID||"", upiName: UPI_NAME||"", contactLink: CONTACT_LINK||`https://t.me/${BOT_USERNAME}`, paymentProvider: PAYMENT_PROVIDER, monetagZoneId: MONETAG_ZONE_ID });
+  res.json({ botUsername: BOT_USERNAME||"", forceJoinRequired: fj.length>0, upiId: UPI_ID||"", upiName: UPI_NAME||"", contactLink: CONTACT_LINK||`https://t.me/${BOT_USERNAME}`, paymentProvider: PAYMENT_PROVIDER, monetagZoneId: MONETAG_ZONE_ID });
 });
 
 // Generates the payment UPI QR server-side (so it's a real, shareable/downloadable HTTPS
@@ -763,10 +833,27 @@ const autoAddLecture = courseRoutes.autoAddLecture;
 const autoSetLectureNotes = courseRoutes.autoSetLectureNotes;
 const autoDeleteLecture = courseRoutes.autoDeleteLecture;
 
+function validateInput(input, type) {
+  if (type === 'userId' || type === 'batchId') return /^[a-zA-Z0-9_-]{1,50}$/.test(input);
+  if (type === 'txnId') return /^[A-Za-z0-9]{1,50}$/.test(input);
+  if (type === 'amount') return !isNaN(Number(input)) && Number(input) > 0 && Number(input) <= 1000000;
+  if (type === 'name') return /^[\p{L}\p{N}\s._-]{1,100}$/u.test(input);
+  if (type === 'username') return /^[a-zA-Z0-9_]{0,32}$/.test(input);
+  return true;
+}
+
 app.post("/api/pay-request", async (req, res) => {
   try {
     const { batchId, userId, firstName, lastName, username, txnId, screenshotBase64, couponCode, discountPct, finalAmount } = req.body;
+    
     if (!batchId || !txnId) return res.status(400).json({ error: "Missing fields" });
+    if (!validateInput(batchId, 'batchId') || !validateInput(userId, 'userId') || !validateInput(txnId, 'txnId')) {
+      return res.status(400).json({ error: "Invalid input format" });
+    }
+    if (firstName && !validateInput(firstName, 'name')) return res.status(400).json({ error: "Invalid firstName" });
+    if (lastName && !validateInput(lastName, 'name')) return res.status(400).json({ error: "Invalid lastName" });
+    if (username && !validateInput(username, 'username')) return res.status(400).json({ error: "Invalid username" });
+    if (finalAmount && !validateInput(finalAmount, 'amount')) return res.status(400).json({ error: "Invalid amount" });
     const batchData = db.batch.getOne(batchId);
     const batchName = batchData ? batchData.name : batchId;
     const origPrice = batchData?.price ? `₹${batchData.price}` : "N/A";
@@ -776,7 +863,7 @@ app.post("/api/pay-request", async (req, res) => {
     if (!PAYMENT_GROUP_ID) return res.status(500).json({ error: "PAYMENT_GROUP_ID not configured" });
 
     // ── Try auto-verifying the UTR against BharatPe via DevPort before bothering an admin ──
-    const alreadyUsed = usedUTRs.has(txnId);
+    const alreadyUsed = await isUtrUsed(txnId);
     const verify = alreadyUsed ? { ok: false, reason: "utr_reused" } : await verifyBharatPePayment(txnId);
     const amountMatches = verify.ok && expectedAmount != null && verify.amount != null && Math.abs(verify.amount - expectedAmount) <= PAYMENT_AMOUNT_TOLERANCE;
     const autoApprove = verify.ok && verify.verified && verify.found && verify.status === "SUCCESS" && amountMatches;
@@ -792,7 +879,7 @@ app.post("/api/pay-request", async (req, res) => {
     const caption = `💸 <b>New Payment Request!</b>\n\n👤 <b>${esc(firstName)}${lastName?" "+esc(lastName):""}</b>\n🆔 UID: <code>${esc(userId)}</code>\n📱 @${username||"N/A"}\n\n📚 Batch: <b>${esc(batchName)}</b>\n${priceLine}\n🔖 UTR: <code>${esc(txnId)}</code>\n${verifyLine}`;
 
     if (autoApprove) {
-      usedUTRs.add(txnId);
+      await markUtrUsed(txnId);
       try {
         const batch = await grantBatchAccess(batchId, userId);
         await bot.sendMessage(parseInt(userId), `✅ <b>Payment Verified & Approved!</b>\n\nAccess to <b>${esc(batch?.name||batchName)}</b> unlocked! 🚀`, { parse_mode:"HTML", reply_markup:{ inline_keyboard:[[{text:"📚 Open App",web_app:{url:WEB_URL}}]] } }).catch(()=>{});
@@ -835,6 +922,13 @@ app.post("/api/paytm/initiate", async (req, res) => {
     if (!PaytmChecksum || !PAYTM_MID || !PAYTM_MERCHANT_KEY) return apiErr(res, 500, "NOT_CONFIGURED", "Paytm not configured (missing PAYTM_MID/PAYTM_MERCHANT_KEY or paytmchecksum package)");
     const { batchId, userId, firstName, lastName, username, couponCode, discountPct, finalAmount } = req.body;
     if (!batchId || !userId) return apiErr(res, 400, "MISSING_FIELDS", "batchId and userId are required");
+    if (!validateInput(batchId, 'batchId') || !validateInput(userId, 'userId')) {
+      return apiErr(res, 400, "INVALID_INPUT", "Invalid input format");
+    }
+    if (firstName && !validateInput(firstName, 'name')) return apiErr(res, 400, "INVALID_INPUT", "Invalid firstName");
+    if (lastName && !validateInput(lastName, 'name')) return apiErr(res, 400, "INVALID_INPUT", "Invalid lastName");
+    if (username && !validateInput(username, 'username')) return apiErr(res, 400, "INVALID_INPUT", "Invalid username");
+    if (finalAmount && !validateInput(finalAmount, 'amount')) return apiErr(res, 400, "INVALID_AMOUNT", "Invalid amount");
     const batchData = db.batch.getOne(batchId);
     const amount = finalAmount != null ? Number(finalAmount) : (batchData?.price != null ? Number(batchData.price) : null);
     if (!amount || amount <= 0) return apiErr(res, 400, "INVALID_AMOUNT", "Could not determine a valid amount for this batch");
@@ -921,8 +1015,25 @@ app.get("/mn-sdk.js", async (req, res) => {
   }
 });
 
-app.use(express.static(path.join(__dirname, "public")));
-app.get("*", (req, res) => res.sendFile(path.join(__dirname, "public", "index.html")));
+// index.html is templated (not served as a raw static file) so the Monetag
+// popunder <script> tag can be injected statically, right after <head>, with
+// the zone ID from env — matching Monetag's own installation instructions
+// exactly ("paste this after the <head> tag"). Their installation-check and
+// the popunder's own reliability both depend on the tag being present in the
+// initial HTML source, not injected later by our own JS at runtime like the
+// rewarded-ad SDK is (that one's fine dynamic since it has no such requirement).
+let _indexHtmlCache = null;
+function renderIndexHtml() {
+  if (!_indexHtmlCache) _indexHtmlCache = fs.readFileSync(path.join(__dirname, "public", "index.html"), "utf-8");
+  const vignetteTag = `<script>(function(s){s.dataset.zone='${MONETAG_VIGNETTE_ZONE_ID}',s.src='https://n6wxm.com/vignette.min.js'})([document.documentElement, document.body].filter(Boolean).pop().appendChild(document.createElement('script')))</script>`;
+  return _indexHtmlCache.replace("<!--MONETAG_VIGNETTE_SCRIPT-->", vignetteTag);
+}
+
+// { index: false } stops express.static from auto-serving the raw index.html
+// file for "/" — every request for it must go through renderIndexHtml() above
+// so the popunder tag actually gets injected, instead of silently bypassing it.
+app.use(express.static(path.join(__dirname, "public"), { index: false }));
+app.get("*", (req, res) => res.type("html").send(renderIndexHtml()));
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
 
 // ── Bulk sessions ─────────────────────────────────────────────────────────────
@@ -1159,7 +1270,6 @@ async function startBot() {
 <b>🎬 Auto-Save Mode</b> (start/stop from the app)
 • /undo — Revert the last auto-saved lecture or notes attach
 • /nextchapter — Move to the next chapter without stopping the session
-• /nextunit — Move to the next unit within the current chapter
 
 <b>👤 User Management</b>
 • /ban (userId) [reason] — Ban a user (also deletes all their pending DM videos immediately)
@@ -1255,47 +1365,6 @@ async function startBot() {
     } catch (err) {
       console.error("nextchapter error:", err.message);
       bot.sendMessage(chatId, `❌ Couldn't switch chapter: ${esc(err.message)}`, { parse_mode: "HTML" });
-    }
-  });
-
-  // ── /nextunit ─────────────────────────────────────────────────────────────
-  // Same idea as /nextchapter, one level down — advances to the next unit
-  // within the CURRENT chapter, without stopping the session. If the session
-  // is currently at chapter-level (no unit selected), this moves to the
-  // chapter's first unit rather than a "next" one.
-  bot.onText(/\/nextunit/, async (msg) => {
-    if (isGroupChat(msg) || !isOwner(msg.from?.id)) return;
-    const chatId = msg.chat.id;
-    if (!autoLectureSession.active) return bot.sendMessage(chatId, `⚠️ Auto-save mode isn't active right now. Start it from the app first.`);
-    try {
-      const batchData = db.batch.getOne(autoLectureSession.batchId);
-      const subj = batchData && (batchData.subjects || []).find(s => String(s._id) === autoLectureSession.subjectId);
-      if (!subj) return bot.sendMessage(chatId, `❌ Couldn't find the current subject.`);
-      const chap = (subj.chapters || []).find(c => String(c._id) === autoLectureSession.chapterId);
-      if (!chap) return bot.sendMessage(chatId, `❌ Couldn't find the current chapter.`);
-      const units = [...(chap.units || [])].sort((a, b) => (a.order || 0) - (b.order || 0));
-      if (!units.length) return bot.sendMessage(chatId, `📭 "${esc(autoLectureSession.chapterName)}" has no units. Add one from the app, or /nextchapter to move on.`, { parse_mode: "HTML" });
-
-      let next;
-      if (!autoLectureSession.unitId) {
-        next = units[0]; // currently at chapter-level — first unit is the "next" step
-      } else {
-        const curIdx = units.findIndex(u => String(u._id) === autoLectureSession.unitId);
-        next = units[curIdx + 1];
-      }
-      if (!next) return bot.sendMessage(chatId, `📭 No more units after "${esc(autoLectureSession.unitName)}" in this chapter. Add one from the app, or /nextchapter to move on.`, { parse_mode: "HTML" });
-
-      autoLectureSession.unitId = String(next._id);
-      autoLectureSession.unitName = next.name || "";
-      autoLectureSession.lectureCount = (next.lectures || []).length;
-      autoLectureSession.lastLectureId = null;
-      autoLectureSession.lastActionType = null;
-      courseRoutes.saveAutoSession && courseRoutes.saveAutoSession();
-
-      await bot.sendMessage(chatId, `➡️ <b>Switched to next unit</b>\n📍 ${esc(autoLectureSession.subjectName)} › ${esc(autoLectureSession.chapterName)} › ${esc(autoLectureSession.unitName)}\n\n📨 Send video for <b>Lecture ${autoLectureSession.lectureCount + 1}</b>`, { parse_mode: "HTML" });
-    } catch (err) {
-      console.error("nextunit error:", err.message);
-      bot.sendMessage(chatId, `❌ Couldn't switch unit: ${esc(err.message)}`, { parse_mode: "HTML" });
     }
   });
 
@@ -1807,14 +1876,14 @@ async function startBot() {
       await autoSetLectureNotes({ batchId: autoLectureSession.batchId, subjectId: autoLectureSession.subjectId, chapterId: autoLectureSession.chapterId, unitId: autoLectureSession.unitId, lectureId: autoLectureSession.lastLectureId, notes: code });
       autoLectureSession.lastActionType = "notes"; courseRoutes.saveAutoSession && courseRoutes.saveAutoSession();
       const loc = autoLectureSession.unitName ? `${autoLectureSession.subjectName} › ${autoLectureSession.chapterName} › ${autoLectureSession.unitName}` : `${autoLectureSession.subjectName} › ${autoLectureSession.chapterName}`;
-      await bot.sendMessage(chatId, `📎 <b>Notes Attached!</b>\n📖 Lecture ${autoLectureSession.lectureCount}\n📁 ${stored.file_name}\n📍 ${loc}\n🔗 <code>${link}</code>\n\n📨 Send the next video for <b>Lecture ${autoLectureSession.lectureCount + 1}</b>\n↩️ /undo — if this was a mistake\n➡️ /nextchapter — move to next chapter\n➡️ /nextunit — move to next unit`, { parse_mode: "HTML" });
+      await bot.sendMessage(chatId, `📎 <b>Notes Attached!</b>\n📖 Lecture ${autoLectureSession.lectureCount}\n📁 ${stored.file_name}\n📍 ${loc}\n🔗 <code>${link}</code>\n\n📨 Send the next video for <b>Lecture ${autoLectureSession.lectureCount + 1}</b> (or /undo if this was a mistake)`, { parse_mode: "HTML" });
     } else {
       const lNum = autoLectureSession.lectureCount + 1; const lName = `Lecture ${lNum}`;
       const lecId = await autoAddLecture({ batchId: autoLectureSession.batchId, subjectId: autoLectureSession.subjectId, chapterId: autoLectureSession.chapterId, unitId: autoLectureSession.unitId, name: lName, link: code });
       autoLectureSession.lectureCount = lNum; autoLectureSession.lastLectureId = lecId; autoLectureSession.lastActionType = "lecture"; courseRoutes.saveAutoSession && courseRoutes.saveAutoSession();
       const loc = autoLectureSession.unitName ? `${autoLectureSession.subjectName} › ${autoLectureSession.chapterName} › ${autoLectureSession.unitName}` : `${autoLectureSession.subjectName} › ${autoLectureSession.chapterName}`;
       const hint = stored.file_type === "document" ? "" : "📎 Send a PDF next to attach it as this lecture's notes, or ";
-      await bot.sendMessage(chatId, `✅ <b>Auto-Saved!</b>\n📖 <b>${lName}</b>\n📁 ${stored.file_name}\n📍 ${loc}\n🔗 <code>${link}</code>\n\n${hint}📨 Send the next video for <b>Lecture ${lNum + 1}</b>\n↩️ /undo — if this was a mistake\n➡️ /nextchapter — move to next chapter\n➡️ /nextunit — move to next unit`, { parse_mode: "HTML" });
+      await bot.sendMessage(chatId, `✅ <b>Auto-Saved!</b>\n📖 <b>${lName}</b>\n📁 ${stored.file_name}\n📍 ${loc}\n🔗 <code>${link}</code>\n\n${hint}📨 Send the next video for <b>Lecture ${lNum + 1}</b> (or /undo if this was a mistake)`, { parse_mode: "HTML" });
     }
   }
 

@@ -628,9 +628,17 @@ const AdToken = mongoose.model("AdToken", adTokenSchema);
 const accessSchema = new mongoose.Schema({ userId: { type: String, required: true, unique: true }, expiresAt: { type: Date, required: true }, claimsToday: { type: Number, default: 0 }, claimDay: { type: String, default: '' } });
 const Access = mongoose.model("Access", accessSchema);
 
+function validateInput(input, type) {
+  if (type === 'userId' || type === 'batchId') return /^[a-zA-Z0-9_-]{1,50}$/.test(input);
+  if (type === 'rewardType') return ['accessPass', 'batch24h', 'batch7d'].includes(input);
+  return true;
+}
+
 router.get("/access/:userId", (req, res) => {
   try {
-    const record = db.access.findOne(req.params.userId);
+    const userId = req.params.userId;
+    if (!validateInput(userId, 'userId')) return res.status(400).json({ error: 'Invalid userId' });
+    const record = db.access.findOne(userId);
     const today = new Date().toISOString().slice(0, 10);
     const claimsToday = (record && record.claimDay === today) ? (record.claimsToday||0) : 0;
     const claimsLeft = Math.max(0, 3 - claimsToday);
@@ -642,6 +650,7 @@ router.get("/access/:userId", (req, res) => {
 router.post("/access/token/:userId", async (req, res) => {
   try {
     const userId = req.params.userId;
+    if (!validateInput(userId, 'userId')) return res.status(400).json({ error: 'Invalid userId' });
     const banReason = await isUserBanned(userId);
     if (banReason) return res.status(403).json({ error: `Aapka account suspend hai: ${banReason}`, banned: true });
     const today = new Date().toISOString().slice(0, 10);
@@ -665,6 +674,7 @@ router.post("/access/token/:userId", async (req, res) => {
 router.post("/access/claim/:userId", async (req, res) => {
   try {
     const userId = req.params.userId;
+    if (!validateInput(userId, 'userId')) return res.status(400).json({ error: 'Invalid userId' });
     const banReason = await isUserBanned(userId);
     if (banReason) return res.status(403).json({ error: `Aapka account suspend hai: ${banReason}`, banned: true });
     const { token } = req.body;
@@ -704,7 +714,9 @@ const Referral = mongoose.model('Referral', referralSchema);
 
 router.get('/refer/stats/:userId', (req, res) => {
   try {
-    const { referrals, spent, points } = getPointsBreakdown(req.params.userId);
+    const userId = req.params.userId;
+    if (!validateInput(userId, 'userId')) return res.status(400).json({ error: 'Invalid userId' });
+    const { referrals, spent, points } = getPointsBreakdown(userId);
     res.json({ referrals, spent, points });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -713,6 +725,7 @@ router.post('/refer/record', async (req, res) => {
   try {
     const { referrerId, referredId } = req.body;
     if (!referrerId || !referredId) return res.status(400).json({ error: 'Missing fields' });
+    if (!validateInput(referrerId, 'userId') || !validateInput(referredId, 'userId')) return res.status(400).json({ error: 'Invalid userId format' });
     if (referrerId === referredId) return res.status(400).json({ error: 'Cannot refer yourself' });
     if (!req.body.isNewUser) return res.json({ success: false, isNew: false, reason: 'Not a new user' });
 
@@ -890,10 +903,19 @@ router.get('/rewards/eligible-batches/:userId', (req, res) => {
 });
 
 // POST redeem — the actual "spend points" action
+function validateInput(input, type) {
+  if (type === 'userId' || type === 'batchId') return /^[a-zA-Z0-9_-]{1,50}$/.test(input);
+  if (type === 'rewardType') return ['accessPass', 'batch24h', 'batch7d'].includes(input);
+  return true;
+}
+
 router.post('/rewards/redeem', async (req, res) => {
   try {
     const { userId, rewardType, batchId } = req.body;
     if (!userId) return res.status(400).json({ error: 'userId required' });
+    if (!validateInput(userId, 'userId') || !validateInput(rewardType, 'rewardType') || (batchId && !validateInput(batchId, 'batchId'))) {
+      return res.status(400).json({ error: 'Invalid input format' });
+    }
     const banReason = await isUserBanned(userId);
     if (banReason) return res.status(403).json({ error: `Aapka account suspend hai: ${banReason}`, banned: true });
     const catalogEntry = REWARD_CATALOG[rewardType];
