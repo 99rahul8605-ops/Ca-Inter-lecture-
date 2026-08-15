@@ -50,7 +50,7 @@ function _setupTables(db) {
   // never drop it on schema mismatch — just add the new column if it's
   // missing, for any deployment where the SQLite file survives a restart.
   try {
-    const frCols = db.prepare(`PRAGMA table_info(?)`).all('file_records').map(c => c.name);
+    const frCols = db.prepare(`PRAGMA table_info(file_records)`).all().map(c => c.name);
     if (frCols.length && !frCols.includes('delivered_at')) {
       db.exec(`ALTER TABLE file_records ADD COLUMN delivered_at TEXT DEFAULT '{}'`);
     }
@@ -59,7 +59,7 @@ function _setupTables(db) {
   // Same story for auto_lec_session — add lastLectureId to existing deployments
   // instead of dropping the table (which would lose an in-progress session).
   try {
-    const alsCols = db.prepare(`PRAGMA table_info(?)`).all('auto_lec_session').map(c => c.name);
+    const alsCols = db.prepare(`PRAGMA table_info(auto_lec_session)`).all().map(c => c.name);
     if (alsCols.length && !alsCols.includes('lastLectureId')) {
       db.exec(`ALTER TABLE auto_lec_session ADD COLUMN lastLectureId TEXT`);
     }
@@ -343,23 +343,17 @@ function _setupTables(db) {
     CREATE INDEX IF NOT EXISTS idx_device_sightings_fp ON device_sightings(fingerprint);
     CREATE INDEX IF NOT EXISTS idx_device_sightings_ip ON device_sightings(ip);
     CREATE INDEX IF NOT EXISTS idx_device_sightings_user ON device_sightings(userId);
-
-    -- Used UTRs — prevents duplicate payment approvals. Persists across restarts.
-    CREATE TABLE IF NOT EXISTS used_utrs (
-      utr       TEXT PRIMARY KEY,
-      used_at   INTEGER DEFAULT 0
-    );
   `);
 }
 
 function _resetTableIfIncompatible(db, table, expectedColumns) {
   let existingCols;
   try {
-    existingCols = db.prepare(`PRAGMA table_info(?)`).all(table).map(c => c.name);
+    existingCols = db.prepare(`PRAGMA table_info(${table})`).all().map(c => c.name);
   } catch (e) {
-    return;
+    return; // couldn't inspect it — leave it for CREATE TABLE IF NOT EXISTS to handle
   }
-  if (existingCols.length === 0) return;
+  if (existingCols.length === 0) return; // table doesn't exist yet — nothing to reset
   const existingSet = new Set(existingCols);
   const matches = existingCols.length === expectedColumns.length && expectedColumns.every(c => existingSet.has(c));
   if (!matches) {
