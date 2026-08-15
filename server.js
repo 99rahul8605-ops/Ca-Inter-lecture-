@@ -47,11 +47,6 @@ const LOGS_GROUP_ID = process.env.LOGS_GROUP_ID ? parseInt(process.env.LOGS_GROU
 // so the frontend reads this from /api/config and builds that function name
 // dynamically rather than hardcoding it — see _monetagShow() in index.html.
 const MONETAG_ZONE_ID = process.env.MONETAG_ZONE_ID || "11502469";
-// Vignette Banner — full-screen ad shown during page/section transitions, with
-// Monetag's own auto-appearing skip button after a few seconds. Same
-// self-triggering pattern as the popunder (own script src, own zone), just a
-// different Monetag product — so it gets its own zone + its own static tag.
-const MONETAG_VIGNETTE_ZONE_ID = process.env.MONETAG_VIGNETTE_ZONE_ID || "11541416";
 const CONTACT_LINK = process.env.CONTACT_LINK || "";
 
 // Ilambit DevPort — used to auto-verify UPI payments by UTR against the BharatPe
@@ -926,25 +921,8 @@ app.get("/mn-sdk.js", async (req, res) => {
   }
 });
 
-// index.html is templated (not served as a raw static file) so the Monetag
-// popunder <script> tag can be injected statically, right after <head>, with
-// the zone ID from env — matching Monetag's own installation instructions
-// exactly ("paste this after the <head> tag"). Their installation-check and
-// the popunder's own reliability both depend on the tag being present in the
-// initial HTML source, not injected later by our own JS at runtime like the
-// rewarded-ad SDK is (that one's fine dynamic since it has no such requirement).
-let _indexHtmlCache = null;
-function renderIndexHtml() {
-  if (!_indexHtmlCache) _indexHtmlCache = fs.readFileSync(path.join(__dirname, "public", "index.html"), "utf-8");
-  const vignetteTag = `<script>(function(s){s.dataset.zone='${MONETAG_VIGNETTE_ZONE_ID}',s.src='https://n6wxm.com/vignette.min.js'})([document.documentElement, document.body].filter(Boolean).pop().appendChild(document.createElement('script')))</script>`;
-  return _indexHtmlCache.replace("<!--MONETAG_VIGNETTE_SCRIPT-->", vignetteTag);
-}
-
-// { index: false } stops express.static from auto-serving the raw index.html
-// file for "/" — every request for it must go through renderIndexHtml() above
-// so the popunder tag actually gets injected, instead of silently bypassing it.
-app.use(express.static(path.join(__dirname, "public"), { index: false }));
-app.get("*", (req, res) => res.type("html").send(renderIndexHtml()));
+app.use(express.static(path.join(__dirname, "public")));
+app.get("*", (req, res) => res.sendFile(path.join(__dirname, "public", "index.html")));
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
 
 // ── Bulk sessions ─────────────────────────────────────────────────────────────
