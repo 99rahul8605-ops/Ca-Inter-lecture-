@@ -51,7 +51,7 @@ CONTACT_LINK=
 # Monetag ad zone ID. The frontend loads the Monetag SDK with this zone via
 # /api/config instead of it being hardcoded in index.html, so it can be
 # changed here without touching frontend code.
-MONETAG_ZONE_ID=11011844
+MONETAG_ZONE_ID=11502469
 
 # ── Storage backend (optional — auto-detected sensible defaults) ────────────
 # SQLite is used as the primary store (fast local reads; MongoDB stays in sync
