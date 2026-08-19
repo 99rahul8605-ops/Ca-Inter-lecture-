@@ -2034,9 +2034,6 @@ async function startSpin() {
   if (spinStatus.spinsLeft <= 0) { toast('Aaj ke saare ' + (spinStatus.maxSpins || 5) + ' spins ho gaye! Kal wapas aao. 🕐', 'error'); return; }
   if (spinStatus.cooldownRemainingMs > 0) { toast('Thoda ruko, ' + Math.ceil(spinStatus.cooldownRemainingMs / 1000) + 's baad try karo!', 'error'); return; }
 
-  var formats = ['rewarded', 'pop', 'interstitial'];
-  var format = formats[Math.floor(Math.random() * formats.length)];
-
   _spinInProgress = true;
   var btn = document.getElementById('spinBtn');
   var resultEl = document.getElementById('spinResultText');
@@ -2066,11 +2063,8 @@ async function startSpin() {
     return;
   }
 
-  var tgUid = tg && tg.initDataUnsafe && tg.initDataUnsafe.user ? String(tg.initDataUnsafe.user.id) : 'unknown';
-  var adPromise;
-  if (format === 'pop') adPromise = _monetagShow('pop');
-  else if (format === 'interstitial') adPromise = _monetagShow();
-  else adPromise = _monetagShow({ ymid: tgUid });
+  // In-App Interstitial format
+  var adPromise = _monetagShow();
 
   try {
     await adPromise;
@@ -3705,7 +3699,7 @@ function _claimsDotRow() {
   '</div>';
 }
 
-// ── Helper: single Watch Ad button (format chosen randomly inside watchAd) ────
+// ── Helper: single Watch Ad button (In-App Interstitial format) ────────────────
 function _adButtonsHTML() {
   if (claimsToday >= 3) {
     return '<div style="padding:14px 16px;text-align:center;font-size:13px;color:var(--text2)">' +
@@ -3838,10 +3832,6 @@ var _adToken = null;
 var _adActuallyShown = false;
 
 async function watchAd() {
-  // Randomly pick one of three Monetag formats
-  var formats = ['rewarded', 'pop', 'interstitial'];
-  var format = formats[Math.floor(Math.random() * formats.length)];
-
   if (_adWatching) return; // already playing an ad
   if (claimsToday >= 3) {
     toast('Aaj ke 3 claims ho gaye! Kal wapas aao. 🕐', 'error');
@@ -3876,17 +3866,8 @@ async function watchAd() {
     return;
   }
 
-  var uid = tg && tg.initDataUnsafe && tg.initDataUnsafe.user ? String(tg.initDataUnsafe.user.id) : 'unknown';
-
-  // Pick Monetag ad format
-  var adPromise;
-  if (format === 'pop') {
-    adPromise = _monetagShow('pop');          // Rewarded Popup
-  } else if (format === 'interstitial') {
-    adPromise = _monetagShow();               // Rewarded Interstitial
-  } else {
-    adPromise = _monetagShow({ ymid: uid }); // Original Rewarded
-  }
+  // In-App Interstitial format
+  var adPromise = _monetagShow();
 
   adPromise
     .then(function() {
