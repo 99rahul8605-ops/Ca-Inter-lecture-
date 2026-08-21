@@ -2064,6 +2064,7 @@ async function startSpin() {
   }
 
   // In-App Interstitial format
+  var adStartedAt = Date.now();
   var adPromise = _monetagShow();
 
   try {
@@ -2079,6 +2080,18 @@ async function startSpin() {
     }
     renderSpinStatusBar();
     return;
+  }
+
+  // The ad SDK can resolve its promise before a genuine 10s watch (short
+  // creative, fast dismiss, etc.) — don't let that shortcut the reward. Hold
+  // here until at least 10 real seconds have passed since the ad was
+  // triggered, so the claim request itself is never even sent early (on top
+  // of the server's own independent 10s check).
+  var elapsedSinceAdStart = Date.now() - adStartedAt;
+  var stillNeeded = Math.max(0, 10000 - elapsedSinceAdStart);
+  if (stillNeeded > 0) {
+    if (btn) btn.innerHTML = '<i class="ti ti-loader-2" style="animation:spin 0.8s linear infinite;display:inline-block"></i> Please wait ' + Math.ceil(stillNeeded / 1000) + 's...';
+    await new Promise(function(res) { setTimeout(res, stillNeeded); });
   }
 
   // 2. Ad watched fully — claim the spin (server verifies watch-time server-side too)
@@ -3867,16 +3880,26 @@ async function watchAd() {
   }
 
   // In-App Interstitial format
+  var adStartedAt = Date.now();
   var adPromise = _monetagShow();
 
   adPromise
     .then(function() {
-      _adActuallyShown = true;
-      adWatched = true;
-      _adWatching = false;
-      _setAdBtns(false);
-      renderAccessCard();
-      toast('Ad complete! Ab claim karo 👇', 'success');
+      // Same reasoning as the spin flow — the SDK can resolve before a
+      // genuine 10s watch, so hold the Claim button back until 10 real
+      // seconds have actually passed since the ad was triggered.
+      var elapsedSinceAdStart = Date.now() - adStartedAt;
+      var stillNeeded = Math.max(0, 10000 - elapsedSinceAdStart);
+      var finalizeAdWatched = function() {
+        _adActuallyShown = true;
+        adWatched = true;
+        _adWatching = false;
+        _setAdBtns(false);
+        renderAccessCard();
+        toast('Ad complete! Ab claim karo 👇', 'success');
+      };
+      if (stillNeeded > 0) setTimeout(finalizeAdWatched, stillNeeded);
+      else finalizeAdWatched();
     })
     .catch(function(err) {
       _adToken = null;
