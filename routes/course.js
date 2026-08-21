@@ -733,7 +733,7 @@ router.post("/access/claim/:userId", async (req, res) => {
     if (!record) return res.status(403).json({ error: "Invalid or expired token. Please watch the ad again." });
     if (record.expiresAt < new Date()) return res.status(403).json({ error: "Token expired. Please watch the ad again." });
     const elapsed = (Date.now() - new Date(record.issuedAt)) / 1000;
-    if (elapsed < 15) return res.status(403).json({ error: "Ad not fully watched. Please wait..." });
+    if (elapsed < 10) return res.status(403).json({ error: "Ad not fully watched. Please wait..." });
 
     const today = new Date().toISOString().slice(0, 10);
     const existing = db.access.findOne(userId);
@@ -866,12 +866,7 @@ function getSpinDailyLimit() {
   return db.settings.get('spin_daily_limit', 5);
 }
 const SPIN_COOLDOWN_MS = 10 * 1000;
-const SPIN_AD_WATCH_SECONDS = 2; // NOTE: lower than access/claim's 15s on purpose — that flow has a manual
-// "Claim" button tap AFTER the ad finishes (adding natural delay on top of ad duration), but spins
-// auto-chain claim immediately once the ad SDK's promise resolves, so elapsed here is essentially just
-// the ad's own playback time. Many ad formats (pop/interstitial) resolve in well under 15s, so keeping
-// that threshold here would silently reject every legitimate spin. 2s still blocks trivial direct-API
-// abuse that skips the ad SDK entirely.
+const SPIN_AD_WATCH_SECONDS = 10;
 
 const REWARD_CATALOG = {
   accessPass: { cost: 5, durationMs: 24 * 60 * 60 * 1000, label: '24 Hour Site Access' },
