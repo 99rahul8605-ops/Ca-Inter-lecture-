@@ -368,26 +368,33 @@ mongoose.connect(MONGO_URI).then(async () => {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function getTodayIST() { const now = new Date(); return new Date(now.getTime() + 5.5*60*60*1000).toISOString().slice(0,10); }
 
-function peekVideoLimit(userId) {
-  const today = getTodayIST();
-  let rec = db.dailyVideoLimit.find(userId);
-  if (!rec || rec.resetDate !== today) { db.dailyVideoLimit.upsert({ userId, count: 0, resetDate: today }); rec = { count: 0 }; }
-  if (rec.count >= DAILY_VIDEO_LIMIT) return { allowed: false, used: rec.count, remaining: 0 };
-  return { allowed: true, used: rec.count, remaining: DAILY_VIDEO_LIMIT - rec.count };
-}
-
-// Call only AFTER the file has actually been delivered successfully — never
-// before sendFile(). Incrementing before delivery meant a failed send (dead
-// file_id, Telegram error, etc.) still burned one of the user's 10 daily
-// slots even though they received nothing, with no rollback on error.
-function commitVideoLimitIncrement(userId) {
+// Atomically checks AND reserves one of today's video slots in a single
+// synchronous operation (better-sqlite3 calls here are synchronous, so there's
+// no await between the read and the write — nothing else can interleave).
+// MUST be called before sendFile(), not after — the old check-then-send-then-
+// increment sequence had an await gap during sendFile() where many parallel
+// /start requests could all pass the check before any of them committed their
+// increment, letting a user blow way past the daily limit by firing several
+// lecture requests at once. If delivery actually fails, call
+// releaseVideoSlot() to give the reserved slot back.
+function tryReserveVideoSlot(userId) {
   const today = getTodayIST();
   let rec = db.dailyVideoLimit.find(userId);
   if (!rec || rec.resetDate !== today) rec = { count: 0 };
+  if (rec.count >= DAILY_VIDEO_LIMIT) return { allowed: false, used: rec.count, remaining: 0 };
   const newCount = rec.count + 1;
   db.dailyVideoLimit.upsert({ userId, count: newCount, resetDate: today });
   DailyVideoLimit.findOneAndUpdate({ userId }, { userId, count: newCount, resetDate: today }, { upsert: true }).catch(() => {});
   return { allowed: true, used: newCount, remaining: DAILY_VIDEO_LIMIT - newCount };
+}
+
+function releaseVideoSlot(userId) {
+  const today = getTodayIST();
+  const rec = db.dailyVideoLimit.find(userId);
+  if (!rec || rec.resetDate !== today) return; // day rolled over since reservation — nothing to release
+  const newCount = Math.max(0, rec.count - 1);
+  db.dailyVideoLimit.upsert({ userId, count: newCount, resetDate: today });
+  DailyVideoLimit.findOneAndUpdate({ userId }, { userId, count: newCount, resetDate: today }, { upsert: true }).catch(() => {});
 }
 
 function generateCode() { const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789"; let c=""; for(let i=0;i<6;i++) c+=chars[Math.floor(Math.random()*chars.length)]; return c; }
@@ -1042,22 +1049,41 @@ async function startBot() {
         try {
           const batch = db.bulkBatch.findByCode(param);
           if (!batch) return bot.sendMessage(chatId, `File not found. Link may be invalid.`);
-          let hasVideo = false, failedCount = 0;
+          let hasVideo = false, failedCount = 0, limitBlockedCount = 0;
           for (const f of batch.files) {
+            const isVideoFile = f.file_type==="video"||f.file_type==="video_note";
+            // Same daily cap enforced on the single-file path below — this loop
+            // was missing it entirely, letting a batch of N videos bypass the
+            // per-day limit completely regardless of N. Non-owner + video only;
+            // non-video files in the batch are unaffected, same as single-file.
+            // Reserve BEFORE sending (atomic, no await gap) so parallel requests
+            // can't all pass the check before any of them commit — see
+            // tryReserveVideoSlot() for why.
+            let reserved = false;
+            if (isVideoFile && !isOwner(userId)) {
+              const limCheck = tryReserveVideoSlot(userId);
+              if (!limCheck.allowed) { limitBlockedCount++; continue; }
+              reserved = true;
+            }
             let sentMsg;
             try {
               sentMsg = await sendFile(bot, chatId, f);
             } catch (fileErr) {
               // One broken file (dead file_id + no channel copy to fall back on) must
               // not abort the whole batch — skip it and keep sending the rest.
+              if (reserved) releaseVideoSlot(userId); // give the slot back, delivery never happened
               failedCount++;
               continue;
             }
-            if ((f.file_type==="video"||f.file_type==="video_note") && sentMsg) { hasVideo=true; await scheduleDelete(bot,chatId,sentMsg.message_id,new Date(Date.now()+6*60*60*1000)); }
+            if (isVideoFile && sentMsg) {
+              hasVideo=true;
+              await scheduleDelete(bot,chatId,sentMsg.message_id,new Date(Date.now()+6*60*60*1000));
+            }
             if (sentMsg) logLectureActivity(bot, msg.from, { file_type: f.file_type, file_name: f.file_name, code: param });
           }
           if (hasVideo) await bot.sendMessage(chatId, `⚠️ Videos will auto-delete after 6 hours.`);
           if (failedCount > 0) await bot.sendMessage(chatId, `⚠️ ${failedCount} file(s) in this batch couldn't be delivered (owner needs to re-upload them).`);
+          if (limitBlockedCount > 0) await bot.sendMessage(chatId, `🚫 <b>Daily limit reached!</b>\n\n${limitBlockedCount} video(s) in this batch weren't sent — you've hit your <b>${DAILY_VIDEO_LIMIT} videos/day</b> limit.\n📅 Resets at midnight.`, { parse_mode:"HTML" });
           return;
         } catch (err) { return bot.sendMessage(chatId, `Error occurred. Please try again.`); }
       }
@@ -1069,10 +1095,16 @@ async function startBot() {
         const isVideo = record.file_type==="video"||record.file_type==="video_note";
         if (isVideo && db.fileRecord.isDeliveryActive(record.id, chatId, 6*60*60*1000)) return bot.sendMessage(chatId, `⚠️ This video was already delivered. You can request it again after 6 hours.`);
         if (isVideo && !isOwner(userId)) {
-          const limCheck = peekVideoLimit(userId);
+          const limCheck = tryReserveVideoSlot(userId);
           if (!limCheck.allowed) return bot.sendMessage(chatId, `🚫 <b>Daily limit reached!</b>\n\nYou've watched <b>${DAILY_VIDEO_LIMIT} videos</b> today.\n📅 Resets at midnight.`, { parse_mode:"HTML" });
-          const sentMsg = await sendFile(bot, chatId, record);
-          const lim = commitVideoLimitIncrement(userId);
+          let sentMsg;
+          try {
+            sentMsg = await sendFile(bot, chatId, record);
+          } catch (err) {
+            releaseVideoSlot(userId); // delivery failed — give the reserved slot back
+            throw err;
+          }
+          const lim = limCheck;
           await scheduleDelete(bot,chatId,sentMsg.message_id,new Date(Date.now()+6*60*60*1000));
           db.fileRecord.addDeliveredTo(record.id,chatId);
           FileRecord.updateOne({ code:record.code },{ $addToSet:{ delivered_to:chatId } }).catch(() => {});
