@@ -262,8 +262,19 @@ async function autoDeleteLecture({ batchId, subjectId, chapterId, unitId, lectur
 router.get("/batches", async (req, res) => {
   try {
     const admin = isAdminRequest(req);
-    // Admin: fresh from MongoDB
-    if (admin) { return res.json(await Batch.find({}).sort({ order: 1 })); }
+    // Admin: fresh from MongoDB, so edits show up immediately without waiting
+    // for the SQLite sync. But if Mongo is briefly unreachable (network blip,
+    // Atlas cluster asleep, etc.), fall back to the SQLite copy instead of
+    // hard-failing — better to show slightly-stale data than a broken "Load
+    // failed" screen for the admin while everyone else's app works fine.
+    if (admin) {
+      try {
+        return res.json(await Batch.find({}).sort({ order: 1 }));
+      } catch (mongoErr) {
+        console.error("Admin batches: MongoDB fetch failed, falling back to SQLite:", mongoErr.message);
+        return res.json(db.batch.getAll());
+      }
+    }
 
     // Users: from SQLite ⚡
     const batches = db.batch.getAll();
@@ -279,9 +290,16 @@ router.get("/batches/:bid", async (req, res) => {
   try {
     const admin = isAdminRequest(req);
     if (admin) {
-      const b = await Batch.findById(req.params.bid);
-      if (!b) return res.status(404).json({ error: "Not found" });
-      return res.json(b.toObject());
+      try {
+        const b = await Batch.findById(req.params.bid);
+        if (!b) return res.status(404).json({ error: "Not found" });
+        return res.json(b.toObject());
+      } catch (mongoErr) {
+        console.error("Admin batch fetch: MongoDB failed, falling back to SQLite:", mongoErr.message);
+        const bLocal = db.batch.getOne(req.params.bid);
+        if (!bLocal) return res.status(404).json({ error: "Not found" });
+        return res.json(bLocal);
+      }
     }
     const b = db.batch.getOne(req.params.bid);
     if (!b) return res.status(404).json({ error: "Not found" });
@@ -733,7 +751,7 @@ router.post("/access/claim/:userId", async (req, res) => {
     if (!record) return res.status(403).json({ error: "Invalid or expired token. Please watch the ad again." });
     if (record.expiresAt < new Date()) return res.status(403).json({ error: "Token expired. Please watch the ad again." });
     const elapsed = (Date.now() - new Date(record.issuedAt)) / 1000;
-    if (elapsed < 10) return res.status(403).json({ error: "Ad not fully watched. Please wait..." });
+    if (elapsed < 10) return res.status(403).json({ error: "You skipped the ad too soon! Please watch it fully (at least 10 seconds) to unlock your reward." });
 
     const today = new Date().toISOString().slice(0, 10);
     const existing = db.access.findOne(userId);
@@ -1151,7 +1169,7 @@ router.post('/spin/claim/:userId', (req, res) => {
     if (!record) return res.status(403).json({ error: 'Invalid or expired spin. Please try again.' });
     if (record.expiresAt < new Date()) { db.spinToken.deleteById(record.id); return res.status(403).json({ error: 'Spin expired. Please try again.' }); }
     const elapsed = (Date.now() - record.issuedAt.getTime()) / 1000;
-    if (elapsed < SPIN_AD_WATCH_SECONDS) return res.status(403).json({ error: 'Ad poori dekho pehle! Spin count nahi hoga.' });
+    if (elapsed < SPIN_AD_WATCH_SECONDS) return res.status(403).json({ error: 'You skipped the ad too soon! Please watch it fully (at least 10 seconds) to get your spin.' });
 
     // ── Critical section: everything below is synchronous, no await in between,
     // so no concurrent request can double-spend this spin (same reasoning as
