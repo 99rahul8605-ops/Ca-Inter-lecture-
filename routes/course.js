@@ -261,23 +261,20 @@ async function autoDeleteLecture({ batchId, subjectId, chapterId, unitId, lectur
 
 router.get("/batches", async (req, res) => {
   try {
+    // Everyone reads from SQLite — it's the source of truth for reads (see
+    // the strategy note at the top of sqlite-manager.js), and every batch
+    // write endpoint below calls db.batch.upsert() right alongside its Mongo
+    // write, so SQLite is never stale. Admin used to read fresh from MongoDB
+    // directly here "to be safe", but that just made the admin panel's most
+    // basic screen depend on Mongo being reachable for no real benefit — a
+    // MongoDB hiccup (network blip, Atlas cluster asleep, etc.) broke the
+    // whole batches list for admin while everyone else's SQLite-backed app
+    // kept working fine. Admin gets the FULL unstripped data (no premium
+    // filtering); everyone else gets premium links stripped unless they have access.
     const admin = isAdminRequest(req);
-    // Admin: fresh from MongoDB, so edits show up immediately without waiting
-    // for the SQLite sync. But if Mongo is briefly unreachable (network blip,
-    // Atlas cluster asleep, etc.), fall back to the SQLite copy instead of
-    // hard-failing — better to show slightly-stale data than a broken "Load
-    // failed" screen for the admin while everyone else's app works fine.
-    if (admin) {
-      try {
-        return res.json(await Batch.find({}).sort({ order: 1 }));
-      } catch (mongoErr) {
-        console.error("Admin batches: MongoDB fetch failed, falling back to SQLite:", mongoErr.message);
-        return res.json(db.batch.getAll());
-      }
-    }
-
-    // Users: from SQLite ⚡
     const batches = db.batch.getAll();
+    if (admin) return res.json(batches);
+
     const userId = getRequestUserId(req);
     res.json(batches.map(b => {
       if (!b.isPremium) return b;
@@ -288,21 +285,15 @@ router.get("/batches", async (req, res) => {
 
 router.get("/batches/:bid", async (req, res) => {
   try {
+    // Same reasoning as GET /batches above — read from SQLite always, admin
+    // included. Every write path keeps SQLite in sync via db.batch.upsert(),
+    // so there's no freshness to gain from hitting MongoDB here, only a
+    // needless dependency on it being reachable.
     const admin = isAdminRequest(req);
-    if (admin) {
-      try {
-        const b = await Batch.findById(req.params.bid);
-        if (!b) return res.status(404).json({ error: "Not found" });
-        return res.json(b.toObject());
-      } catch (mongoErr) {
-        console.error("Admin batch fetch: MongoDB failed, falling back to SQLite:", mongoErr.message);
-        const bLocal = db.batch.getOne(req.params.bid);
-        if (!bLocal) return res.status(404).json({ error: "Not found" });
-        return res.json(bLocal);
-      }
-    }
     const b = db.batch.getOne(req.params.bid);
     if (!b) return res.status(404).json({ error: "Not found" });
+    if (admin) return res.json(b);
+
     const userId = getRequestUserId(req);
     const userHasAccess = hasPremiumAccess(userId, b);
     res.json(b.isPremium && !userHasAccess ? stripPremiumLinks(b) : b);
