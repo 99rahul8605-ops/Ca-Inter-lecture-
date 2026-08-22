@@ -2173,6 +2173,14 @@ function handlePic(input) {
 // MONETAG_ZONE_ID env var without touching this file. The SDK's global show
 // function is named show_<zone>, so we can't hardcode that name either — every
 // ad call site uses the _monetagShow()/_monetagReady() wrappers below instead.
+//
+// TEMP A/B TEST (see server.js /mn-sdk.js route comment): loading directly
+// from libtl.com instead of our same-origin /mn-sdk.js proxy, to check whether
+// the proxy (a same-origin third-party-script technique commonly used to beat
+// ad-blockers) was getting flagged by Monetag's traffic-quality/anti-fraud
+// systems and suppressing CPM to remnant-tier demand. If CPM recovers over
+// the next few days, this was the cause — if not, switch s.src back to
+// '/mn-sdk.js' to restore ad-blocker resistance without losing anything.
 var _monetagZoneId = null;
 var _monetagSdkPromise = null;
 function loadMonetagSdk(zoneId) {
@@ -2180,7 +2188,7 @@ function loadMonetagSdk(zoneId) {
   _monetagZoneId = zoneId;
   _monetagSdkPromise = new Promise(function(resolve) {
     var s = document.createElement('script');
-    s.src = '/mn-sdk.js';
+    s.src = 'https://libtl.com/sdk.js';
     s.setAttribute('data-zone', zoneId);
     s.setAttribute('data-sdk', 'show_' + zoneId);
     s.onload = function() { resolve(true); };
