@@ -899,6 +899,14 @@ app.post("/api/paytm/callback", async (req, res) => {
 });
 
 // ── Monetag SDK proxy ────────────────────────────────────────────────────────
+// TEMP: currently NOT used by index.html — loadMonetagSdk() there was switched
+// to load directly from https://libtl.com/sdk.js to A/B test whether this
+// proxy technique (serving the SDK same-origin to dodge ad-blockers) was
+// getting flagged by Monetag's traffic-quality systems and suppressing CPM.
+// Route kept alive and ready — just point s.src back to '/mn-sdk.js' in
+// index.html's loadMonetagSdk() to restore ad-blocker resistance if the test
+// shows the proxy wasn't actually the cause.
+//
 // Monetag doesn't offer a signed server-to-server API like HilltopAds does —
 // this is a plain reverse-proxy of their static sdk.js file. Same idea though:
 // serving it from our own domain means both hostname-based blocklist rules
