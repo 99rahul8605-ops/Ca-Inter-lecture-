@@ -3529,8 +3529,25 @@ function _lecRowHtml(l, i) {
     </div>`;
 }
 
-function openLecLink(codeOrLink, type) {
+// Persistent (never resets) "every 3rd lecture click shows an ad" counter.
+// Skippable/non-mandatory — the ad plays if available, but the lecture opens
+// right after regardless of whether the user watched or skipped it. Only
+// applies to actual lecture (video) clicks, not Notes.
+function _shouldShowAdForLectureClick() {
+  try {
+    var count = parseInt(localStorage.getItem('edubot_lec_click_count') || '0', 10) + 1;
+    localStorage.setItem('edubot_lec_click_count', String(count));
+    return count % 3 === 0;
+  } catch (e) { return false; }
+}
+
+async function openLecLink(codeOrLink, type) {
   if (!codeOrLink) return openLink('', type || 'lecture');
+
+  if ((type || 'lecture') === 'lecture' && _shouldShowAdForLectureClick() && _monetagReady()) {
+    try { await _monetagShow(); } catch (e) { /* skipped/failed — open the lecture anyway */ }
+  }
+
   var url;
   if (codeOrLink.startsWith('http')) {
     // Legacy full link — extract code and rebuild with current bot username
