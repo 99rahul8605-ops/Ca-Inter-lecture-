@@ -390,6 +390,10 @@ body.ready{transition:none}
 .ban-title{font-size:20px;font-weight:700;margin-bottom:8px;color:var(--text)}
 .ban-sub{font-size:13px;color:var(--text2);line-height:1.6;margin-bottom:8px;max-width:320px}
 
+/* ── Ad Blocker Gate (shown instead of the app if the ad SDK fails to load) ── */
+#adBlockGate{position:fixed;inset:0;background:var(--bg);z-index:99998;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;text-align:center}
+#adBlockGate.hidden{display:none}
+
 /* ── Verifying Screen ───────────────────────────────── */
 #verifyingScreen{position:fixed;inset:0;background:var(--bg);z-index:99999;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:32px 24px;text-align:center;transition:opacity 0.35s ease}
 #verifyingScreen.vs-hide{opacity:0;pointer-events:none}
@@ -473,6 +477,19 @@ body.ready{transition:none}
     <div style="font-size:11px;color:var(--text3);margin-bottom:10px">Think this is a mistake? Contact us</div>
     <button onclick="var _cl=window._contactLink||('https://t.me/'+(window._botUsername||''));if(tg&&/^https?:\/\/t\.me\//i.test(_cl)&&typeof tg.openTelegramLink==='function'){tg.openTelegramLink(_cl);}else if(tg){tg.openLink(_cl,{try_instant_view:false});}else{window.open(_cl,'_blank');}" style="display:inline-flex;align-items:center;gap:7px;background:var(--surface2);border:1px solid var(--border);color:var(--text2);padding:9px 18px;border-radius:20px;font-size:13px;font-weight:600;cursor:pointer;">
       📩 Contact Support
+    </button>
+  </div>
+</div>
+
+<!-- AD BLOCKER GATE (shown instead of the app if the ad SDK failed to load —
+     browser extension ad-blocker, or DNS-level blocking like AdGuard DNS/NextDNS) -->
+<div id="adBlockGate" class="hidden">
+  <div class="ban-logo">🛡️</div>
+  <div class="ban-title">Ad Blocker Detected</div>
+  <div class="ban-sub">This app is supported by ads. Please disable your ad blocker or ad-blocking DNS (like AdGuard DNS/NextDNS) for this site, then retry.</div>
+  <div style="margin-top:8px;text-align:center">
+    <button onclick="location.reload()" style="display:inline-flex;align-items:center;gap:7px;background:var(--accent);border:none;color:#fff;padding:11px 22px;border-radius:20px;font-size:14px;font-weight:700;cursor:pointer;">
+      🔄 I've Disabled It — Retry
     </button>
   </div>
 </div>
@@ -2063,9 +2080,15 @@ async function startSpin() {
     return;
   }
 
-  // In-App Interstitial format
+  // Randomly pick one of three Monetag formats
+  var formats = ['rewarded', 'pop', 'interstitial'];
+  var format = formats[Math.floor(Math.random() * formats.length)];
+  var tgUid = tg && tg.initDataUnsafe && tg.initDataUnsafe.user ? String(tg.initDataUnsafe.user.id) : 'unknown';
   var adStartedAt = Date.now();
-  var adPromise = _monetagShow();
+  var adPromise;
+  if (format === 'pop') adPromise = _monetagShow('pop');
+  else if (format === 'interstitial') adPromise = _monetagShow();
+  else adPromise = _monetagShow({ ymid: tgUid });
 
   try {
     await adPromise;
@@ -2202,6 +2225,35 @@ function _monetagReady() {
 }
 function _monetagShow(arg) {
   return window['show_' + _monetagZoneId](arg);
+}
+
+// Exposes the in-flight/settled SDK-load promise from loadMonetagSdk() above
+// so checkAdBlocker() (called from init()) can await the SAME load attempt
+// instead of triggering a second one.
+function getMonetagSdkPromise() { return _monetagSdkPromise; }
+
+// Hard-blocks the app if the Monetag SDK script failed to load — this is the
+// same signal already used for the "Ad blocker detected!" toasts elsewhere,
+// just enforced as a full app gate here instead of only affecting the
+// ad-watch flows. Checked immediately (no artificial extra wait) — whatever
+// time the script tag's own onload/onerror naturally takes is what's used, so
+// a slow (but not blocked) connection could occasionally be caught by this;
+// that tradeoff was chosen deliberately over adding delay for everyone.
+// Owner is exempt — checked before this is ever called, same pattern as ban/
+// force-join checks.
+async function checkAdBlocker() {
+  try {
+    var sdkPromise = getMonetagSdkPromise();
+    if (!sdkPromise) return false; // config fetch itself failed — don't punish the user for our own issue
+    var loaded = await sdkPromise;
+    if (loaded === false) {
+      document.getElementById('adBlockGate').classList.remove('hidden');
+      return true;
+    }
+    return false;
+  } catch (e) {
+    return false; // never block a legit user over an unexpected error here
+  }
 }
 
 async function checkAdminAccess() {
@@ -3553,7 +3605,14 @@ async function openLecLink(codeOrLink, type) {
   if (!codeOrLink) return openLink('', type || 'lecture');
 
   if ((type || 'lecture') === 'lecture' && _shouldShowAdForLectureClick() && _monetagReady()) {
-    try { await _monetagShow(); } catch (e) { /* skipped/failed — open the lecture anyway */ }
+    try {
+      var lecFormats = ['rewarded', 'pop', 'interstitial'];
+      var lecFormat = lecFormats[Math.floor(Math.random() * lecFormats.length)];
+      var lecUid = tg && tg.initDataUnsafe && tg.initDataUnsafe.user ? String(tg.initDataUnsafe.user.id) : 'unknown';
+      if (lecFormat === 'pop') await _monetagShow('pop');
+      else if (lecFormat === 'interstitial') await _monetagShow();
+      else await _monetagShow({ ymid: lecUid });
+    } catch (e) { /* skipped/failed — open the lecture anyway */ }
   }
 
   var url;
@@ -3904,9 +3963,19 @@ async function watchAd() {
     return;
   }
 
-  // In-App Interstitial format
+  // Randomly pick one of three Monetag formats
+  var formats = ['rewarded', 'pop', 'interstitial'];
+  var format = formats[Math.floor(Math.random() * formats.length)];
+  var uid = tg && tg.initDataUnsafe && tg.initDataUnsafe.user ? String(tg.initDataUnsafe.user.id) : 'unknown';
   var adStartedAt = Date.now();
-  var adPromise = _monetagShow();
+  var adPromise;
+  if (format === 'pop') {
+    adPromise = _monetagShow('pop');          // Rewarded Popup
+  } else if (format === 'interstitial') {
+    adPromise = _monetagShow();               // Rewarded Interstitial
+  } else {
+    adPromise = _monetagShow({ ymid: uid }); // Original Rewarded
+  }
 
   adPromise
     .then(function() {
@@ -4232,6 +4301,11 @@ async function init() {
   _animateVsBar();
   await checkAdminAccess();
   if (!isAdmin) reportDeviceFingerprint(); // fire-and-forget, never blocks app load
+
+  if (!isAdmin) {
+    var adBlocked = await checkAdBlocker();
+    if (adBlocked) { _hideVS(); return; }
+  }
 
   var banned = await checkBanStatus();
   if (banned) {
