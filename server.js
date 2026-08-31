@@ -502,13 +502,44 @@ function cleanFileName(name) {
   return (extMatch ? result+extMatch[1] : result) || name;
 }
 
+// "message to delete not found", "chat not found", "bot was blocked", etc. are
+// PERMANENT — the message/chat is just gone, retrying changes nothing and only
+// wastes API calls. Only genuinely transient errors (network blips like the
+// "socket hang up" case) are worth retrying.
+function isPermanentTelegramError(err) {
+  const msg = (err && err.message || "").toLowerCase();
+  return msg.includes("message to delete not found")
+      || msg.includes("message can't be deleted")
+      || msg.includes("chat not found")
+      || msg.includes("bot was blocked")
+      || msg.includes("user is deactivated")
+      || msg.includes("bad request");
+}
+
+// Retries a deleteMessage call with linear backoff (1s, 2s, 3s) on transient
+// errors only. Returns true on success, false if the message was already
+// gone (permanent error — nothing to do), and re-throws if retries run out
+// on a genuinely transient error so the caller's own catch/log still fires.
+async function deleteMessageWithRetry(bot, chatId, messageId, retries = 3, delay = 1000) {
+  for (let i = 0; i < retries; i++) {
+    try {
+      await bot.deleteMessage(chatId, messageId);
+      return true;
+    } catch (err) {
+      if (isPermanentTelegramError(err)) return false;
+      if (i === retries - 1) throw err;
+      await new Promise(r => setTimeout(r, delay * (i + 1)));
+    }
+  }
+}
+
 async function scheduleDelete(bot, chatId, messageId, deleteAt) {
   const id = db.generateId();
   db.pendingDelete.create({ id, chat_id: chatId, message_id: messageId, delete_at: deleteAt });
   PendingDelete.create({ chat_id: chatId, message_id: messageId, delete_at: deleteAt }).catch(() => {});
   const delay = Math.max(0, new Date(deleteAt) - Date.now());
   setTimeout(async () => {
-    try { await bot.deleteMessage(chatId, messageId); } catch (err) { if (!err.message?.includes("message to delete not found")) console.error("Auto DM deletion error:", err.message); }
+    try { await deleteMessageWithRetry(bot, chatId, messageId); } catch (err) { console.error("Auto DM deletion error:", err.message); }
     db.pendingDelete.deleteByChatMsg(chatId, messageId);
     PendingDelete.deleteOne({ chat_id: chatId, message_id: messageId }).catch(() => {});
   }, delay);
@@ -520,7 +551,7 @@ async function recoverPendingDeletes(bot) {
   for (const p of pending) {
     const delay = Math.max(0, new Date(p.delete_at) - Date.now());
     setTimeout(async () => {
-      try { await bot.deleteMessage(p.chat_id, p.message_id); } catch (err) { console.error("Recovered deletion error:", err.message); }
+      try { await deleteMessageWithRetry(bot, p.chat_id, p.message_id); } catch (err) { console.error("Recovered deletion error:", err.message); }
       db.pendingDelete.deleteById(p._id);
       PendingDelete.deleteOne({ _id: p._id }).catch(() => {});
     }, delay);
@@ -535,10 +566,10 @@ async function deleteAllPendingVideosForUser(bot, chatId) {
   let deleted = 0;
   for (const p of pending) {
     try {
-      await bot.deleteMessage(chatId, p.message_id);
-      deleted++;
+      const ok = await deleteMessageWithRetry(bot, chatId, p.message_id);
+      if (ok) deleted++;
     } catch (err) {
-      if (!err.message?.includes("message to delete not found")) console.error("Ban-time deletion error:", err.message);
+      console.error("Ban-time deletion error:", err.message);
     }
     db.pendingDelete.deleteById(p._id);
     PendingDelete.deleteOne({ _id: p._id }).catch(() => {});
