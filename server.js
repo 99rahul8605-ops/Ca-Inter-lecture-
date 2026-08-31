@@ -503,10 +503,36 @@ async function scheduleDelete(bot, chatId, messageId, deleteAt) {
 async function recoverPendingDeletes(bot) {
   const pending = db.pendingDelete.getAll();
   console.log(`Recovering ${pending.length} pending DM deletions...`);
-  for (const p of pending) {
-    const delay = Math.max(0, new Date(p.delete_at) - Date.now());
+
+  // Deletions whose time has already passed (the common case right after a
+  // restart) are run sequentially with a small stagger, instead of all firing
+  // in the same tick via setTimeout(0) — that burst was overwhelming
+  // Telegram's connection pool and causing socket hang up / AggregateError.
+  const due = pending.filter(p => new Date(p.delete_at) - Date.now() <= 0);
+  const future = pending.filter(p => new Date(p.delete_at) - Date.now() > 0);
+
+  const STAGGER_MS = 250;
+  (async () => {
+    for (const p of due) {
+      try {
+        await bot.deleteMessage(p.chat_id, p.message_id);
+      } catch (err) {
+        if (!err.message?.includes("message to delete not found")) console.error("Recovered deletion error:", err.message);
+      }
+      db.pendingDelete.deleteById(p._id);
+      PendingDelete.deleteOne({ _id: p._id }).catch(() => {});
+      await new Promise(r => setTimeout(r, STAGGER_MS));
+    }
+  })();
+
+  for (const p of future) {
+    const delay = new Date(p.delete_at) - Date.now();
     setTimeout(async () => {
-      try { await bot.deleteMessage(p.chat_id, p.message_id); } catch (err) { console.error("Recovered deletion error:", err.message); }
+      try {
+        await bot.deleteMessage(p.chat_id, p.message_id);
+      } catch (err) {
+        if (!err.message?.includes("message to delete not found")) console.error("Recovered deletion error:", err.message);
+      }
       db.pendingDelete.deleteById(p._id);
       PendingDelete.deleteOne({ _id: p._id }).catch(() => {});
     }, delay);
