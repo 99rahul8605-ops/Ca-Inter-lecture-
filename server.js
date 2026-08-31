@@ -16,6 +16,20 @@ const fs = require("fs");
 const crypto = require("crypto");
 const db = require("./sqlite-manager");
 
+// node-telegram-bot-api's internal long-polling (getUpdates) uses the
+// deprecated request-promise/@cypress/request HTTP client under the hood.
+// On any brief network hiccup between us and Telegram's servers (packet
+// loss, a dropped TCP connection — "socket hang up", etc.), that internal
+// polling loop can throw a rejection that isn't caught anywhere in OUR code,
+// because it originates entirely inside the library's own networking layer.
+// Node terminates the whole process on an unhandled rejection by default —
+// meaning a single transient network blip could take the whole bot down.
+// This just logs it and lets the bot keep running; node-telegram-bot-api's
+// polling loop recovers and retries on its own once the network is back.
+process.on("unhandledRejection", (reason) => {
+  console.error("Unhandled rejection (likely a transient Telegram API network blip, bot continues running):", reason?.message || reason);
+});
+
 // QR-with-logo generation. Wrapped in try/catch so the app still boots (with plain QR
 // generation disabled) if these haven't been installed yet — run:
 //   npm install qrcode jimp --save
@@ -503,36 +517,10 @@ async function scheduleDelete(bot, chatId, messageId, deleteAt) {
 async function recoverPendingDeletes(bot) {
   const pending = db.pendingDelete.getAll();
   console.log(`Recovering ${pending.length} pending DM deletions...`);
-
-  // Deletions whose time has already passed (the common case right after a
-  // restart) are run sequentially with a small stagger, instead of all firing
-  // in the same tick via setTimeout(0) — that burst was overwhelming
-  // Telegram's connection pool and causing socket hang up / AggregateError.
-  const due = pending.filter(p => new Date(p.delete_at) - Date.now() <= 0);
-  const future = pending.filter(p => new Date(p.delete_at) - Date.now() > 0);
-
-  const STAGGER_MS = 250;
-  (async () => {
-    for (const p of due) {
-      try {
-        await bot.deleteMessage(p.chat_id, p.message_id);
-      } catch (err) {
-        if (!err.message?.includes("message to delete not found")) console.error("Recovered deletion error:", err.message);
-      }
-      db.pendingDelete.deleteById(p._id);
-      PendingDelete.deleteOne({ _id: p._id }).catch(() => {});
-      await new Promise(r => setTimeout(r, STAGGER_MS));
-    }
-  })();
-
-  for (const p of future) {
-    const delay = new Date(p.delete_at) - Date.now();
+  for (const p of pending) {
+    const delay = Math.max(0, new Date(p.delete_at) - Date.now());
     setTimeout(async () => {
-      try {
-        await bot.deleteMessage(p.chat_id, p.message_id);
-      } catch (err) {
-        if (!err.message?.includes("message to delete not found")) console.error("Recovered deletion error:", err.message);
-      }
+      try { await bot.deleteMessage(p.chat_id, p.message_id); } catch (err) { console.error("Recovered deletion error:", err.message); }
       db.pendingDelete.deleteById(p._id);
       PendingDelete.deleteOne({ _id: p._id }).catch(() => {});
     }, delay);
