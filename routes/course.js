@@ -1354,6 +1354,17 @@ router.get('/banned/me', (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// GET — is the current user exempt from the ad-blocker hard-block gate?
+// Owner is exempt automatically on the frontend before this is ever called;
+// this covers the additional per-user exemption list (/exemptads command).
+router.get('/adblock-exempt/me', (req, res) => {
+  try {
+    const userId = getRequestUserId(req);
+    if (!userId) return res.json({ exempt: false });
+    res.json({ exempt: db.adblockExempt.isExempt(userId) });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // GET — full list of lectureIds this user has marked watched
 router.get('/watched/:userId', (req, res) => {
   try {
