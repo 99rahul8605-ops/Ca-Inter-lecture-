@@ -492,6 +492,9 @@ body.ready{transition:none}
       🔄 I've Disabled It — Retry
     </button>
   </div>
+  <div style="font-size:11px;color:var(--text3);margin-top:16px;max-width:300px;line-height:1.5">
+    ⚠️ Still not working after disabling it? Fully close Telegram (not just this window) and reopen it — sometimes Telegram needs a fresh restart to pick up the change.
+  </div>
 </div>
 
 <!-- PAGE: Home (Batches) -->
@@ -2074,9 +2077,10 @@ async function startSpin() {
 
   if (!_monetagReady()) {
     _spinToken = null;
-    toast('Ad load nahi hua. Ad blocker band karo aur try karo.', 'error');
     _spinInProgress = false;
     renderSpinStatusBar();
+    if (!isAdmin && await _isAdBlockerActiveForUser()) { document.getElementById('adBlockGate').classList.remove('hidden'); return; }
+    toast('Ad load nahi hua. Ad blocker band karo aur try karo.', 'error');
     return;
   }
 
@@ -2241,19 +2245,66 @@ function getMonetagSdkPromise() { return _monetagSdkPromise; }
 // that tradeoff was chosen deliberately over adding delay for everyone.
 // Owner is exempt — checked before this is ever called, same pattern as ban/
 // force-join checks.
+// Fresh, repeatable ad-blocker probe — unlike the one-time SDK script tag
+// (which, once loaded successfully, stays loaded in memory even if the user
+// re-enables their ad-blocker afterward), this makes a NEW network request
+// every time it's called, with a cache-busting param so the browser can't
+// just reuse a cached "it worked" result. This is what makes ongoing
+// re-checking possible instead of only checking once at page load.
+function _probeAdBlocker() {
+  return new Promise(function(resolve) {
+    var settled = false;
+    var s = document.createElement('script');
+    s.src = 'https://libtl.com/sdk.js?_probe=' + Date.now();
+    function done(ok) { if (settled) return; settled = true; s.remove(); resolve(ok); }
+    s.onload = function() { done(true); };
+    s.onerror = function() { done(false); };
+    document.head.appendChild(s);
+    setTimeout(function() { done(false); }, 5000); // don't hang forever on a stalled request
+  });
+}
+
+// Shared by both the initial check and every periodic re-check below —
+// decides whether THIS user should see the ad-blocker gate right now.
+async function _isAdBlockerActiveForUser() {
+  if (isAdmin) return false;
+  try {
+    var exemptData = await apiFetch('/api/adblock-exempt/me');
+    if (exemptData && exemptData.exempt) return false;
+  } catch (e) { /* exemption check failed — fall through to the probe result */ }
+  return !(await _probeAdBlocker());
+}
+
 async function checkAdBlocker() {
   try {
     var sdkPromise = getMonetagSdkPromise();
     if (!sdkPromise) return false; // config fetch itself failed — don't punish the user for our own issue
     var loaded = await sdkPromise;
     if (loaded === false) {
-      document.getElementById('adBlockGate').classList.remove('hidden');
-      return true;
+      var blocked = await _isAdBlockerActiveForUser();
+      if (blocked) { document.getElementById('adBlockGate').classList.remove('hidden'); return true; }
+      return false;
     }
+    startAdBlockerMonitoring(); // initial load succeeded — start watching for it being turned on later
     return false;
   } catch (e) {
     return false; // never block a legit user over an unexpected error here
   }
+}
+
+// Re-checks periodically (and whenever the user comes back to the app) so
+// someone can't just disable their ad-blocker once to get past the initial
+// gate, then re-enable it and keep using the app ad-block-free for the rest
+// of the session. Re-shows the gate the moment blocking is detected again.
+var _adBlockerMonitorInterval = null;
+function startAdBlockerMonitoring() {
+  if (_adBlockerMonitorInterval || isAdmin) return;
+  var recheck = async function() {
+    if (document.getElementById('adBlockGate') && !document.getElementById('adBlockGate').classList.contains('hidden')) return; // already showing
+    if (await _isAdBlockerActiveForUser()) document.getElementById('adBlockGate').classList.remove('hidden');
+  };
+  _adBlockerMonitorInterval = setInterval(recheck, 45000);
+  document.addEventListener('visibilitychange', function() { if (!document.hidden) recheck(); });
 }
 
 async function checkAdminAccess() {
@@ -3604,15 +3655,21 @@ function _shouldShowAdForLectureClick() {
 async function openLecLink(codeOrLink, type) {
   if (!codeOrLink) return openLink('', type || 'lecture');
 
-  if ((type || 'lecture') === 'lecture' && _shouldShowAdForLectureClick() && _monetagReady()) {
-    try {
-      var lecFormats = ['rewarded', 'pop', 'interstitial'];
-      var lecFormat = lecFormats[Math.floor(Math.random() * lecFormats.length)];
-      var lecUid = tg && tg.initDataUnsafe && tg.initDataUnsafe.user ? String(tg.initDataUnsafe.user.id) : 'unknown';
-      if (lecFormat === 'pop') await _monetagShow('pop');
-      else if (lecFormat === 'interstitial') await _monetagShow();
-      else await _monetagShow({ ymid: lecUid });
-    } catch (e) { /* skipped/failed — open the lecture anyway */ }
+  if ((type || 'lecture') === 'lecture' && _shouldShowAdForLectureClick()) {
+    if (!_monetagReady() && !isAdmin && await _isAdBlockerActiveForUser()) {
+      document.getElementById('adBlockGate').classList.remove('hidden');
+      return;
+    }
+    if (_monetagReady()) {
+      try {
+        var lecFormats = ['rewarded', 'pop', 'interstitial'];
+        var lecFormat = lecFormats[Math.floor(Math.random() * lecFormats.length)];
+        var lecUid = tg && tg.initDataUnsafe && tg.initDataUnsafe.user ? String(tg.initDataUnsafe.user.id) : 'unknown';
+        if (lecFormat === 'pop') await _monetagShow('pop');
+        else if (lecFormat === 'interstitial') await _monetagShow();
+        else await _monetagShow({ ymid: lecUid });
+      } catch (e) { /* skipped/failed — open the lecture anyway */ }
+    }
   }
 
   var url;
@@ -3957,9 +4014,10 @@ async function watchAd() {
 
   if (!_monetagReady()) {
     _adToken = null;
-    toast('Ad load nahi hua. Ad blocker band karo aur try karo.', 'error');
     _adWatching = false;
     _setAdBtns(false);
+    if (!isAdmin && await _isAdBlockerActiveForUser()) { document.getElementById('adBlockGate').classList.remove('hidden'); return; }
+    toast('Ad load nahi hua. Ad blocker band karo aur try karo.', 'error');
     return;
   }
 
