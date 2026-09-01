@@ -308,6 +308,16 @@ function _setupTables(db) {
       bannedBy TEXT DEFAULT ''
     );
 
+    -- Users exempted from the ad-blocker gate (index.html blocks the whole app
+    -- if the Monetag SDK fails to load — owner is always exempt, this table
+    -- lets the owner exempt specific other users too, e.g. testers or VIPs).
+    CREATE TABLE IF NOT EXISTS adblock_exempt_users (
+      userId    TEXT PRIMARY KEY,
+      note      TEXT DEFAULT '',
+      addedAt   INTEGER DEFAULT 0,
+      addedBy   TEXT DEFAULT ''
+    );
+
     -- Lecture request log — one row per successful lecture/video delivery via the
     -- bot's /start deep link. Used only to detect a burst of requests (possible
     -- bulk-download/leak behavior) within a short rolling window; rows older than
@@ -1641,6 +1651,32 @@ const bannedUser = {
   },
 };
 
+// ── AD-BLOCKER GATE EXEMPTION Operations ────────────────────────────────────
+// Users the owner has manually exempted from the ad-blocker hard-block gate
+// in index.html (owner is always exempt regardless of this table).
+
+const adblockExempt = {
+  isExempt(userId) {
+    return !!getDb().prepare(`SELECT 1 FROM adblock_exempt_users WHERE userId=?`).get(String(userId));
+  },
+  add({ userId, note, addedBy }) {
+    getDb().prepare(`INSERT INTO adblock_exempt_users(userId,note,addedAt,addedBy) VALUES(?,?,?,?)
+      ON CONFLICT(userId) DO UPDATE SET note=excluded.note, addedAt=excluded.addedAt, addedBy=excluded.addedBy`)
+      .run(String(userId), note || '', Date.now(), String(addedBy || ''));
+  },
+  // Returns true if the user was actually exempt before (so callers can tell
+  // "removed" apart from "wasn't exempt in the first place").
+  remove(userId) {
+    const existed = !!getDb().prepare(`SELECT 1 FROM adblock_exempt_users WHERE userId=?`).get(String(userId));
+    getDb().prepare(`DELETE FROM adblock_exempt_users WHERE userId=?`).run(String(userId));
+    return existed;
+  },
+  listAll() {
+    return getDb().prepare(`SELECT * FROM adblock_exempt_users ORDER BY addedAt DESC`).all()
+      .map(r => ({ ...r, addedAt: new Date(r.addedAt) }));
+  },
+};
+
 // ── LECTURE REQUEST Operations (suspicious-activity / burst detection) ────────
 // One row per successful lecture/video delivery via the bot. countRecent() powers
 // the "N lectures within M minutes" burst check in server.js; pruneOlderThan()
@@ -1736,6 +1772,7 @@ module.exports = {
   pointAdjustment,
   spinAdjustment,
   bannedUser,
+  adblockExempt,
   lectureRequest,
   settings,
   deviceSighting,

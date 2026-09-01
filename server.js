@@ -1276,6 +1276,9 @@ async function startBot() {
 • /stats — View bot usage stats
 • /rmword (word) — Add a word to the auto-filter blocklist
 • /rmword list — Show all blocked words
+• /exemptads (userId) [note] — Let a user bypass the ad-blocker gate
+• /unexemptads (userId) — Remove that exemption
+• /exemptadslist — List everyone exempt from the ad-blocker gate
 • /admin — Show this list`;
     bot.sendMessage(chatId, text, { parse_mode:"HTML" });
   });
@@ -1541,6 +1544,44 @@ async function startBot() {
       const text=`🚫 <b>Banned Users</b> (${list.length})\n\n`+list.map(b=>`• <code>${b.userId}</code>${b.reason?` — ${esc(b.reason)}`:""} (${formatIST(b.bannedAt)})`).join("\n");
       bot.sendMessage(chatId,text,{parse_mode:"HTML"});
     } catch(err){ console.error("banned list error:",err.message); bot.sendMessage(chatId,`❌ Could not load banned users.`); }
+  });
+
+  // ── Ad-blocker gate exemption list ──────────────────────────────────────────
+  // /exemptads <userId> [note]  — let this user bypass the ad-blocker hard-block gate
+  // /unexemptads <userId>       — remove that exemption
+  // /exemptadslist              — list everyone currently exempt
+  bot.onText(/\/exemptads (.+)/, async (msg,match) => {
+    if(isGroupChat(msg)||!isOwner(msg.from?.id)) return;
+    const chatId=msg.chat.id;
+    const parts=match[1].trim().split(/\s+/);
+    const targetId=parts.shift();
+    const note=parts.join(" ");
+    if(!targetId||isNaN(parseInt(targetId,10))) return bot.sendMessage(chatId,`Usage: /exemptads <userId> [note]`);
+    try {
+      db.adblockExempt.add({ userId: targetId, note, addedBy: String(msg.from.id) });
+      bot.sendMessage(chatId,`✅ User <code>${targetId}</code> can now bypass the ad-blocker gate.${note?`\nNote: ${esc(note)}`:""}`,{parse_mode:"HTML"});
+    } catch(err){ console.error("exemptads error:",err.message); bot.sendMessage(chatId,`❌ Could not add exemption.`); }
+  });
+
+  bot.onText(/\/unexemptads (.+)/, async (msg,match) => {
+    if(isGroupChat(msg)||!isOwner(msg.from?.id)) return;
+    const chatId=msg.chat.id;
+    const targetId=match[1].trim();
+    try {
+      const removed=db.adblockExempt.remove(targetId);
+      bot.sendMessage(chatId, removed ? `✅ Removed ad-blocker exemption for <code>${targetId}</code>.` : `User <code>${targetId}</code> wasn't exempt.`, {parse_mode:"HTML"});
+    } catch(err){ console.error("unexemptads error:",err.message); bot.sendMessage(chatId,`❌ Could not remove exemption.`); }
+  });
+
+  bot.onText(/\/exemptadslist/, async (msg) => {
+    if(isGroupChat(msg)||!isOwner(msg.from?.id)) return;
+    const chatId=msg.chat.id;
+    try {
+      const list=db.adblockExempt.listAll();
+      if(!list.length) return bot.sendMessage(chatId,`No one is exempt from the ad-blocker gate (besides you).`);
+      const text=`🛡️ <b>Ad-Blocker Gate Exemptions</b> (${list.length})\n\n`+list.map(e=>`• <code>${e.userId}</code>${e.note?` — ${esc(e.note)}`:""} (${formatIST(e.addedAt)})`).join("\n");
+      bot.sendMessage(chatId,text,{parse_mode:"HTML"});
+    } catch(err){ console.error("exemptadslist error:",err.message); bot.sendMessage(chatId,`❌ Could not load exemption list.`); }
   });
 
   // ── Suspicious-activity rules ────────────────────────────────────────────
