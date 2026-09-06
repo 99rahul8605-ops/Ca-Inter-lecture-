@@ -2084,9 +2084,8 @@ async function startSpin() {
     return;
   }
 
-  // Randomly pick one of three Monetag formats
-  var formats = ['rewarded', 'pop', 'interstitial'];
-  var format = formats[Math.floor(Math.random() * formats.length)];
+  // Rotate through the three Monetag formats in order (see _nextAdFormat)
+  var format = _nextAdFormat();
   var tgUid = tg && tg.initDataUnsafe && tg.initDataUnsafe.user ? String(tg.initDataUnsafe.user.id) : 'unknown';
   var adStartedAt = Date.now();
   var adPromise;
@@ -3640,6 +3639,22 @@ function _lecRowHtml(l, i) {
     </div>`;
 }
 
+// Shared across every ad-trigger point (Spin, Watch Ad, lecture-click ad) so
+// the three Monetag formats rotate in strict order — 1st ad call gets format
+// A, 2nd gets B, 3rd gets C, 4th back to A, etc. — instead of random selection
+// (which could, just by chance, land on the same format many times in a row).
+// Persistent across sessions via localStorage so the rotation continues
+// correctly even after closing and reopening the app.
+function _nextAdFormat() {
+  try {
+    var formats = ['rewarded', 'pop', 'interstitial'];
+    var idx = parseInt(localStorage.getItem('edubot_ad_format_idx') || '0', 10);
+    var format = formats[idx % formats.length];
+    localStorage.setItem('edubot_ad_format_idx', String(idx + 1));
+    return format;
+  } catch (e) { return 'interstitial'; }
+}
+
 // Persistent (never resets) "every 3rd lecture click shows an ad" counter.
 // Skippable/non-mandatory — the ad plays if available, but the lecture opens
 // right after regardless of whether the user watched or skipped it. Only
@@ -3662,8 +3677,7 @@ async function openLecLink(codeOrLink, type) {
     }
     if (_monetagReady()) {
       try {
-        var lecFormats = ['rewarded', 'pop', 'interstitial'];
-        var lecFormat = lecFormats[Math.floor(Math.random() * lecFormats.length)];
+        var lecFormat = _nextAdFormat();
         var lecUid = tg && tg.initDataUnsafe && tg.initDataUnsafe.user ? String(tg.initDataUnsafe.user.id) : 'unknown';
         if (lecFormat === 'pop') await _monetagShow('pop');
         else if (lecFormat === 'interstitial') await _monetagShow();
@@ -4021,9 +4035,8 @@ async function watchAd() {
     return;
   }
 
-  // Randomly pick one of three Monetag formats
-  var formats = ['rewarded', 'pop', 'interstitial'];
-  var format = formats[Math.floor(Math.random() * formats.length)];
+  // Rotate through the three Monetag formats in order (see _nextAdFormat)
+  var format = _nextAdFormat();
   var uid = tg && tg.initDataUnsafe && tg.initDataUnsafe.user ? String(tg.initDataUnsafe.user.id) : 'unknown';
   var adStartedAt = Date.now();
   var adPromise;
