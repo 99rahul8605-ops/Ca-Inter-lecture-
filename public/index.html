@@ -2084,14 +2084,10 @@ async function startSpin() {
     return;
   }
 
-  // Rotate through the three Monetag formats in order (see _nextAdFormat)
+  // Rotate between the 2 genuinely reward-gated Monetag formats (see _nextAdFormat)
   var format = _nextAdFormat();
-  var tgUid = tg && tg.initDataUnsafe && tg.initDataUnsafe.user ? String(tg.initDataUnsafe.user.id) : 'unknown';
   var adStartedAt = Date.now();
-  var adPromise;
-  if (format === 'pop') adPromise = _monetagShow('pop');
-  else if (format === 'interstitial') adPromise = _monetagShow();
-  else adPromise = _monetagShow({ ymid: tgUid });
+  var adPromise = format === 'pop' ? _monetagShow('pop') : _monetagShow();
 
   try {
     await adPromise;
@@ -2285,10 +2281,36 @@ async function checkAdBlocker() {
       return false;
     }
     startAdBlockerMonitoring(); // initial load succeeded — start watching for it being turned on later
+    setupInAppInterstitial();   // start the passive ambient ad stream (see function for why it's separate)
     return false;
   } catch (e) {
     return false; // never block a legit user over an unexpected error here
   }
+}
+
+// Monetag's third documented format for this zone — "In-App Interstitial" —
+// isn't a per-action reward-gated call like the other two; it's a
+// self-scheduling ambient ad stream that Monetag's own SDK manages
+// internally once configured (no .then()/.catch() reward callback exists for
+// it, per Monetag's own docs). Set up once per app session, not tied to any
+// specific button/action, and not part of the Rewarded Interstitial/Popup
+// rotation used for Spin and Watch Ad (those two are the only formats that
+// can actually confirm a genuine watch before granting a reward).
+var _inAppInterstitialStarted = false;
+function setupInAppInterstitial() {
+  if (_inAppInterstitialStarted || !_monetagReady()) return;
+  _inAppInterstitialStarted = true;
+  try {
+    _monetagShow({
+      type: 'inApp',
+      // 2 ads within 20 minutes (0.333 hours), at least 60s apart, first one
+      // 5s after the page loads. Session persists across navigation (last
+      // digit 0 = everyPage: false). Reduced from the default 2-per-6-min
+      // (~20 ads/hour) down to ~6 ads/hour max, so it stays present without
+      // being frustrating.
+      inAppSettings: { frequency: 2, capping: 0.334, interval: 60, timeout: 5, everyPage: false }
+    });
+  } catch (e) { /* purely ambient — failing here shouldn't affect anything else */ }
 }
 
 // Re-checks periodically (and whenever the user comes back to the app) so
@@ -2317,7 +2339,7 @@ async function checkAdminAccess() {
     window._paymentProvider = config.paymentProvider || 'bharatpe';
     // Store force-join requirement
     _fjRequired = !!config.forceJoinRequired;
-    loadMonetagSdk(config.monetagZoneId || '11011844'); // fire-and-forget, don't block init()
+    loadMonetagSdk(config.monetagZoneId || '11502469'); // fire-and-forget, don't block init()
     if (!ownerId) return;
     var tgUser = tg && tg.initDataUnsafe && tg.initDataUnsafe.user;
     var curId = tgUser ? tgUser.id : null;
@@ -3639,15 +3661,24 @@ function _lecRowHtml(l, i) {
     </div>`;
 }
 
-// Shared across every ad-trigger point (Spin, Watch Ad, lecture-click ad) so
-// the three Monetag formats rotate in strict order — 1st ad call gets format
-// A, 2nd gets B, 3rd gets C, 4th back to A, etc. — instead of random selection
-// (which could, just by chance, land on the same format many times in a row).
-// Persistent across sessions via localStorage so the rotation continues
-// correctly even after closing and reopening the app.
+// Shared across every reward-gated ad-trigger point (Spin, Watch Ad,
+// lecture-click ad) so the two genuinely reward-gated Monetag formats rotate
+// in strict order. IMPORTANT: only "Rewarded Interstitial" (no-arg) and
+// "Rewarded Popup" ('pop') belong here — both resolve/reject a real promise
+// after the user actually watches or skips, which is what makes them safe to
+// gate a reward on. Monetag's third documented format for this zone,
+// "In-App Interstitial" ({type:'inApp', inAppSettings:{...}}), is a
+// self-scheduling AMBIENT ad system with no per-call reward callback at all
+// — it can't tell us whether any specific user action was rewarded, so it's
+// set up separately as a passive background ad stream (see
+// setupInAppInterstitial()) instead of being rotated in here. An earlier
+// version of this rotation mistakenly included a third `{ymid: uid}` variant
+// that isn't a real parameter this zone recognizes at all — the SDK likely
+// silently fell back to plain interstitial behavior for it, which is why
+// "Interstitial" appeared far more often than intended.
 function _nextAdFormat() {
   try {
-    var formats = ['rewarded', 'pop', 'interstitial'];
+    var formats = ['interstitial', 'pop'];
     var idx = parseInt(localStorage.getItem('edubot_ad_format_idx') || '0', 10);
     var format = formats[idx % formats.length];
     localStorage.setItem('edubot_ad_format_idx', String(idx + 1));
@@ -3678,10 +3709,8 @@ async function openLecLink(codeOrLink, type) {
     if (_monetagReady()) {
       try {
         var lecFormat = _nextAdFormat();
-        var lecUid = tg && tg.initDataUnsafe && tg.initDataUnsafe.user ? String(tg.initDataUnsafe.user.id) : 'unknown';
         if (lecFormat === 'pop') await _monetagShow('pop');
-        else if (lecFormat === 'interstitial') await _monetagShow();
-        else await _monetagShow({ ymid: lecUid });
+        else await _monetagShow();
       } catch (e) { /* skipped/failed — open the lecture anyway */ }
     }
   }
@@ -4035,18 +4064,10 @@ async function watchAd() {
     return;
   }
 
-  // Rotate through the three Monetag formats in order (see _nextAdFormat)
+  // Rotate between the 2 genuinely reward-gated Monetag formats (see _nextAdFormat)
   var format = _nextAdFormat();
-  var uid = tg && tg.initDataUnsafe && tg.initDataUnsafe.user ? String(tg.initDataUnsafe.user.id) : 'unknown';
   var adStartedAt = Date.now();
-  var adPromise;
-  if (format === 'pop') {
-    adPromise = _monetagShow('pop');          // Rewarded Popup
-  } else if (format === 'interstitial') {
-    adPromise = _monetagShow();               // Rewarded Interstitial
-  } else {
-    adPromise = _monetagShow({ ymid: uid }); // Original Rewarded
-  }
+  var adPromise = format === 'pop' ? _monetagShow('pop') : _monetagShow();
 
   adPromise
     .then(function() {
