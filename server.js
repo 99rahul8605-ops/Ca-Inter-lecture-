@@ -590,14 +590,19 @@ async function scheduleDelete(bot, chatId, messageId, deleteAt) {
     db.pendingDelete.deleteByChatMsg(chatId, messageId);
     PendingDelete.deleteOne({ chat_id: chatId, message_id: messageId }).catch(() => {});
   }, delay);
-  await enforceActiveVideoCap(bot, chatId);
+  // Returns how many older videos got evicted by the cap below, so the caller
+  // can fold that into the SAME "auto-deletes in 6 hours" message instead of
+  // sending it as a separate notice.
+  return enforceActiveVideoCap(bot, chatId);
 }
 
 // Keeps at most MAX_ACTIVE_VIDEOS videos "live" in a chat at any time. All
 // scheduleDelete() entries for a chat are videos (it's never called for other
 // file types), and every one is scheduled for exactly +6h from its own send
 // time, so sorting by delete_at ascending is the same as sorting by send order
-// — oldest-sent first. Anything beyond the cap gets deleted right now.
+// — oldest-sent first. Anything beyond the cap gets deleted right now. Returns
+// the number evicted (0 if none) — no message sent here, callers combine this
+// into their own single "video sent" notice (see evictionNotice() below).
 async function enforceActiveVideoCap(bot, chatId) {
   const active = db.pendingDelete.getByChatId(chatId).sort((a, b) => a.delete_at - b.delete_at);
   const excess = active.length - MAX_ACTIVE_VIDEOS;
@@ -607,11 +612,18 @@ async function enforceActiveVideoCap(bot, chatId) {
     db.pendingDelete.deleteById(p._id);
     PendingDelete.deleteOne({ chat_id: chatId, message_id: p.message_id }).catch(() => {});
   }
-  if (excess > 0) {
-    const word = excess === 1 ? "video" : "videos";
-    await bot.sendMessage(chatId, `🗑 Aapke sabse purane ${excess} ${word} hata diye gaye (ek time pe max ${MAX_ACTIVE_VIDEOS} lecture videos allowed hain).`).catch(() => {});
-  }
+  return Math.max(0, excess);
 }
+
+// One-line phrasing for however many older videos got evicted, or "" if none —
+// meant to be folded into the same message as the "auto-deletes in 6h" notice.
+function evictionNotice(evictedCount) {
+  if (!evictedCount) return "";
+  const word = evictedCount === 1 ? "video" : "videos";
+  return `🗑 Aapke sabse purane ${evictedCount} ${word} hata diye gaye (ek time pe max ${MAX_ACTIVE_VIDEOS} lecture videos allowed hain).`;
+}
+
+
 
 async function recoverPendingDeletes(bot) {
   const pending = db.pendingDelete.getAll();
@@ -1262,7 +1274,7 @@ async function startBot() {
         try {
           const batch = db.bulkBatch.findByCode(param);
           if (!batch) return bot.sendMessage(chatId, `File not found. Link may be invalid.`);
-          let hasVideo = false, failedCount = 0, limitBlockedCount = 0;
+          let hasVideo = false, failedCount = 0, limitBlockedCount = 0, totalEvicted = 0;
           for (const f of batch.files) {
             const isVideoFile = f.file_type==="video"||f.file_type==="video_note";
             // Same daily cap enforced on the single-file path below — this loop
@@ -1290,11 +1302,16 @@ async function startBot() {
             }
             if (isVideoFile && sentMsg) {
               hasVideo=true;
-              await scheduleDelete(bot,chatId,sentMsg.message_id,new Date(Date.now()+6*60*60*1000));
+              totalEvicted += await scheduleDelete(bot,chatId,sentMsg.message_id,new Date(Date.now()+6*60*60*1000));
             }
             if (sentMsg) logLectureActivity(bot, msg.from, { file_type: f.file_type, file_name: f.file_name, code: param });
           }
-          if (hasVideo) await bot.sendMessage(chatId, `⚠️ Videos will auto-delete after 6 hours.`);
+          if (hasVideo) {
+            var noticeLines = [`⚠️ Videos will auto-delete after 6 hours.`];
+            var ev = evictionNotice(totalEvicted);
+            if (ev) noticeLines.push("", ev);
+            await bot.sendMessage(chatId, noticeLines.join("\n"));
+          }
           if (failedCount > 0) await bot.sendMessage(chatId, `⚠️ ${failedCount} file(s) in this batch couldn't be delivered (owner needs to re-upload them).`);
           if (limitBlockedCount > 0) await bot.sendMessage(chatId, `🚫 <b>Daily limit reached!</b>\n\n${limitBlockedCount} video(s) in this batch weren't sent — you've hit your <b>${DAILY_VIDEO_LIMIT} videos/day</b> limit.\n📅 Resets at midnight.`, { parse_mode:"HTML" });
           return;
@@ -1318,7 +1335,7 @@ async function startBot() {
             throw err;
           }
           const lim = limCheck;
-          await scheduleDelete(bot,chatId,sentMsg.message_id,new Date(Date.now()+6*60*60*1000));
+          const evicted = await scheduleDelete(bot,chatId,sentMsg.message_id,new Date(Date.now()+6*60*60*1000));
           db.fileRecord.addDeliveredTo(record.id,chatId);
           FileRecord.updateOne({ code:record.code },{ $addToSet:{ delivered_to:chatId } }).catch(() => {});
           stampMongoDeliveredAt(record.id, chatId, Date.now());
@@ -1328,18 +1345,23 @@ async function startBot() {
           const lines=[`⚠️ This video auto-deletes in 6 hours.`,``,`📊 <b>Today:</b> ${lim.used}/${DAILY_VIDEO_LIMIT} videos`];
           if(lim.remaining===0) lines.push(`🚫 Limit reached for today!`);
           else if(lim.remaining<=3) lines.push(`⚠️ Only <b>${lim.remaining}</b> left today!`);
+          const evictionMsg = evictionNotice(evicted);
+          if (evictionMsg) lines.push(``, evictionMsg);
           await bot.sendMessage(chatId, lines.join("\n"), { parse_mode:"HTML" });
           return;
         }
         const sentMsg = await sendFile(bot, chatId, record);
         logLectureActivity(bot, msg.from, record, null);
         if (isVideo) {
-          await scheduleDelete(bot,chatId,sentMsg.message_id,new Date(Date.now()+6*60*60*1000));
+          const evicted = await scheduleDelete(bot,chatId,sentMsg.message_id,new Date(Date.now()+6*60*60*1000));
           db.fileRecord.addDeliveredTo(record.id,chatId);
           FileRecord.updateOne({ code:record.code },{ $addToSet:{ delivered_to:chatId } }).catch(() => {});
           stampMongoDeliveredAt(record.id, chatId, Date.now());
           await scheduleUndeliver(record.id, record.code, chatId, new Date(Date.now()+6*60*60*1000));
-          await bot.sendMessage(chatId, `⚠️ This video auto-deletes in 6 hours.`);
+          var ownerLines = [`⚠️ This video auto-deletes in 6 hours.`];
+          var ownerEvictionMsg = evictionNotice(evicted);
+          if (ownerEvictionMsg) ownerLines.push(``, ownerEvictionMsg);
+          await bot.sendMessage(chatId, ownerLines.join("\n"));
         }
       } catch (err) { console.error("Deep link error:", err.message); bot.sendMessage(chatId, `Error occurred. Please try again.`); }
       return;
