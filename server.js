@@ -80,6 +80,10 @@ const PAYMENT_AMOUNT_TOLERANCE = 0;
 // dashboard. PAYTM_MERCHANT_KEY below is still needed for two things Paytm itself
 // requires directly: creating the checkout order (Initiate Transaction) and
 // verifying the authenticity of Paytm's callback POST to our server.
+// "razorpay" = official Razorpay Standard Checkout (popup, no page redirect needed).
+// Fully self-contained — no DevPort dependency. Get Key ID/Secret from Razorpay
+// Dashboard → Settings → API Keys, and (optionally, but recommended) a Webhook
+// Secret from Settings → Webhooks for the redundant server-to-server confirmation.
 const PAYMENT_PROVIDER = (process.env.PAYMENT_PROVIDER || "bharatpe").trim().toLowerCase();
 const PAYTM_MID = process.env.PAYTM_MID || "";
 const PAYTM_MERCHANT_KEY = process.env.PAYTM_MERCHANT_KEY || "";
@@ -92,10 +96,26 @@ const PAYTM_HOST = PAYTM_ENV === "staging" ? "securegw-stage.paytm.in" : "secure
 // from the internet (your WEB_URL's domain). Falls back to WEB_URL's origin + this path.
 const PAYTM_CALLBACK_URL = process.env.PAYTM_CALLBACK_URL || (() => { try { return WEB_URL ? new URL("/api/paytm/callback", WEB_URL).toString() : ""; } catch (_) { return ""; } })();
 
+const RAZORPAY_KEY_ID = process.env.RAZORPAY_KEY_ID || "";
+const RAZORPAY_KEY_SECRET = process.env.RAZORPAY_KEY_SECRET || "";
+// Optional but recommended — enables /api/razorpay/webhook as a second, server-to-
+// server confirmation path that grants access even if the user closes the app right
+// after paying (before the Checkout.js success handler's /verify call can fire).
+const RAZORPAY_WEBHOOK_SECRET = process.env.RAZORPAY_WEBHOOK_SECRET || "";
+
 let PaytmChecksum = null;
 if (PAYMENT_PROVIDER === "paytm") {
   try { PaytmChecksum = require("paytmchecksum"); }
   catch (e) { console.warn("paytmchecksum not installed — Paytm payments will be unavailable. Run `npm install paytmchecksum --save`."); }
+}
+
+let Razorpay = null, razorpayClient = null;
+if (PAYMENT_PROVIDER === "razorpay") {
+  try {
+    Razorpay = require("razorpay");
+    if (RAZORPAY_KEY_ID && RAZORPAY_KEY_SECRET) razorpayClient = new Razorpay({ key_id: RAZORPAY_KEY_ID, key_secret: RAZORPAY_KEY_SECRET });
+    else console.warn("RAZORPAY_KEY_ID/RAZORPAY_KEY_SECRET not set — Razorpay payments will be unavailable.");
+  } catch (e) { console.warn("razorpay not installed — Razorpay payments will be unavailable. Run `npm install razorpay --save`."); }
 }
 
 let BOT_USERNAME = "";
@@ -349,6 +369,28 @@ const paytmOrderSchema = new mongoose.Schema({
 });
 const PaytmOrder = mongoose.model("PaytmOrder", paytmOrderSchema);
 
+// ── Razorpay order tracking ───────────────────────────────────────────────────
+// One row per checkout attempt, created at /api/razorpay/create-order and resolved
+// by /api/razorpay/verify (Checkout.js success handler, signature-verified) and/or
+// the /api/razorpay/webhook (payment.captured, signature-verified) — whichever
+// arrives first grants access; both are idempotent on order status.
+const razorpayOrderSchema = new mongoose.Schema({
+  orderId: { type: String, required: true, unique: true }, // Razorpay's order_... id
+  batchId: String,
+  userId: String,
+  firstName: String,
+  lastName: String,
+  username: String,
+  amount: Number,
+  couponCode: String,
+  discountPct: Number,
+  status: { type: String, enum: ["pending","success","failed"], default: "pending" },
+  paymentId: String, // Razorpay's own pay_... id, filled in on success
+  createdAt: { type: Date, default: Date.now },
+});
+const RazorpayOrder = mongoose.model("RazorpayOrder", razorpayOrderSchema);
+
+
 function giveawayRulesText() {
   return [
     `🎁 <b>GIVEAWAY — TERMS &amp; CONDITIONS</b>`,
@@ -533,6 +575,11 @@ async function deleteMessageWithRetry(bot, chatId, messageId, retries = 3, delay
   }
 }
 
+// Max lecture videos allowed to sit in a user's chat at once (separate from the
+// DAILY_VIDEO_LIMIT/day cap above). The 4th active video pushes the oldest one
+// out immediately — deleted right away instead of waiting for its own 6h timer.
+const MAX_ACTIVE_VIDEOS = 3;
+
 async function scheduleDelete(bot, chatId, messageId, deleteAt) {
   const id = db.generateId();
   db.pendingDelete.create({ id, chat_id: chatId, message_id: messageId, delete_at: deleteAt });
@@ -543,6 +590,27 @@ async function scheduleDelete(bot, chatId, messageId, deleteAt) {
     db.pendingDelete.deleteByChatMsg(chatId, messageId);
     PendingDelete.deleteOne({ chat_id: chatId, message_id: messageId }).catch(() => {});
   }, delay);
+  await enforceActiveVideoCap(bot, chatId);
+}
+
+// Keeps at most MAX_ACTIVE_VIDEOS videos "live" in a chat at any time. All
+// scheduleDelete() entries for a chat are videos (it's never called for other
+// file types), and every one is scheduled for exactly +6h from its own send
+// time, so sorting by delete_at ascending is the same as sorting by send order
+// — oldest-sent first. Anything beyond the cap gets deleted right now.
+async function enforceActiveVideoCap(bot, chatId) {
+  const active = db.pendingDelete.getByChatId(chatId).sort((a, b) => a.delete_at - b.delete_at);
+  const excess = active.length - MAX_ACTIVE_VIDEOS;
+  for (let i = 0; i < excess; i++) {
+    const p = active[i];
+    try { await deleteMessageWithRetry(bot, chatId, p.message_id); } catch (err) { console.error("Active-video-cap eviction error:", err.message); }
+    db.pendingDelete.deleteById(p._id);
+    PendingDelete.deleteOne({ chat_id: chatId, message_id: p.message_id }).catch(() => {});
+  }
+  if (excess > 0) {
+    const word = excess === 1 ? "video" : "videos";
+    await bot.sendMessage(chatId, `🗑 Aapke sabse purane ${excess} ${word} hata diye gaye (ek time pe max ${MAX_ACTIVE_VIDEOS} lecture videos allowed hain).`).catch(() => {});
+  }
 }
 
 async function recoverPendingDeletes(bot) {
@@ -752,13 +820,13 @@ const app = express();
 // be removed/changed, since trusting X-Forwarded-For without a proxy lets a
 // client spoof its own IP.
 app.set("trust proxy", true);
-app.use(express.json({ limit: "10mb" }));
+app.use(express.json({ limit: "10mb", verify: (req, res, buf) => { req.rawBody = buf; } }));
 app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 
 app.get("/health", (req, res) => res.json({ status: "ok", uptime: process.uptime(), mongo: mongoose.connection.readyState===1?"connected":"disconnected", sqlite: "active" }));
 app.get("/api/config", (req, res) => {
   const fj = (process.env.FORCE_JOIN_CHANNELS||"").split(",").map(s=>s.trim()).filter(Boolean);
-  res.json({ ownerId: OWNER_ID, botUsername: BOT_USERNAME||"", forceJoinRequired: fj.length>0, upiId: UPI_ID||"", upiName: UPI_NAME||"", contactLink: CONTACT_LINK||`https://t.me/${BOT_USERNAME}`, paymentProvider: PAYMENT_PROVIDER, monetagZoneId: MONETAG_ZONE_ID });
+  res.json({ ownerId: OWNER_ID, botUsername: BOT_USERNAME||"", forceJoinRequired: fj.length>0, upiId: UPI_ID||"", upiName: UPI_NAME||"", contactLink: CONTACT_LINK||`https://t.me/${BOT_USERNAME}`, paymentProvider: PAYMENT_PROVIDER, razorpayKeyId: RAZORPAY_KEY_ID||"", monetagZoneId: MONETAG_ZONE_ID });
 });
 
 // Generates the payment UPI QR server-side (so it's a real, shareable/downloadable HTTPS
@@ -941,6 +1009,98 @@ app.post("/api/paytm/callback", async (req, res) => {
     console.error("Paytm callback error:", err.message);
     return resultPage(false, "Server Error");
   }
+});
+
+// ── Razorpay: create order ────────────────────────────────────────────────────
+// Creates a Razorpay order (amount in paise) + a tracked RazorpayOrder row, and
+// hands the frontend what it needs to open the official Checkout.js popup.
+app.post("/api/razorpay/create-order", async (req, res) => {
+  try {
+    if (PAYMENT_PROVIDER !== "razorpay") return apiErr(res, 400, "SERVICE_DISABLED", "Razorpay is not the active payment provider");
+    if (!razorpayClient) return apiErr(res, 500, "NOT_CONFIGURED", "Razorpay not configured (missing RAZORPAY_KEY_ID/RAZORPAY_KEY_SECRET or razorpay package)");
+    const { batchId, userId, firstName, lastName, username, couponCode, discountPct, finalAmount } = req.body;
+    if (!batchId || !userId) return apiErr(res, 400, "MISSING_FIELDS", "batchId and userId are required");
+    const batchData = db.batch.getOne(batchId);
+    const amount = finalAmount != null ? Number(finalAmount) : (batchData?.price != null ? Number(batchData.price) : null);
+    if (!amount || amount <= 0) return apiErr(res, 400, "INVALID_AMOUNT", "Could not determine a valid amount for this batch");
+
+    const rpOrder = await razorpayClient.orders.create({
+      amount: Math.round(amount * 100), // paise
+      currency: "INR",
+      receipt: `ORD${Date.now()}${Math.floor(Math.random()*1000)}`,
+      notes: { batchId, userId: String(userId), couponCode: couponCode || "" },
+    });
+
+    await RazorpayOrder.create({ orderId: rpOrder.id, batchId, userId: String(userId), firstName, lastName, username, amount, couponCode, discountPct, status: "pending" });
+
+    return apiOk(res, { orderId: rpOrder.id, amount: rpOrder.amount, currency: rpOrder.currency, keyId: RAZORPAY_KEY_ID }, { service: "razorpay" });
+  } catch (err) { console.error("Razorpay create-order error:", err.message); apiErr(res, 500, "INTERNAL_ERROR", err.message); }
+});
+
+// ── Razorpay: verify payment ──────────────────────────────────────────────────
+// Called by the frontend's Checkout.js success handler with razorpay_order_id,
+// razorpay_payment_id, razorpay_signature. The signature is an HMAC-SHA256 of
+// "order_id|payment_id" keyed with our Key Secret — Razorpay's own recommended
+// way to authoritatively confirm a payment without any extra API call. Never
+// trust the presence of a success callback alone; always verify this signature
+// before granting access.
+app.post("/api/razorpay/verify", async (req, res) => {
+  try {
+    if (PAYMENT_PROVIDER !== "razorpay") return apiErr(res, 400, "SERVICE_DISABLED", "Razorpay is not the active payment provider");
+    if (!RAZORPAY_KEY_SECRET) return apiErr(res, 500, "NOT_CONFIGURED", "Razorpay not configured");
+    const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
+    if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) return apiErr(res, 400, "MISSING_FIELDS", "Missing Razorpay payment fields");
+
+    const order = await RazorpayOrder.findOne({ orderId: razorpay_order_id });
+    if (!order) return apiErr(res, 404, "NOT_FOUND", "Order not found");
+    if (order.status === "success") return apiOk(res, { alreadyVerified: true }, { service: "razorpay" }); // idempotent
+
+    const expectedSignature = crypto.createHmac("sha256", RAZORPAY_KEY_SECRET).update(`${razorpay_order_id}|${razorpay_payment_id}`).digest("hex");
+    const valid = expectedSignature.length === razorpay_signature.length && crypto.timingSafeEqual(Buffer.from(expectedSignature), Buffer.from(razorpay_signature));
+    if (!valid) {
+      console.error(`Razorpay signature mismatch for order ${razorpay_order_id}`);
+      return apiErr(res, 400, "SIGNATURE_INVALID", "Payment verification failed");
+    }
+
+    order.status = "success"; order.paymentId = razorpay_payment_id; await order.save();
+    const batch = await grantBatchAccess(order.batchId, order.userId);
+    await bot.sendMessage(parseInt(order.userId), `✅ <b>Payment Verified & Approved!</b>\n\nAccess to <b>${esc(batch?.name||order.batchId)}</b> unlocked! 🚀`, { parse_mode:"HTML", reply_markup:{ inline_keyboard:[[{text:"📚 Open App",web_app:{url:WEB_URL}}]] } }).catch(()=>{});
+    if (PAYMENT_GROUP_ID) bot.sendMessage(PAYMENT_GROUP_ID, `💸 <b>Razorpay Payment Received</b>\n\n👤 UID: <code>${esc(order.userId)}</code>\n📚 Batch: <b>${esc(batch?.name||order.batchId)}</b>\n💰 Amount: <b>₹${esc(String(order.amount))}</b>\n🔖 Razorpay Payment: <code>${esc(razorpay_payment_id)}</code>\n\n✅ <b>AUTO-APPROVED</b> (signature verified)`, { parse_mode:"HTML" }).catch(()=>{});
+    return apiOk(res, { verified: true, batchName: batch?.name||order.batchId }, { service: "razorpay" });
+  } catch (err) { console.error("Razorpay verify error:", err.message); apiErr(res, 500, "INTERNAL_ERROR", err.message); }
+});
+
+// ── Razorpay: webhook (redundant server-to-server confirmation) ──────────────
+// Optional but recommended: configure this URL (WEB_URL + /api/razorpay/webhook)
+// under Razorpay Dashboard → Settings → Webhooks, subscribed to "payment.captured".
+// This grants access even if the user closes the WebView right after paying,
+// before the Checkout.js success handler's /verify call reaches our server.
+// Idempotent with /verify — whichever arrives first wins, the other is a no-op.
+app.post("/api/razorpay/webhook", async (req, res) => {
+  try {
+    if (!RAZORPAY_WEBHOOK_SECRET) return res.status(200).send("ignored"); // not configured — ack so Razorpay stops retrying
+    const signature = req.headers["x-razorpay-signature"];
+    const expected = crypto.createHmac("sha256", RAZORPAY_WEBHOOK_SECRET).update(req.rawBody || Buffer.from(JSON.stringify(req.body))).digest("hex");
+    if (!signature || expected.length !== signature.length || !crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(signature))) {
+      console.error("Razorpay webhook signature mismatch");
+      return res.status(400).send("invalid signature");
+    }
+    const event = req.body;
+    if (event.event === "payment.captured") {
+      const payment = event.payload?.payment?.entity;
+      const orderId = payment?.order_id;
+      if (orderId) {
+        const order = await RazorpayOrder.findOne({ orderId });
+        if (order && order.status !== "success") {
+          order.status = "success"; order.paymentId = payment.id; await order.save();
+          const batch = await grantBatchAccess(order.batchId, order.userId);
+          await bot.sendMessage(parseInt(order.userId), `✅ <b>Payment Verified & Approved!</b>\n\nAccess to <b>${esc(batch?.name||order.batchId)}</b> unlocked! 🚀`, { parse_mode:"HTML", reply_markup:{ inline_keyboard:[[{text:"📚 Open App",web_app:{url:WEB_URL}}]] } }).catch(()=>{});
+          if (PAYMENT_GROUP_ID) bot.sendMessage(PAYMENT_GROUP_ID, `💸 <b>Razorpay Payment Received (webhook)</b>\n\n👤 UID: <code>${esc(order.userId)}</code>\n📚 Batch: <b>${esc(batch?.name||order.batchId)}</b>\n💰 Amount: <b>₹${esc(String(order.amount))}</b>\n🔖 Razorpay Payment: <code>${esc(payment.id)}</code>\n\n✅ <b>AUTO-APPROVED</b> (webhook verified)`, { parse_mode:"HTML" }).catch(()=>{});
+        }
+      }
+    }
+    res.status(200).send("ok");
+  } catch (err) { console.error("Razorpay webhook error:", err.message); res.status(500).send("error"); }
 });
 
 // ── Monetag SDK proxy ────────────────────────────────────────────────────────

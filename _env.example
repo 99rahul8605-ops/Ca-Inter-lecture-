@@ -25,8 +25,8 @@ LOGS_GROUP_ID=
 UPI_ID=
 # Payee name shown in the UPI app (pn= param). Falls back to a generic name if blank.
 UPI_NAME=
-# "bharatpe" (default) or "paytm" — selects which flow /api/config and the
-# payment-verification routes use.
+# "bharatpe" (default), "paytm" or "razorpay" — selects which flow /api/config
+# and the payment-verification routes use.
 PAYMENT_PROVIDER=bharatpe
 # API key for the BharatPe/devport order-status lookup (used to auto-verify
 # payments instead of calling Paytm's Order Status API directly). Only needed
@@ -42,6 +42,19 @@ PAYTM_INDUSTRY_TYPE=
 PAYTM_CALLBACK_URL=
 # "production" (default) or "staging"
 PAYTM_ENV=production
+
+# ── Payments — Razorpay (only needed when PAYMENT_PROVIDER=razorpay) ───────
+# Get these from Razorpay Dashboard → Settings → API Keys. Fully self-contained
+# — no DevPort dependency, unlike the Paytm flow above.
+RAZORPAY_KEY_ID=
+RAZORPAY_KEY_SECRET=
+# Optional but recommended — enables /api/razorpay/webhook as a redundant
+# server-to-server confirmation (grants access even if the user closes the app
+# right after paying, before the Checkout.js success handler's call lands).
+# You choose this value yourself (any strong random string) and enter the SAME
+# value in Razorpay Dashboard → Settings → Webhooks when adding the webhook
+# (URL: <WEB_URL>/api/razorpay/webhook, event: payment.captured).
+RAZORPAY_WEBHOOK_SECRET=
 
 # ── Support / contact ─────────────────────────────────────────────────────────
 # Shown as the "Contact Support" link in the app. Falls back to https://t.me/<bot username> if blank.
