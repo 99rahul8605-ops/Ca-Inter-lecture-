@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>EduBot</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
+<script src="https://checkout.razorpay.com/v1/checkout.js"></script>
 <!-- Monetag SDK is loaded dynamically (see loadMonetagSdk() in the main script)
      using the zone ID from /api/config (MONETAG_ZONE_ID env var), instead of
      being hardcoded here — the SDK's global function name is derived from the
@@ -2223,6 +2224,11 @@ function _monetagReady() {
   return !!_monetagZoneId && typeof window['show_' + _monetagZoneId] === 'function';
 }
 function _monetagShow(arg) {
+  // Pause every ad trigger (rewarded interstitial/popup/ambient in-app) while a
+  // payment/checkout is in progress, so an ad can never pop over the Razorpay
+  // checkout window or a manual UTR submission. See _paymentInProgress in the
+  // Payment Modal section (buyBatch()/closePayModal()) for where this is set.
+  if (window._paymentInProgress) return Promise.resolve();
   return window['show_' + _monetagZoneId](arg);
 }
 
@@ -2325,7 +2331,16 @@ function startAdBlockerMonitoring() {
     if (await _isAdBlockerActiveForUser()) document.getElementById('adBlockGate').classList.remove('hidden');
   };
   _adBlockerMonitorInterval = setInterval(recheck, 45000);
-  document.addEventListener('visibilitychange', function() { if (!document.hidden) recheck(); });
+  document.addEventListener('visibilitychange', function() {
+    if (!document.hidden) {
+      recheck();
+      // Safety net: if the payment modal got dismissed some other way (back
+      // button, app switch) without going through closePayModal(), don't leave
+      // ads paused forever.
+      var pm = document.getElementById('payModal');
+      if (pm && !pm.classList.contains('show')) window._paymentInProgress = false;
+    }
+  });
 }
 
 async function checkAdminAccess() {
@@ -2337,6 +2352,7 @@ async function checkAdminAccess() {
     if (config.upiName) window._upiName = config.upiName;
     if (config.contactLink) window._contactLink = config.contactLink;
     window._paymentProvider = config.paymentProvider || 'bharatpe';
+    window._razorpayKeyId = config.razorpayKeyId || '';
     // Store force-join requirement
     _fjRequired = !!config.forceJoinRequired;
     loadMonetagSdk(config.monetagZoneId || '11502469'); // fire-and-forget, don't block init()
@@ -2708,6 +2724,7 @@ function _renderManageLevel() {
         </div>
         <button class="edit-btn" ${upDisabled} onclick="moveSubject('${b._id}','${s._id}','up')"><i class="ti ti-arrow-up"></i></button>
         <button class="edit-btn" ${downDisabled} onclick="moveSubject('${b._id}','${s._id}','down')"><i class="ti ti-arrow-down"></i></button>
+        <button class="edit-btn" title="Copy to another batch" onclick="openCopySubject('${b._id}','${s._id}')"><i class="ti ti-copy"></i></button>
         <button class="edit-btn" onclick="openEdit('subject','${b._id}','${s._id}')"><i class="ti ti-pencil"></i></button>
         <button class="del-btn" onclick="delSubject('${b._id}','${s._id}')"><i class="ti ti-trash"></i></button>
       </div>`;
@@ -2731,6 +2748,7 @@ function _renderManageLevel() {
         </div>
         <button class="edit-btn" ${upDisabled} onclick="moveChapter('${b._id}','${s._id}','${c._id}','up')"><i class="ti ti-arrow-up"></i></button>
         <button class="edit-btn" ${downDisabled} onclick="moveChapter('${b._id}','${s._id}','${c._id}','down')"><i class="ti ti-arrow-down"></i></button>
+        <button class="edit-btn" title="Copy to another batch" onclick="openCopyChapter('${b._id}','${s._id}','${c._id}')"><i class="ti ti-copy"></i></button>
         <button class="edit-btn" onclick="openEdit('chapter','${b._id}','${s._id}','${c._id}')"><i class="ti ti-pencil"></i></button>
         <button class="del-btn" onclick="delChapter('${b._id}','${s._id}','${c._id}')"><i class="ti ti-trash"></i></button>
       </div>`;
@@ -2766,6 +2784,7 @@ function _renderManageLevel() {
               <div class="manage-item-sub">${u.name}</div>
             </div>
             <button class="edit-btn" onclick="openEdit('lecture','${b._id}','${s._id}','${ch._id}','${u._id}','${l._id}')"><i class="ti ti-pencil"></i></button>
+            <button class="edit-btn" title="Copy to another batch/chapter" onclick="openCopyLecture('${b._id}','${s._id}','${ch._id}','${u._id}','${l._id}')"><i class="ti ti-copy"></i></button>
             <button class="del-btn" onclick="delLecture('${b._id}','${s._id}','${ch._id}','${u._id}','${l._id}')"><i class="ti ti-trash"></i></button>
           </div>`;
         });
@@ -2783,6 +2802,7 @@ function _renderManageLevel() {
             <div class="manage-item-sub">${ch.name}</div>
           </div>
           <button class="edit-btn" onclick="openEdit('lecture','${b._id}','${s._id}','${ch._id}','','${l._id}')"><i class="ti ti-pencil"></i></button>
+          <button class="edit-btn" title="Copy to another batch/chapter" onclick="openCopyLecture('${b._id}','${s._id}','${ch._id}','','${l._id}')"><i class="ti ti-copy"></i></button>
           <button class="del-btn" onclick="delLecture('${b._id}','${s._id}','${ch._id}','','${l._id}')"><i class="ti ti-trash"></i></button>
         </div>`;
       });
@@ -3091,6 +3111,7 @@ function buyBatch(bid) {
   _paySsBase64 = null;
   _payOriginalPrice = b.price || 0;
   _payAppliedCoupon = null;
+  window._paymentInProgress = true; // pauses ad triggers until closePayModal()/checkout finishes — see _monetagShow()
 
   // Set batch info
   document.getElementById('payBatchName').textContent = b.name;
@@ -3102,10 +3123,12 @@ function buyBatch(bid) {
   document.getElementById('payUpiId').textContent = upi || 'Not configured';
 
   var isPaytm = window._paymentProvider === 'paytm';
-  document.getElementById('payBharatpeFlow').style.display = isPaytm ? 'none' : '';
+  var isRazorpay = window._paymentProvider === 'razorpay';
+  document.getElementById('payBharatpeFlow').style.display = (isPaytm || isRazorpay) ? 'none' : '';
   document.getElementById('payPaytmFlow').style.display = isPaytm ? '' : 'none';
+  document.getElementById('payRazorpayFlow').style.display = isRazorpay ? '' : 'none';
 
-  if (!isPaytm) {
+  if (!isPaytm && !isRazorpay) {
   // Generate QR via our own server (/api/payment-qr) — it builds the UPI link itself
   // (using the server's UPI_ID/UPI_NAME) and overlays public/logo.png in the center.
   var payNowBtn = document.getElementById('payNowBtn');
@@ -3135,6 +3158,11 @@ function buyBatch(bid) {
   csP.className = 'pay-coupon-status'; csP.textContent = '';
   var applyBtnP = document.getElementById('payCouponApplyBtnPaytm');
   if (applyBtnP) { applyBtnP.textContent = 'Apply'; applyBtnP.disabled = false; }
+  document.getElementById('payCouponInputRazorpay').value = '';
+  var csR = document.getElementById('payCouponStatusRazorpay');
+  csR.className = 'pay-coupon-status'; csR.textContent = '';
+  var applyBtnR = document.getElementById('payCouponApplyBtnRazorpay');
+  if (applyBtnR) { applyBtnR.textContent = 'Apply'; applyBtnR.disabled = false; }
 
   // Reset form
   document.getElementById('payTxnId').value = '';
@@ -3145,6 +3173,8 @@ function buyBatch(bid) {
   document.getElementById('paySubmitBtn').innerHTML = '<i class="ti ti-send"></i> Submit Payment Proof';
   var paytmBtn = document.getElementById('paySubmitBtnPaytm');
   if (paytmBtn) { paytmBtn.disabled = false; paytmBtn.innerHTML = '<i class="ti ti-credit-card"></i> Pay with Paytm'; }
+  var rzpBtn = document.getElementById('paySubmitBtnRazorpay');
+  if (rzpBtn) { rzpBtn.disabled = false; rzpBtn.innerHTML = '<i class="ti ti-credit-card"></i> Pay Now'; }
 
   document.getElementById('payModal').classList.add('show');
 }
@@ -3152,6 +3182,7 @@ function buyBatch(bid) {
 function closePayModal() {
   document.getElementById('payModal').classList.remove('show');
   _payBatchId = null; _paySsBase64 = null; _payAppliedCoupon = null;
+  window._paymentInProgress = false;
 }
 function closePayOutside(e) { if (e.target.id === 'payModal') closePayModal(); }
 
@@ -3298,6 +3329,110 @@ async function payWithPaytm() {
     btn.innerHTML = '<i class="ti ti-credit-card"></i> Pay with Paytm';
   }
 }
+
+async function applyCouponRazorpay() {
+  var code = document.getElementById('payCouponInputRazorpay').value.trim().toUpperCase();
+  var cs = document.getElementById('payCouponStatusRazorpay');
+  var btn = document.getElementById('payCouponApplyBtnRazorpay');
+  if (!code) { cs.className = 'pay-coupon-status error'; cs.textContent = 'Coupon code daalo!'; return; }
+  btn.disabled = true; btn.textContent = '...';
+  cs.className = 'pay-coupon-status'; cs.textContent = '';
+  try {
+    var r = await fetch('/api/coupons/validate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code, batchId: _payBatchId }) });
+    var d = await r.json();
+    if (!r.ok) {
+      _payAppliedCoupon = null;
+      cs.className = 'pay-coupon-status error'; cs.textContent = '❌ ' + (d.error || 'Invalid coupon');
+      document.getElementById('payAmount').textContent = _payOriginalPrice ? '₹' + _payOriginalPrice : 'Contact Admin';
+      document.getElementById('payAmount').className = 'pay-amount';
+    } else {
+      var disc = d.discountPct;
+      var final = Math.round(_payOriginalPrice * (1 - disc / 100));
+      _payAppliedCoupon = { code: d.code, discountPct: disc, finalAmount: final };
+      cs.className = 'pay-coupon-status success'; cs.textContent = '✅ ' + disc + '% off applied! You pay ₹' + final + ' instead of ₹' + _payOriginalPrice;
+      var amtEl = document.getElementById('payAmount');
+      amtEl.innerHTML = '<span class="pay-amount-original">₹' + _payOriginalPrice + '</span><span class="pay-amount-final">₹' + final + '</span>';
+      amtEl.className = '';
+      btn.textContent = '✓';
+    }
+  } catch(e) {
+    cs.className = 'pay-coupon-status error'; cs.textContent = '❌ Error validating coupon';
+  }
+  btn.disabled = false; if (btn.textContent === '...') btn.textContent = 'Apply';
+}
+
+// Kicks off official Razorpay Standard Checkout: asks our server to create a
+// Razorpay order, then opens the Checkout.js popup right here in the WebView (no
+// redirect). On success, Checkout.js's handler posts the payment_id/order_id/
+// signature to /api/razorpay/verify — access unlocks the moment that's confirmed.
+async function payWithRazorpay() {
+  if (!_payBatchId) return;
+  var btn = document.getElementById('paySubmitBtnRazorpay');
+  if (typeof Razorpay === 'undefined') { toast('Payment SDK could not load — check your connection', 'error'); return; }
+  btn.disabled = true;
+  btn.innerHTML = '<i class="ti ti-loader-2" style="animation:spin 0.8s linear infinite;display:inline-block"></i> Starting checkout...';
+  try {
+    var tgUser = tg && tg.initDataUnsafe && tg.initDataUnsafe.user;
+    if (!tgUser) throw new Error('Could not detect Telegram user');
+    var b = batches.find(x => x._id === _payBatchId);
+    var payload = {
+      batchId: _payBatchId,
+      userId: String(tgUser.id),
+      firstName: tgUser.first_name || '',
+      lastName: tgUser.last_name || '',
+      username: tgUser.username || '',
+      couponCode: _payAppliedCoupon ? _payAppliedCoupon.code : null,
+      discountPct: _payAppliedCoupon ? _payAppliedCoupon.discountPct : null,
+      finalAmount: _payAppliedCoupon ? _payAppliedCoupon.finalAmount : null,
+    };
+    var r = await fetch('/api/razorpay/create-order', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+    var d = await r.json();
+    if (!d.success) throw new Error((d.error && d.error.message) || 'Could not start checkout');
+    var data = d.data;
+
+    var rzp = new Razorpay({
+      key: data.keyId,
+      order_id: data.orderId,
+      amount: data.amount,
+      currency: data.currency,
+      name: 'Complete Payment',
+      description: b ? b.name : 'Batch Access',
+      prefill: { name: (tgUser.first_name || '') + (tgUser.last_name ? ' ' + tgUser.last_name : ''), contact: '', email: '' },
+      theme: { color: '#f59e0b' },
+      handler: async function (response) {
+        btn.innerHTML = '<i class="ti ti-loader-2" style="animation:spin 0.8s linear infinite;display:inline-block"></i> Verifying payment...';
+        try {
+          var vr = await fetch('/api/razorpay/verify', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(response) });
+          var vd = await vr.json();
+          if (!vd.success) throw new Error((vd.error && vd.error.message) || 'Verification failed');
+          toast('✅ Payment verified instantly! Access unlocked 🚀', 'success');
+          closePayModal();
+        } catch(e) {
+          toast('Payment received but verification failed — contact admin with your payment ID. (' + e.message + ')', 'error');
+        }
+        btn.disabled = false;
+        btn.innerHTML = '<i class="ti ti-credit-card"></i> Pay Now';
+      },
+      modal: {
+        ondismiss: function () {
+          btn.disabled = false;
+          btn.innerHTML = '<i class="ti ti-credit-card"></i> Pay Now';
+        }
+      }
+    });
+    rzp.on('payment.failed', function (response) {
+      toast('❌ Payment failed: ' + ((response.error && response.error.description) || 'Please try again'), 'error');
+      btn.disabled = false;
+      btn.innerHTML = '<i class="ti ti-credit-card"></i> Pay Now';
+    });
+    rzp.open();
+  } catch(e) {
+    toast('Error: ' + e.message, 'error');
+    btn.disabled = false;
+    btn.innerHTML = '<i class="ti ti-credit-card"></i> Pay Now';
+  }
+}
+
 
 // Builds the URL for our own /api/payment-qr endpoint (server builds the UPI link and
 // overlays public/logo.png). amount can be a number or null/0 (no am= param, generic QR).
@@ -3519,6 +3654,134 @@ async function delSubject(bid,sid){if(!confirm('Subject delete?'))return;try{awa
 async function moveSubject(bid,sid,direction){try{var updated=await apiFetch(`/api/batches/${bid}/subjects/${sid}/move`,'PATCH',{direction});var idx=batches.findIndex(x=>x._id===bid);if(idx!==-1)batches[idx]=updated;_renderManageLevel();}catch(e){toast('Could not reorder','error');}}
 async function moveChapter(bid,sid,cid,direction){try{var updated=await apiFetch(`/api/batches/${bid}/subjects/${sid}/chapters/${cid}/move`,'PATCH',{direction});var idx=batches.findIndex(x=>x._id===bid);if(idx!==-1)batches[idx]=updated;_renderManageLevel();}catch(e){toast('Could not reorder','error');}}
 async function delChapter(bid,sid,cid){if(!confirm('Chapter delete?'))return;try{await apiFetch(`/api/batches/${bid}/subjects/${sid}/chapters/${cid}`,'DELETE');var b=batches.find(x=>x._id===bid);var s=b&&b.subjects.find(x=>x._id===sid);if(s)s.chapters=s.chapters.filter(x=>x._id!==cid);populateAllSelects();_renderManageLevel();toast('Deleted!','success');}catch(e){toast('Error','error');}}
+
+var _ccState = { mode:null, bid:null, sid:null, cid:null, uid:null, lid:null };
+
+function openCopySubject(bid,sid) {
+  var b = batches.find(x=>x._id===bid);
+  var s = b && b.subjects.find(x=>x._id===sid);
+  _ccState = { mode:'subject', bid, sid, cid:null, uid:null, lid:null };
+  document.getElementById('ccModalTitle').textContent = 'Copy "' + (s ? s.name : 'Subject') + '"';
+  document.getElementById('ccModalHint').textContent = 'Yeh subject (saare chapters + units + lectures ke saath) as-it-is dusre batch me copy ho jayega.';
+  document.getElementById('ccSubjectGroup').style.display = 'none';
+  document.getElementById('ccChapterGroup').style.display = 'none';
+  document.getElementById('ccUnitGroup').style.display = 'none';
+  var tb = document.getElementById('ccTargetBatch');
+  tb.innerHTML = batches.map(x => `<option value="${x._id}">${x.name}</option>`).join('');
+  tb.value = bid;
+  document.getElementById('copyChapterModal').classList.add('show');
+}
+
+function openCopyChapter(bid,sid,cid) {
+  var b = batches.find(x=>x._id===bid);
+  var s = b && b.subjects.find(x=>x._id===sid);
+  var c = s && s.chapters.find(x=>x._id===cid);
+  _ccState = { mode:'chapter', bid, sid, cid, uid:null, lid:null };
+  document.getElementById('ccModalTitle').textContent = 'Copy "' + (c ? c.name : 'Chapter') + '"';
+  document.getElementById('ccModalHint').textContent = 'Yeh chapter (saare units + lectures ke saath) as-it-is dusre batch/subject me copy ho jayega.';
+  document.getElementById('ccSubjectGroup').style.display = '';
+  document.getElementById('ccChapterGroup').style.display = 'none';
+  document.getElementById('ccUnitGroup').style.display = 'none';
+  var tb = document.getElementById('ccTargetBatch');
+  tb.innerHTML = batches.map(x => `<option value="${x._id}">${x.name}</option>`).join('');
+  tb.value = bid;
+  _ccPopulateSubjects();
+  document.getElementById('copyChapterModal').classList.add('show');
+}
+
+function openCopyLecture(bid,sid,cid,uid,lid) {
+  var b = batches.find(x=>x._id===bid);
+  var s = b && b.subjects.find(x=>x._id===sid);
+  var c = s && s.chapters.find(x=>x._id===cid);
+  var u = uid ? (c && c.units.find(x=>x._id===uid)) : null;
+  var l = u ? u.lectures.find(x=>x._id===lid) : (c && c.lectures.find(x=>x._id===lid));
+  _ccState = { mode:'lecture', bid, sid, cid, uid: uid||null, lid };
+  document.getElementById('ccModalTitle').textContent = 'Copy "' + (l ? l.name : 'Lecture') + '"';
+  document.getElementById('ccModalHint').textContent = 'Yeh lecture as-it-is dusre batch/subject/chapter me copy ho jayega.';
+  document.getElementById('ccSubjectGroup').style.display = '';
+  document.getElementById('ccChapterGroup').style.display = '';
+  document.getElementById('ccUnitGroup').style.display = '';
+  var tb = document.getElementById('ccTargetBatch');
+  tb.innerHTML = batches.map(x => `<option value="${x._id}">${x.name}</option>`).join('');
+  tb.value = bid;
+  _ccPopulateSubjects();
+  document.getElementById('copyChapterModal').classList.add('show');
+}
+
+function _ccPopulateSubjects() {
+  var tb = document.getElementById('ccTargetBatch');
+  var ts = document.getElementById('ccTargetSubject');
+  var b = batches.find(x => x._id === tb.value);
+  if (_ccState.mode === 'subject') return;
+  if (!b || !b.subjects.length) { ts.innerHTML = '<option value="">No subjects — create one first</option>'; _ccPopulateChapters(); return; }
+  ts.innerHTML = b.subjects.map(s => `<option value="${s._id}">${s.icon||'📚'} ${s.name}</option>`).join('');
+  _ccPopulateChapters();
+}
+function _ccPopulateChapters() {
+  if (_ccState.mode !== 'lecture') return;
+  var tb = document.getElementById('ccTargetBatch');
+  var ts = document.getElementById('ccTargetSubject');
+  var tc = document.getElementById('ccTargetChapter');
+  var b = batches.find(x => x._id === tb.value);
+  var s = b && b.subjects.find(x => x._id === ts.value);
+  if (!s || !s.chapters.length) { tc.innerHTML = '<option value="">No chapters — create one first</option>'; _ccPopulateUnits(); return; }
+  tc.innerHTML = s.chapters.map(c => `<option value="${c._id}">${c.name}</option>`).join('');
+  _ccPopulateUnits();
+}
+function _ccPopulateUnits() {
+  if (_ccState.mode !== 'lecture') return;
+  var tb = document.getElementById('ccTargetBatch');
+  var ts = document.getElementById('ccTargetSubject');
+  var tc = document.getElementById('ccTargetChapter');
+  var tu = document.getElementById('ccTargetUnit');
+  var b = batches.find(x => x._id === tb.value);
+  var s = b && b.subjects.find(x => x._id === ts.value);
+  var c = s && s.chapters.find(x => x._id === tc.value);
+  var opts = '<option value="">— Direct lecture (no unit) —</option>';
+  if (c && c.units.length) opts += c.units.map(u => `<option value="${u._id}">${u.name}</option>`).join('');
+  tu.innerHTML = opts;
+}
+
+function closeCopyChapter() { document.getElementById('copyChapterModal').classList.remove('show'); _ccState = { mode:null, bid:null, sid:null, cid:null, uid:null, lid:null }; }
+function closeCopyChapterOutside(e) { if (e.target.id==='copyChapterModal') closeCopyChapter(); }
+
+async function submitCopyItem() {
+  var targetBatchId = document.getElementById('ccTargetBatch').value;
+  if (!targetBatchId) return toast('Target batch select karo!', 'error');
+  var { mode, bid, sid, cid, uid, lid } = _ccState;
+  var btn = document.getElementById('ccCopyBtn');
+  btn.disabled = true;
+  try {
+    var url, body;
+    if (mode === 'subject') {
+      url = `/api/batches/${bid}/subjects/${sid}/copy-to`;
+      body = { targetBatchId };
+    } else if (mode === 'chapter') {
+      var targetSubjectId = document.getElementById('ccTargetSubject').value;
+      if (!targetSubjectId) { toast('Target subject select karo!', 'error'); btn.disabled = false; return; }
+      url = `/api/batches/${bid}/subjects/${sid}/chapters/${cid}/copy-to`;
+      body = { targetBatchId, targetSubjectId };
+    } else if (mode === 'lecture') {
+      var targetSubjectId = document.getElementById('ccTargetSubject').value;
+      var targetChapterId = document.getElementById('ccTargetChapter').value;
+      var targetUnitId = document.getElementById('ccTargetUnit').value || undefined;
+      if (!targetSubjectId || !targetChapterId) { toast('Target subject/chapter select karo!', 'error'); btn.disabled = false; return; }
+      url = uid
+        ? `/api/batches/${bid}/subjects/${sid}/chapters/${cid}/units/${uid}/lectures/${lid}/copy-to`
+        : `/api/batches/${bid}/subjects/${sid}/chapters/${cid}/lectures/${lid}/copy-to`;
+      body = { targetBatchId, targetSubjectId, targetChapterId, targetUnitId };
+    } else { btn.disabled = false; return; }
+
+    var r = await apiFetch(url, 'POST', body);
+    var idx = batches.findIndex(x => x._id === targetBatchId);
+    if (idx !== -1) batches[idx] = r.batch;
+    populateAllSelects();
+    closeCopyChapter();
+    toast('✅ Copy ho gaya!', 'success');
+    _renderManageLevel();
+  } catch(e) { toast('Error: ' + e.message, 'error'); }
+  btn.disabled = false;
+}
 async function delUnit(bid,sid,cid,uid){if(!confirm('Unit delete?'))return;try{await apiFetch(`/api/batches/${bid}/subjects/${sid}/chapters/${cid}/units/${uid}`,'DELETE');var b=batches.find(x=>x._id===bid);var s=b&&b.subjects.find(x=>x._id===sid);var c=s&&s.chapters.find(x=>x._id===cid);if(c)c.units=c.units.filter(x=>x._id!==uid);populateAllSelects();_renderManageLevel();toast('Deleted!','success');}catch(e){toast('Error','error');}}
 async function delLecture(bid,sid,cid,uid,lid){if(!confirm('Lecture delete?'))return;try{
   var url = uid ? `/api/batches/${bid}/subjects/${sid}/chapters/${cid}/units/${uid}/lectures/${lid}` : `/api/batches/${bid}/subjects/${sid}/chapters/${cid}/lectures/${lid}`;
@@ -4861,6 +5124,25 @@ body.light-mode .lec-mini-notes{background:var(--surface2);color:var(--text)}
           <i class="ti ti-credit-card"></i> Pay with Paytm
         </button>
       </div>
+
+      <!-- Razorpay flow: official Checkout.js popup, auto-approves on verified signature -->
+      <div id="payRazorpayFlow" style="display:none">
+        <!-- Coupon Code -->
+        <div style="margin-bottom:14px">
+          <label class="form-label" style="margin-bottom:5px;display:block">🎟 Coupon Code (optional)</label>
+          <div class="pay-coupon-row">
+            <input class="pay-coupon-input" id="payCouponInputRazorpay" placeholder="ENTER CODE" maxlength="30" oninput="this.value=this.value.toUpperCase()">
+            <button class="pay-coupon-btn" id="payCouponApplyBtnRazorpay" onclick="applyCouponRazorpay()">Apply</button>
+          </div>
+          <div class="pay-coupon-status" id="payCouponStatusRazorpay"></div>
+        </div>
+        <div class="pay-steps">
+          Pay securely via Card, UPI, Netbanking or Wallet — a Razorpay checkout window will open. Access unlocks automatically the moment your payment is confirmed, no screenshot needed.
+        </div>
+        <button class="pay-submit-btn" id="paySubmitBtnRazorpay" onclick="payWithRazorpay()">
+          <i class="ti ti-credit-card"></i> Pay Now
+        </button>
+      </div>
     </div>
   </div>
 </div>
@@ -4925,6 +5207,21 @@ body.light-mode .lec-mini-notes{background:var(--surface2);color:var(--text)}
     <div class="modal-title"><i class="ti ti-pencil" style="color:var(--accent)"></i><span id="editModalTitle">Edit</span></div>
     <div id="editModalBody"></div>
     <button class="btn-add" id="editSaveBtn" onclick="saveEdit()" style="margin-top:8px"><i class="ti ti-check"></i> Save</button>
+  </div>
+</div>
+
+<!-- Copy (Chapter/Subject/Lecture) Modal -->
+<div class="modal-overlay" id="copyChapterModal" onclick="closeCopyChapterOutside(event)">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <button class="modal-close" onclick="closeCopyChapter()"><i class="ti ti-x"></i></button>
+    <div class="modal-title"><i class="ti ti-copy" style="color:var(--accent)"></i><span id="ccModalTitle">Copy</span></div>
+    <div style="font-size:12px;color:var(--text2);margin-bottom:12px;line-height:1.5" id="ccModalHint">Yeh as-it-is dusre batch me copy ho jayega.</div>
+    <div class="form-group"><label class="form-label">Target Batch</label><select class="form-select" id="ccTargetBatch" onchange="_ccPopulateSubjects()"></select></div>
+    <div class="form-group" id="ccSubjectGroup"><label class="form-label">Target Subject</label><select class="form-select" id="ccTargetSubject" onchange="_ccPopulateChapters()"></select></div>
+    <div class="form-group" id="ccChapterGroup" style="display:none"><label class="form-label">Target Chapter</label><select class="form-select" id="ccTargetChapter" onchange="_ccPopulateUnits()"></select></div>
+    <div class="form-group" id="ccUnitGroup" style="display:none"><label class="form-label">Target Unit</label><select class="form-select" id="ccTargetUnit"></select></div>
+    <button class="btn-add" id="ccCopyBtn" onclick="submitCopyItem()" style="margin-top:8px"><i class="ti ti-copy"></i> Copy</button>
   </div>
 </div>
 
