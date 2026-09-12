@@ -447,6 +447,19 @@ router.patch("/batches/:bid/subjects/:sid/edit", verifyAdmin, async (req, res) =
 });
 
 // Re-arrange a subject's position within the batch — { direction: 'up' | 'down' }
+// Deep-clone any subdocument as plain data, stripping every _id so Mongoose
+// mints brand-new ones for it and everything nested inside it (used by the
+// chapter/subject/lecture "copy to another batch" endpoints below).
+function stripIds(obj) {
+  const clone = JSON.parse(JSON.stringify(obj));
+  const strip = (o) => {
+    if (Array.isArray(o)) { o.forEach(strip); return; }
+    if (o && typeof o === "object") { delete o._id; Object.values(o).forEach(strip); }
+  };
+  strip(clone);
+  return clone;
+}
+
 router.patch("/batches/:bid/subjects/:sid/move", verifyAdmin, async (req, res) => {
   try {
     const batch = await Batch.findById(req.params.bid);
@@ -462,6 +475,30 @@ router.patch("/batches/:bid/subjects/:sid/move", verifyAdmin, async (req, res) =
     await batch.save();
     db.batch.upsert(batch.toObject());
     res.json(batch);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Copy an entire subject (with all its chapters + units + lectures) AS-IS into another batch.
+// Body: { targetBatchId }
+router.post("/batches/:bid/subjects/:sid/copy-to", verifyAdmin, async (req, res) => {
+  try {
+    const { targetBatchId } = req.body;
+    if (!targetBatchId) return res.status(400).json({ error: "targetBatchId required" });
+
+    const srcBatch = await Batch.findById(req.params.bid);
+    const srcSubj = srcBatch && srcBatch.subjects.id(req.params.sid);
+    if (!srcSubj) return res.status(404).json({ error: "Source subject not found" });
+
+    const destBatch = String(targetBatchId) === String(req.params.bid) ? srcBatch : await Batch.findById(targetBatchId);
+    if (!destBatch) return res.status(404).json({ error: "Target batch not found" });
+
+    const clonedSubject = stripIds(srcSubj.toObject());
+    clonedSubject.order = destBatch.subjects.length;
+
+    destBatch.subjects.push(clonedSubject);
+    await destBatch.save();
+    db.batch.upsert(destBatch.toObject());
+    res.json({ success: true, batch: destBatch });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -522,6 +559,35 @@ router.patch("/batches/:bid/subjects/:sid/chapters/:cid/move", verifyAdmin, asyn
     await batch.save();
     db.batch.upsert(batch.toObject());
     res.json(batch);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Copy a chapter (with all its units + lectures) AS-IS into another batch/subject.
+// Body: { targetBatchId, targetSubjectId }
+router.post("/batches/:bid/subjects/:sid/chapters/:cid/copy-to", verifyAdmin, async (req, res) => {
+  try {
+    const { targetBatchId, targetSubjectId } = req.body;
+    if (!targetBatchId || !targetSubjectId) return res.status(400).json({ error: "targetBatchId and targetSubjectId required" });
+
+    const srcBatch = await Batch.findById(req.params.bid);
+    const srcSubj = srcBatch && srcBatch.subjects.id(req.params.sid);
+    const srcChap = srcSubj && srcSubj.chapters.id(req.params.cid);
+    if (!srcChap) return res.status(404).json({ error: "Source chapter not found" });
+
+    const destBatch = String(targetBatchId) === String(req.params.bid) ? srcBatch : await Batch.findById(targetBatchId);
+    if (!destBatch) return res.status(404).json({ error: "Target batch not found" });
+    const destSubj = destBatch.subjects.id(targetSubjectId);
+    if (!destSubj) return res.status(404).json({ error: "Target subject not found" });
+
+    // Deep-clone the chapter as plain data, stripping every _id so Mongoose
+    // mints brand-new ones for the chapter, its units, and every lecture.
+    const clonedChapter = stripIds(srcChap.toObject());
+    clonedChapter.order = destSubj.chapters.length;
+
+    destSubj.chapters.push(clonedChapter);
+    await destBatch.save();
+    db.batch.upsert(destBatch.toObject());
+    res.json({ success: true, batch: destBatch });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -613,6 +679,37 @@ router.patch("/batches/:bid/subjects/:sid/chapters/:cid/lectures/:lid/edit", ver
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// Copy a single chapter-level lecture AS-IS into another batch/subject/chapter (or unit).
+// Body: { targetBatchId, targetSubjectId, targetChapterId, targetUnitId? }
+router.post("/batches/:bid/subjects/:sid/chapters/:cid/lectures/:lid/copy-to", verifyAdmin, async (req, res) => {
+  try {
+    const { targetBatchId, targetSubjectId, targetChapterId, targetUnitId } = req.body;
+    if (!targetBatchId || !targetSubjectId || !targetChapterId) return res.status(400).json({ error: "targetBatchId, targetSubjectId and targetChapterId required" });
+
+    const srcBatch = await Batch.findById(req.params.bid);
+    const srcSubj = srcBatch && srcBatch.subjects.id(req.params.sid);
+    const srcChap = srcSubj && srcSubj.chapters.id(req.params.cid);
+    const srcLec = srcChap && srcChap.lectures.id(req.params.lid);
+    if (!srcLec) return res.status(404).json({ error: "Source lecture not found" });
+
+    const destBatch = String(targetBatchId) === String(req.params.bid) ? srcBatch : await Batch.findById(targetBatchId);
+    if (!destBatch) return res.status(404).json({ error: "Target batch not found" });
+    const destSubj = destBatch.subjects.id(targetSubjectId);
+    const destChap = destSubj && destSubj.chapters.id(targetChapterId);
+    if (!destChap) return res.status(404).json({ error: "Target chapter not found" });
+    const destList = targetUnitId ? (destChap.units.id(targetUnitId) || {}).lectures : destChap.lectures;
+    if (!destList) return res.status(404).json({ error: "Target unit not found" });
+
+    const clonedLecture = stripIds(srcLec.toObject());
+    clonedLecture.order = destList.length;
+    destList.push(clonedLecture);
+
+    await destBatch.save();
+    db.batch.upsert(destBatch.toObject());
+    res.json({ success: true, batch: destBatch });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ── Lectures (unit-level) ─────────────────────────────────────────────────────
 
 router.post("/batches/:bid/subjects/:sid/chapters/:cid/units/:uid/lectures", verifyAdmin, async (req, res) => {
@@ -659,6 +756,38 @@ router.patch("/batches/:bid/subjects/:sid/chapters/:cid/units/:uid/lectures/:lid
     await batch.save();
     db.batch.upsert(batch.toObject());
     res.json(batch);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Copy a single unit-level lecture AS-IS into another batch/subject/chapter (or unit).
+// Body: { targetBatchId, targetSubjectId, targetChapterId, targetUnitId? }
+router.post("/batches/:bid/subjects/:sid/chapters/:cid/units/:uid/lectures/:lid/copy-to", verifyAdmin, async (req, res) => {
+  try {
+    const { targetBatchId, targetSubjectId, targetChapterId, targetUnitId } = req.body;
+    if (!targetBatchId || !targetSubjectId || !targetChapterId) return res.status(400).json({ error: "targetBatchId, targetSubjectId and targetChapterId required" });
+
+    const srcBatch = await Batch.findById(req.params.bid);
+    const srcSubj = srcBatch && srcBatch.subjects.id(req.params.sid);
+    const srcChap = srcSubj && srcSubj.chapters.id(req.params.cid);
+    const srcUnit = srcChap && srcChap.units.id(req.params.uid);
+    const srcLec = srcUnit && srcUnit.lectures.id(req.params.lid);
+    if (!srcLec) return res.status(404).json({ error: "Source lecture not found" });
+
+    const destBatch = String(targetBatchId) === String(req.params.bid) ? srcBatch : await Batch.findById(targetBatchId);
+    if (!destBatch) return res.status(404).json({ error: "Target batch not found" });
+    const destSubj = destBatch.subjects.id(targetSubjectId);
+    const destChap = destSubj && destSubj.chapters.id(targetChapterId);
+    if (!destChap) return res.status(404).json({ error: "Target chapter not found" });
+    const destList = targetUnitId ? (destChap.units.id(targetUnitId) || {}).lectures : destChap.lectures;
+    if (!destList) return res.status(404).json({ error: "Target unit not found" });
+
+    const clonedLecture = stripIds(srcLec.toObject());
+    clonedLecture.order = destList.length;
+    destList.push(clonedLecture);
+
+    await destBatch.save();
+    db.batch.upsert(destBatch.toObject());
+    res.json({ success: true, batch: destBatch });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
