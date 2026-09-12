@@ -581,14 +581,21 @@ async function deleteMessageWithRetry(bot, chatId, messageId, retries = 3, delay
 const MAX_ACTIVE_VIDEOS = 3;
 
 async function scheduleDelete(bot, chatId, messageId, deleteAt) {
-  const id = db.generateId();
+  const id = db.generateId(); // 24-hex string — reused as the Mongo _id below too, so
+  // SQLite and Mongo always agree on identity. Without this, a resync (e.g. a
+  // redeploy where SQLite's disk persists) would give the Mongo copy a brand new
+  // _id and re-insert it as a DUPLICATE row instead of recognizing it as already
+  // present — which is exactly what was silently inflating the active-video count
+  // and causing way more than 1 eviction per new lecture call.
   db.pendingDelete.create({ id, chat_id: chatId, message_id: messageId, delete_at: deleteAt });
-  PendingDelete.create({ chat_id: chatId, message_id: messageId, delete_at: deleteAt }).catch(() => {});
+  PendingDelete.create({ _id: id, chat_id: chatId, message_id: messageId, delete_at: deleteAt }).catch(() => {});
   const delay = Math.max(0, new Date(deleteAt) - Date.now());
   setTimeout(async () => {
     try { await deleteMessageWithRetry(bot, chatId, messageId); } catch (err) { console.error("Auto DM deletion error:", err.message); }
+    // deleteMany (not deleteOne) — cleans up ALL rows for this message, including
+    // any leftover duplicate from before the _id fix above went live.
     db.pendingDelete.deleteByChatMsg(chatId, messageId);
-    PendingDelete.deleteOne({ chat_id: chatId, message_id: messageId }).catch(() => {});
+    PendingDelete.deleteMany({ chat_id: chatId, message_id: messageId }).catch(() => {});
   }, delay);
   // Returns how many older videos got evicted by the cap below, so the caller
   // can fold that into the SAME "auto-deletes in 6 hours" message instead of
@@ -604,13 +611,22 @@ async function scheduleDelete(bot, chatId, messageId, deleteAt) {
 // the number evicted (0 if none) — no message sent here, callers combine this
 // into their own single "video sent" notice (see evictionNotice() below).
 async function enforceActiveVideoCap(bot, chatId) {
-  const active = db.pendingDelete.getByChatId(chatId).sort((a, b) => a.delete_at - b.delete_at);
+  const raw = db.pendingDelete.getByChatId(chatId);
+  // De-dupe by message_id — any already-existing duplicate rows left over from
+  // before the _id fix above (or any future resync edge case) must never be
+  // double-counted as two separate "active videos".
+  const seen = new Map();
+  for (const p of raw) if (!seen.has(p.message_id)) seen.set(p.message_id, p);
+  const active = [...seen.values()].sort((a, b) => a.delete_at - b.delete_at);
   const excess = active.length - MAX_ACTIVE_VIDEOS;
   for (let i = 0; i < excess; i++) {
     const p = active[i];
     try { await deleteMessageWithRetry(bot, chatId, p.message_id); } catch (err) { console.error("Active-video-cap eviction error:", err.message); }
-    db.pendingDelete.deleteById(p._id);
-    PendingDelete.deleteOne({ chat_id: chatId, message_id: p.message_id }).catch(() => {});
+    // deleteByChatMsg/deleteMany — removes EVERY row for this message (not just
+    // the one matched by its own id), so any lingering duplicate gets cleaned up
+    // too instead of being recounted on the next call.
+    db.pendingDelete.deleteByChatMsg(chatId, p.message_id);
+    PendingDelete.deleteMany({ chat_id: chatId, message_id: p.message_id }).catch(() => {});
   }
   return Math.max(0, excess);
 }
@@ -675,9 +691,9 @@ async function stampMongoDeliveredAt(fileRecordId, chatId, value) {
 // job) so a bot restart doesn't lose the timer and leave the chatId stuck in
 // delivered_to forever — which was blocking re-requests after 6 hours.
 async function scheduleUndeliver(fileRecordId, code, chatId, undeliverAt) {
-  const id = db.generateId();
+  const id = db.generateId(); // reused as Mongo _id below — see scheduleDelete() for why
   db.pendingUndeliver.create({ id, file_record_id: fileRecordId, code, chat_id: chatId, undeliver_at: undeliverAt });
-  PendingUndeliver.create({ file_record_id: fileRecordId, code, chat_id: chatId, undeliver_at: undeliverAt })
+  PendingUndeliver.create({ _id: id, file_record_id: fileRecordId, code, chat_id: chatId, undeliver_at: undeliverAt })
     .catch(err => console.error('PendingUndeliver mongo create error:', err.message));
   const delay = Math.max(0, new Date(undeliverAt) - Date.now());
   setTimeout(() => {
@@ -687,7 +703,7 @@ async function scheduleUndeliver(fileRecordId, code, chatId, undeliverAt) {
     FileRecord.updateOne({ _id: fileRecordId }, { $pull: { delivered_to: chatId } }).catch(() => {});
     stampMongoDeliveredAt(fileRecordId, chatId, null);
     db.pendingUndeliver.deleteById(id);
-    PendingUndeliver.deleteOne({ file_record_id: fileRecordId, chat_id: chatId }).catch(() => {});
+    PendingUndeliver.deleteMany({ file_record_id: fileRecordId, chat_id: chatId }).catch(() => {});
   }, delay);
 }
 
