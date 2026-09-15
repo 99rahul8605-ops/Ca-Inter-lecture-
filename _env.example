@@ -56,6 +56,20 @@ RAZORPAY_KEY_SECRET=
 # (URL: <WEB_URL>/api/razorpay/webhook, event: payment.captured).
 RAZORPAY_WEBHOOK_SECRET=
 
+# ── Ads-Free Plan ────────────────────────────────────────────────────────────
+# Starting/fallback prices (INR) for the two Ads-Free durations, sold via
+# whichever PAYMENT_PROVIDER is active above. These are only used the very
+# first time (before an admin ever sets a price) — once set, use the bot
+# command below to change the LIVE price with no .env edit or restart needed:
+#   /setadsfreeprice weekly 25
+#   /setadsfreeprice monthly 70
+#   /setadsfreeprice   (no args — shows current prices)
+# Manually-renewed (no auto-debit) — a user pays once, gets the corresponding
+# number of ad-free days, and can renew any time before/after it lapses
+# (renewing early stacks on top of remaining time, never wastes it).
+ADS_FREE_WEEKLY_PRICE=20
+ADS_FREE_MONTHLY_PRICE=60
+
 # ── Support / contact ─────────────────────────────────────────────────────────
 # Shown as the "Contact Support" link in the app. Falls back to https://t.me/<bot username> if blank.
 CONTACT_LINK=

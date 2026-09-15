@@ -314,6 +314,71 @@ const dailyLimitSchema = new mongoose.Schema({ userId: { type: Number, required:
 const DailyVideoLimit = mongoose.model("DailyVideoLimit", dailyLimitSchema);
 const DAILY_VIDEO_LIMIT = 10;
 
+// ── Ads-Free Plan ─────────────────────────────────────────────────────────────
+// Manually-renewed (not auto-recurring debit) subscription that turns off every
+// ad in the app for that user — the ambient in-app interstitial, the "every 3rd
+// lecture click shows an ad" step, and the ad-blocker wall. Completely separate
+// from batch/premium access: an Ads-Free subscriber still has to buy or unlock
+// a premium batch the normal way — this plan only removes annoyance-ads, it
+// never substitutes for the deliberate "watch an ad to earn temporary batch
+// access" reward flow, which stays unchanged for everyone (ads-free users
+// included, if they choose to use it).
+// Two durations are sold, each through the SAME payment flow (BharatPe/Paytm/
+// Razorpay, whichever PAYMENT_PROVIDER is active) as batches, by passing one of
+// these two sentinels as the "batchId" — see getProductInfo()/grantBatchAccess()
+// below for how that's threaded through with zero changes to the 5 existing
+// grant call sites.
+// "days" are fixed (1 week / 1 month); "price" is admin-editable at runtime via
+// the /setadsfreeprice bot command — see getAdsFreePlans() below, which is what
+// everything actually calls (this raw map only pairs each plan's fixed
+// metadata with the settings key that holds its live, possibly-overridden
+// price, so a price change takes effect instantly with no redeploy/restart).
+const ADS_FREE_PLAN_META = {
+  ADSFREEWEEKLY: { label: "Ads-Free Plan (1 week)",  days: 7,  settingsKey: "adsFreePrice_weekly",  envDefault: () => Number(process.env.ADS_FREE_WEEKLY_PRICE  || 20) },
+  ADSFREEPLAN:   { label: "Ads-Free Plan (1 month)", days: 30, settingsKey: "adsFreePrice_monthly", envDefault: () => Number(process.env.ADS_FREE_MONTHLY_PRICE || 60) },
+};
+// Reads the live plans map. Never cache this — call it fresh each time, it's
+// a single cheap SQLite read per plan.
+function getAdsFreePlans() {
+  const out = {};
+  for (const [id, meta] of Object.entries(ADS_FREE_PLAN_META)) {
+    out[id] = { label: meta.label, days: meta.days, price: Number(db.settings.get(meta.settingsKey, meta.envDefault())) };
+  }
+  return out;
+}
+const adsFreeSchema = new mongoose.Schema({ userId: { type: String, required: true, unique: true }, expiresAt: { type: Date, required: true } });
+const AdsFreeSubscription = mongoose.model("AdsFreeSubscription", adsFreeSchema);
+
+// Extends (or starts) a user's Ads-Free subscription by `days`, stacking on top
+// of any still-active remaining time rather than resetting it — so renewing a
+// few days early never wastes what's left. Returns the new expiry Date.
+async function grantAdsFreeAccess(userId, days) {
+  const uid = String(userId);
+  const existing = db.adsFree.find(uid);
+  const now = Date.now();
+  const base = (existing && existing.expiresAt > now) ? existing.expiresAt : now;
+  const expiresAt = new Date(base + days * 24 * 60 * 60 * 1000);
+  db.adsFree.upsert({ userId: uid, expiresAt });
+  AdsFreeSubscription.findOneAndUpdate({ userId: uid }, { userId: uid, expiresAt }, { upsert: true }).catch(() => {});
+  return expiresAt;
+}
+
+function getAdsFreeStatus(userId) {
+  const rec = db.adsFree.find(String(userId));
+  const active = !!(rec && rec.expiresAt > Date.now());
+  return { active, expiresAt: rec ? new Date(rec.expiresAt) : null };
+}
+
+// Resolves a "product" (a real batch, or an Ads-Free plan sentinel) to a
+// display name + price, used wherever a payment flow needs to show/charge an
+// amount without caring which of the two it actually is.
+function getProductInfo(batchId) {
+  const plans = getAdsFreePlans();
+  if (plans[batchId]) return { name: plans[batchId].label, price: plans[batchId].price };
+  const b = db.batch.getOne(batchId);
+  return { name: b ? b.name : batchId, price: b && b.price != null ? Number(b.price) : null };
+}
+
 // ── Giveaway ──────────────────────────────────────────────────────────────────
 // Self-contained: doesn't touch the referral/points system at all, so it can't
 // break existing referral counts. Invite tracking uses its own deep-link prefix
@@ -760,8 +825,16 @@ async function verifyBharatPePayment(utr) {
 
 // Shared by both auto-approval (BharatPe-verified) and manual admin approval —
 // grants a user access to a batch in both Mongo (source of truth) and SQLite
-// (fast local reads).
+// (fast local reads). Also transparently handles the Ads-Free plan sentinels
+// (see getAdsFreePlans() above) so every existing caller — BharatPe admin
+// approval, Paytm callback, Razorpay verify/webhook — supports selling either
+// Ads-Free duration for free, with no changes needed at any of those call sites.
 async function grantBatchAccess(batchId, targetUserId) {
+  const adsFreePlans = getAdsFreePlans();
+  if (adsFreePlans[batchId]) {
+    const expiresAt = await grantAdsFreeAccess(targetUserId, adsFreePlans[batchId].days);
+    return { _id: batchId, name: `Ads-Free Plan (active till ${expiresAt.toLocaleDateString("en-IN")})` };
+  }
   const Batch = require("./models/Course");
   const batch = await Batch.findById(batchId);
   if (batch) {
@@ -854,7 +927,17 @@ app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 app.get("/health", (req, res) => res.json({ status: "ok", uptime: process.uptime(), mongo: mongoose.connection.readyState===1?"connected":"disconnected", sqlite: "active" }));
 app.get("/api/config", (req, res) => {
   const fj = (process.env.FORCE_JOIN_CHANNELS||"").split(",").map(s=>s.trim()).filter(Boolean);
-  res.json({ ownerId: OWNER_ID, botUsername: BOT_USERNAME||"", forceJoinRequired: fj.length>0, upiId: UPI_ID||"", upiName: UPI_NAME||"", contactLink: CONTACT_LINK||`https://t.me/${BOT_USERNAME}`, paymentProvider: PAYMENT_PROVIDER, razorpayKeyId: RAZORPAY_KEY_ID||"", monetagZoneId: MONETAG_ZONE_ID });
+  const adsFreePlans = getAdsFreePlans();
+  res.json({ ownerId: OWNER_ID, botUsername: BOT_USERNAME||"", forceJoinRequired: fj.length>0, upiId: UPI_ID||"", upiName: UPI_NAME||"", contactLink: CONTACT_LINK||`https://t.me/${BOT_USERNAME}`, paymentProvider: PAYMENT_PROVIDER, razorpayKeyId: RAZORPAY_KEY_ID||"", monetagZoneId: MONETAG_ZONE_ID, adsFreeWeeklyPrice: adsFreePlans.ADSFREEWEEKLY.price, adsFreeMonthlyPrice: adsFreePlans.ADSFREEPLAN.price });
+});
+
+// Whether this user currently has an active Ads-Free subscription, and when it
+// expires. Frontend polls/caches this at init to decide whether to skip ads.
+app.get("/api/adsfree/status", (req, res) => {
+  const userId = req.query.userId;
+  if (!userId) return apiErr(res, 400, "MISSING_FIELDS", "userId is required");
+  const status = getAdsFreeStatus(userId);
+  return apiOk(res, status, { service: "adsfree" });
 });
 
 // Generates the payment UPI QR server-side (so it's a real, shareable/downloadable HTTPS
@@ -915,10 +998,10 @@ app.post("/api/pay-request", async (req, res) => {
   try {
     const { batchId, userId, firstName, lastName, username, txnId, screenshotBase64, couponCode, discountPct, finalAmount } = req.body;
     if (!batchId || !txnId) return res.status(400).json({ error: "Missing fields" });
-    const batchData = db.batch.getOne(batchId);
-    const batchName = batchData ? batchData.name : batchId;
-    const origPrice = batchData?.price ? `₹${batchData.price}` : "N/A";
-    const expectedAmount = finalAmount != null ? Number(finalAmount) : (batchData?.price != null ? Number(batchData.price) : null);
+    const info = getProductInfo(batchId);
+    const batchName = info.name;
+    const origPrice = info.price != null ? `₹${info.price}` : "N/A";
+    const expectedAmount = finalAmount != null ? Number(finalAmount) : (info.price != null ? Number(info.price) : null);
     let priceLine = `💰 Amount: <b>${esc(origPrice)}</b>`;
     if (couponCode && discountPct && finalAmount!=null) priceLine = `💰 Original: <b>${esc(origPrice)}</b>\n🎟 Coupon: <code>${esc(couponCode)}</code> (${esc(String(discountPct))}% off)\n✅ Final: <b>₹${esc(String(finalAmount))}</b>`;
     if (!PAYMENT_GROUP_ID) return res.status(500).json({ error: "PAYMENT_GROUP_ID not configured" });
@@ -983,8 +1066,7 @@ app.post("/api/paytm/initiate", async (req, res) => {
     if (!PaytmChecksum || !PAYTM_MID || !PAYTM_MERCHANT_KEY) return apiErr(res, 500, "NOT_CONFIGURED", "Paytm not configured (missing PAYTM_MID/PAYTM_MERCHANT_KEY or paytmchecksum package)");
     const { batchId, userId, firstName, lastName, username, couponCode, discountPct, finalAmount } = req.body;
     if (!batchId || !userId) return apiErr(res, 400, "MISSING_FIELDS", "batchId and userId are required");
-    const batchData = db.batch.getOne(batchId);
-    const amount = finalAmount != null ? Number(finalAmount) : (batchData?.price != null ? Number(batchData.price) : null);
+    const amount = finalAmount != null ? Number(finalAmount) : getProductInfo(batchId).price;
     if (!amount || amount <= 0) return apiErr(res, 400, "INVALID_AMOUNT", "Could not determine a valid amount for this batch");
 
     const orderId = `ORD${Date.now()}${Math.floor(Math.random()*1000)}`;
@@ -1048,8 +1130,7 @@ app.post("/api/razorpay/create-order", async (req, res) => {
     if (!razorpayClient) return apiErr(res, 500, "NOT_CONFIGURED", "Razorpay not configured (missing RAZORPAY_KEY_ID/RAZORPAY_KEY_SECRET or razorpay package)");
     const { batchId, userId, firstName, lastName, username, couponCode, discountPct, finalAmount } = req.body;
     if (!batchId || !userId) return apiErr(res, 400, "MISSING_FIELDS", "batchId and userId are required");
-    const batchData = db.batch.getOne(batchId);
-    const amount = finalAmount != null ? Number(finalAmount) : (batchData?.price != null ? Number(batchData.price) : null);
+    const amount = finalAmount != null ? Number(finalAmount) : getProductInfo(batchId).price;
     if (!amount || amount <= 0) return apiErr(res, 400, "INVALID_AMOUNT", "Could not determine a valid amount for this batch");
 
     const rpOrder = await razorpayClient.orders.create({
@@ -2077,6 +2158,74 @@ async function startBot() {
       await bot.sendMessage(chatId, `✅ Global daily spin limit set to <b>${count}</b> for all users.\n\nUsers with a personal /addspins adjustment will still get that on top of this new number.`, { parse_mode: "HTML" });
     } catch (err) {
       console.error("setspinlimit error:", err.message);
+      bot.sendMessage(chatId, `❌ Failed: ${esc(err.message)}`, { parse_mode: "HTML" }).catch(() => {});
+    }
+  });
+
+  // ── /setadsfreeprice <weekly|monthly> <price> ───────────────────────────
+  // Changes the Ads-Free plan price at runtime — no .env edit / redeploy
+  // needed. Persisted in bot_settings (same mechanism as /setspinlimit above),
+  // and getAdsFreePlans() reads it fresh on every call, so it takes effect on
+  // the very next purchase attempt.
+  bot.onText(/\/setadsfreeprice(?:\s+(\S+))?(?:\s+(\d+(?:\.\d+)?))?/, async (msg, match) => {
+    if (isGroupChat(msg) || !isOwner(msg.from?.id)) return;
+    const chatId = msg.chat.id;
+    const planArg = (match[1] || "").toLowerCase();
+    const price = match[2] ? Number(match[2]) : NaN;
+    const plans = getAdsFreePlans();
+    if (!["weekly", "monthly"].includes(planArg) || isNaN(price) || price <= 0) {
+      return bot.sendMessage(chatId,
+        `Current Ads-Free prices:\n` +
+        `📅 Weekly: <b>₹${plans.ADSFREEWEEKLY.price}</b>\n` +
+        `🗓 Monthly: <b>₹${plans.ADSFREEPLAN.price}</b>\n\n` +
+        `Usage: <code>/setadsfreeprice weekly &lt;price&gt;</code>\n` +
+        `or: <code>/setadsfreeprice monthly &lt;price&gt;</code>\n` +
+        `e.g. <code>/setadsfreeprice weekly 25</code>`,
+        { parse_mode: "HTML" });
+    }
+    const settingsKey = planArg === "weekly" ? ADS_FREE_PLAN_META.ADSFREEWEEKLY.settingsKey : ADS_FREE_PLAN_META.ADSFREEPLAN.settingsKey;
+    try {
+      db.settings.set(settingsKey, price);
+      await bot.sendMessage(chatId, `✅ Ads-Free <b>${planArg}</b> price set to <b>₹${price}</b>. Takes effect immediately — no restart needed.`, { parse_mode: "HTML" });
+    } catch (err) {
+      console.error("setadsfreeprice error:", err.message);
+      bot.sendMessage(chatId, `❌ Failed: ${esc(err.message)}`, { parse_mode: "HTML" }).catch(() => {});
+    }
+  });
+
+  // ── /giveadsfree <days> <user_id> ────────────────────────────────────────
+  // Manually grants (or revokes, with a negative number) Ads-Free days to one
+  // user — for comps, support gestures, referral prizes, etc., completely
+  // outside the payment flow. Stacks on top of any existing remaining time,
+  // same as a real purchase (see grantAdsFreeAccess).
+  bot.onText(/\/giveadsfree(?:\s+(-?\d+)\s+(\S+))?/, async (msg, match) => {
+    if (isGroupChat(msg) || !isOwner(msg.from?.id)) return;
+    const chatId = msg.chat.id;
+    const days = match[1] ? parseInt(match[1], 10) : NaN;
+    const userId = match[2];
+    if (!userId || isNaN(days) || days === 0) {
+      return bot.sendMessage(chatId, `Usage: <code>/giveadsfree &lt;days&gt; &lt;user_id&gt;</code>\ne.g. <code>/giveadsfree 30 123456789</code> (1 month free)\ne.g. <code>/giveadsfree 7 123456789</code> (1 week free)\n\nUse a negative number to revoke/reduce, e.g. <code>/giveadsfree -30 123456789</code>. This stacks on top of any time they already have (from a real purchase or an earlier grant), exactly like a normal renewal.`, { parse_mode: "HTML" });
+    }
+    try {
+      const u = db.user.findOne(userId);
+      if (!u) return bot.sendMessage(chatId, `⚠️ No user found with ID <code>${esc(userId)}</code> (they must have started the bot at least once).`, { parse_mode: "HTML" });
+
+      const expiresAt = await grantAdsFreeAccess(userId, days);
+      const displayName = [u.firstName, u.lastName].filter(Boolean).join(' ').trim() || 'Unknown';
+      const usernameStr = u.username ? ` (@${u.username})` : '';
+      const active = expiresAt > new Date();
+      await bot.sendMessage(chatId,
+        `✅ ${days > 0 ? 'Granted' : 'Reduced'} <b>${Math.abs(days)}</b> Ads-Free day(s) for ${esc(displayName)}${esc(usernameStr)}\n` +
+        `🆔 <code>${esc(userId)}</code>\n` +
+        (active ? `📅 Ads-Free until: <b>${esc(expiresAt.toLocaleDateString("en-IN"))}</b>` : `🔴 Ads-Free access ended (no time remaining).`),
+        { parse_mode: "HTML" });
+      bot.sendMessage(parseInt(userId),
+        days > 0
+          ? `🎉 <b>Ads-Free access gifted!</b>\n\nAap ke liye ${days} din ka ads-free access on kar diya gaya hai. Ab koi ads nahi dikhenge — enjoy! 🚀`
+          : `ℹ️ Aapka Ads-Free access update kiya gaya hai.`,
+        { parse_mode: "HTML" }).catch(() => {});
+    } catch (err) {
+      console.error("giveadsfree error:", err.message);
       bot.sendMessage(chatId, `❌ Failed: ${esc(err.message)}`, { parse_mode: "HTML" }).catch(() => {});
     }
   });

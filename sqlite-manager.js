@@ -212,6 +212,13 @@ function _setupTables(db) {
       resetDate TEXT NOT NULL
     );
 
+    -- Ads-Free subscriptions (monthly, manually-renewed — see grantAdsFreeAccess
+    -- in server.js). expiresAt is a unix-ms timestamp; active = expiresAt > now.
+    CREATE TABLE IF NOT EXISTS ads_free_subscriptions (
+      userId    TEXT PRIMARY KEY,
+      expiresAt INTEGER NOT NULL
+    );
+
     -- Reward Redemptions (points-spend ledger — history of every reward claimed)
     CREATE TABLE IF NOT EXISTS reward_redemptions (
       id         TEXT PRIMARY KEY,
@@ -645,6 +652,21 @@ async function syncFromMongo(mongoose) {
   } catch (e) { console.error('  ❌ DailyVideoLimits sync error:', e.message); }
 
   try {
+    // 11b. Ads-Free Subscriptions
+    const AdsFreeSubscription = mongoose.models.AdsFreeSubscription;
+    if (AdsFreeSubscription) {
+      const subs = await AdsFreeSubscription.find({}).lean();
+      const upsertAF = db.prepare(`INSERT INTO ads_free_subscriptions(userId,expiresAt)
+        VALUES(?,?) ON CONFLICT(userId) DO UPDATE SET expiresAt=excluded.expiresAt`);
+      const afTx = db.transaction(() => {
+        for (const a of subs) upsertAF.run(String(a.userId), new Date(a.expiresAt).getTime());
+      });
+      afTx();
+      console.log(`  ✅ AdsFreeSubscriptions: ${subs.length}`);
+    }
+  } catch (e) { console.error('  ❌ AdsFreeSubscriptions sync error:', e.message); }
+
+  try {
     // 12. Reward Redemptions
     const RewardRedemption = mongoose.models.RewardRedemption;
     if (RewardRedemption) {
@@ -952,6 +974,24 @@ async function syncToMongo(mongoose, getPointsBreakdown) {
       console.log(`  ✅ DailyVideoLimits: ${rows.length}`);
     }
   } catch (e) { console.error('  ❌ DailyVideoLimits sync error:', e.message); summary.dailyVideoLimits = 'error'; }
+
+  try {
+    // 10b. AdsFreeSubscriptions (matched by userId)
+    const AdsFreeSubscription = mongoose.models.AdsFreeSubscription;
+    if (AdsFreeSubscription) {
+      const rows = db.prepare(`SELECT * FROM ads_free_subscriptions`).all();
+      const ops = rows.map(a => ({
+        updateOne: {
+          filter: { userId: a.userId },
+          update: { $set: { userId: a.userId, expiresAt: new Date(a.expiresAt) } },
+          upsert: true,
+        },
+      }));
+      if (ops.length) await AdsFreeSubscription.bulkWrite(ops, { ordered: false });
+      summary.adsFreeSubscriptions = rows.length;
+      console.log(`  ✅ AdsFreeSubscriptions: ${rows.length}`);
+    }
+  } catch (e) { console.error('  ❌ AdsFreeSubscriptions sync error:', e.message); summary.adsFreeSubscriptions = 'error'; }
 
   try {
     // 11. Reward Redemptions (ledger — best-effort match on userId+pointsCost+redeemedAt,
@@ -1491,6 +1531,18 @@ const dailyVideoLimit = {
   },
 };
 
+// ── ADS-FREE SUBSCRIPTION Operations ──────────────────────────────────────────
+const adsFree = {
+  find(userId) {
+    return getDb().prepare(`SELECT * FROM ads_free_subscriptions WHERE userId=?`).get(String(userId));
+  },
+  upsert({ userId, expiresAt }) {
+    getDb().prepare(`INSERT INTO ads_free_subscriptions(userId,expiresAt) VALUES(?,?)
+      ON CONFLICT(userId) DO UPDATE SET expiresAt=excluded.expiresAt`)
+      .run(String(userId), new Date(expiresAt).getTime());
+  },
+};
+
 // ── REWARD REDEMPTION Operations (points-spend ledger / history) ──────────────
 // Points themselves are never stored as a balance column — they are always derived
 // as (total referrals earned) - (total points spent here), so the numbers can
@@ -1764,6 +1816,7 @@ module.exports = {
   pendingDelete,
   pendingUndeliver,
   dailyVideoLimit,
+  adsFree,
   rewardRedemption,
   batchRewardAccess,
   spinToken,
