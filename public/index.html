@@ -272,7 +272,7 @@ body.ready{transition:none}
 .empty i{font-size:40px;color:var(--text3);display:block;margin-bottom:10px}
 
 /* Admin Modal */
-.modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:200;align-items:flex-end;justify-content:center}
+.modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:200000;align-items:flex-end;justify-content:center}
 .modal-overlay.show{display:flex}
 .modal{background:var(--surface);border-radius:20px 20px 0 0;padding:20px 16px;width:100%;max-width:480px;max-height:90vh;overflow-y:auto;position:relative}
 .modal-handle{width:40px;height:4px;background:var(--border);border-radius:2px;margin:0 auto 16px}
@@ -387,6 +387,8 @@ body.ready{transition:none}
 /* ── Ban Gate (shown instead of the app for banned users) ───────────────── */
 #banGate{position:fixed;inset:0;background:var(--bg);z-index:99998;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;text-align:center}
 #banGate.hidden{display:none}
+#maintenanceGate{position:fixed;inset:0;background:var(--bg);z-index:99998;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;text-align:center}
+#maintenanceGate.hidden{display:none}
 .ban-logo{width:72px;height:72px;background:linear-gradient(135deg,#e24b4a,#a32d2d);border-radius:18px;display:flex;align-items:center;justify-content:center;font-size:34px;margin:0 auto 20px;box-shadow:0 8px 24px rgba(226,75,74,0.35)}
 .ban-title{font-size:20px;font-weight:700;margin-bottom:8px;color:var(--text)}
 .ban-sub{font-size:13px;color:var(--text2);line-height:1.6;margin-bottom:8px;max-width:320px}
@@ -509,6 +511,12 @@ body.ready{transition:none}
   <div style="font-size:11px;color:var(--text3);margin-top:16px;max-width:300px;line-height:1.5">
     ⚠️ Still not working after disabling it? Fully close Telegram (not just this window) and reopen it — sometimes Telegram needs a fresh restart to pick up the change.
   </div>
+  <div style="margin-top:22px;padding-top:18px;border-top:1px solid var(--border);width:100%;max-width:280px">
+    <div style="font-size:11px;color:var(--text3);margin-bottom:10px">Ya phir, ad-blocker ki tension hi khatam karo</div>
+    <button onclick="openAdsFreePromo()" style="display:inline-flex;align-items:center;gap:7px;background:linear-gradient(135deg,#8b5cf6,#6d28d9);border:none;color:#fff;padding:10px 20px;border-radius:20px;font-size:13px;font-weight:700;cursor:pointer;">
+      ✨ Remove Ads — Plans dekho
+    </button>
+  </div>
 </div>
 
 <!-- PAGE: Home (Batches) -->
@@ -517,7 +525,7 @@ body.ready{transition:none}
     <div style="display:flex;align-items:center;gap:10px;flex:1">
       <div style="width:34px;height:34px;background:linear-gradient(135deg,#4f8ef7,#7c5cbf);border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:17px">📚</div>
       <div><div style="font-size:15px;font-weight:700">EduBot</div><div style="font-size:10px;color:var(--text2)">Select Batch</div></div>
-      <span id="adsFreeBadge" style="display:none;font-size:9px;font-weight:700;background:linear-gradient(135deg,#8b5cf6,#6d28d9);color:#fff;padding:3px 8px;border-radius:20px;cursor:pointer;white-space:nowrap;align-items:center;gap:3px" onclick="switchNavTab('access')">✨ Ads-Free</span>
+      <span id="adsFreeBadge" style="display:none;font-size:9px;font-weight:700;color:#fff;padding:3px 8px;border-radius:20px;cursor:pointer;white-space:nowrap;align-items:center;gap:3px" onclick="openAdsFreePromo()">✨ Ads-Free</span>
     </div>
     <button class="admin-btn" id="adminBtn" onclick="openAdmin()"><i class="ti ti-settings" style="font-size:13px"></i> Admin</button>
     <button class="bell-btn" id="bellBtn" onclick="openAnnouncements()"><i class="ti ti-bell"></i><span class="bell-badge" id="bellBadge"></span></button>
@@ -3342,7 +3350,7 @@ async function payWithRazorpay() {
           var vd = await vr.json();
           if (!vd.success) throw new Error((vd.error && vd.error.message) || 'Verification failed');
           toast('✅ Payment verified instantly! Access unlocked 🚀', 'success');
-          if (isAdsFreePlanId(_payBatchId)) { await loadAdsFreeStatus(); renderAdsFreeBanner(); renderAccessCard(); }
+          if (isAdsFreePlanId(_payBatchId)) { await _afterAdsFreePurchase(); }
           closePayModal();
         } catch(e) {
           toast('Payment received but verification failed — contact admin with your payment ID. (' + e.message + ')', 'error');
@@ -3500,7 +3508,7 @@ async function submitPayment() {
     if (!r.ok) throw new Error(d.error || 'Failed');
     if (d.autoApproved) {
       toast('✅ Payment verified instantly! Access unlocked 🚀', 'success');
-      if (isAdsFreePlanId(_payBatchId)) { await loadAdsFreeStatus(); renderAdsFreeBanner(); renderAccessCard(); }
+      if (isAdsFreePlanId(_payBatchId)) { await _afterAdsFreePurchase(); }
     } else {
       toast('✅ Payment submitted! Admin will verify soon.', 'success');
     }
@@ -3983,10 +3991,49 @@ async function loadAdsFreeStatus() {
 function updateAdsFreeBadge() {
   var badge = document.getElementById('adsFreeBadge');
   if (!badge) return;
-  badge.style.display = window._adsFreeActive ? 'inline-flex' : 'none';
+  badge.style.display = 'inline-flex'; // always visible now — promo when not active, status when active
+  if (window._adsFreeActive) {
+    badge.textContent = '✨ Ads-Free';
+    badge.style.background = 'linear-gradient(135deg,#8b5cf6,#6d28d9)';
+  } else {
+    badge.textContent = '✨ Remove Ads';
+    badge.style.background = 'var(--surface2)';
+    badge.style.color = 'var(--text2)';
+    badge.style.border = '1px solid var(--border)';
+  }
+  if (window._adsFreeActive) { badge.style.color = '#fff'; badge.style.border = 'none'; }
 }
 
 function buyAdsFreePlan(plan) { buyBatch(plan === 'weekly' ? ADS_FREE_PLAN_IDS.weekly : ADS_FREE_PLAN_IDS.monthly); }
+
+// Entry point used by both the home-tab badge and the ad-blocker gate CTA.
+// Already-subscribed users get sent straight to the Access tab (status/renew);
+// everyone else sees the quick weekly-vs-monthly picker first.
+function openAdsFreePromo() {
+  if (window._adsFreeActive) { switchNavTab('access'); return; }
+  var wkEl = document.getElementById('adsFreePromoWeeklyPrice');
+  var moEl = document.getElementById('adsFreePromoMonthlyPrice');
+  if (wkEl) wkEl.textContent = window._adsFreeWeeklyPrice || 20;
+  if (moEl) moEl.textContent = window._adsFreeMonthlyPrice || 60;
+  document.getElementById('adsFreePromoModal').classList.add('show');
+}
+function closeAdsFreePromo() { document.getElementById('adsFreePromoModal').classList.remove('show'); }
+function closeAdsFreePromoOutside(e) { if (e.target.id === 'adsFreePromoModal') closeAdsFreePromo(); }
+
+// Called right after a successful Ads-Free purchase. If they bought it from
+// the ad-blocker gate (the rest of the app never loaded in that case, since
+// init() returned early), a full reload is the simplest way to correctly
+// re-run init() — this time it'll see the active subscription immediately
+// and skip the ad-blocker check entirely.
+async function _afterAdsFreePurchase() {
+  await loadAdsFreeStatus();
+  renderAdsFreeBanner();
+  renderAccessCard();
+  var gate = document.getElementById('adBlockGate');
+  if (gate && !gate.classList.contains('hidden')) {
+    setTimeout(function () { location.reload(); }, 1800);
+  }
+}
 
 function renderAdsFreeBanner() {
   var el = document.getElementById('adsFreeBanner');
@@ -5228,6 +5275,24 @@ body.light-mode .lec-mini-notes{background:var(--surface2);color:var(--text)}
     <div class="form-group" id="ccChapterGroup" style="display:none"><label class="form-label">Target Chapter</label><select class="form-select" id="ccTargetChapter" onchange="_ccPopulateUnits()"></select></div>
     <div class="form-group" id="ccUnitGroup" style="display:none"><label class="form-label">Target Unit</label><select class="form-select" id="ccTargetUnit"></select></div>
     <button class="btn-add" id="ccCopyBtn" onclick="submitCopyItem()" style="margin-top:8px"><i class="ti ti-copy"></i> Copy</button>
+  </div>
+</div>
+
+<!-- Ads-Free Plan Picker Modal — quick "which duration" prompt shown from the
+     home-tab badge or the ad-blocker gate, before handing off to the real
+     payment modal (buyAdsFreePlan -> buyBatch, same flow as batches) -->
+<div class="modal-overlay" id="adsFreePromoModal" onclick="closeAdsFreePromoOutside(event)">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <button class="modal-close" onclick="closeAdsFreePromo()"><i class="ti ti-x"></i></button>
+    <div class="modal-title"><i class="ti ti-mood-smile" style="color:#8b5cf6"></i><span>Remove Ads</span></div>
+    <div style="font-size:12px;color:var(--text2);margin-bottom:16px;line-height:1.5">Koi ambient ad, koi lecture-click ad, koi ad-blocker warning — kuch bhi nahi. Poori app ad-free ho jayegi.</div>
+    <button class="btn-add" onclick="closeAdsFreePromo();buyAdsFreePlan('weekly')" style="margin-bottom:10px">
+      <i class="ti ti-mood-smile"></i> ₹<span id="adsFreePromoWeeklyPrice">20</span>/week
+    </button>
+    <button class="btn-add" onclick="closeAdsFreePromo();buyAdsFreePlan('monthly')">
+      <i class="ti ti-mood-smile"></i> ₹<span id="adsFreePromoMonthlyPrice">60</span>/month
+    </button>
   </div>
 </div>
 
