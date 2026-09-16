@@ -788,6 +788,14 @@ async function recoverPendingUndelivers() {
 }
 
 const esc = (s) => String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+// Formats "👤 Name (@username)" for payment-group notifications — Paytm/Razorpay
+// orders already store firstName/lastName/username at order-creation time
+// (same as BharatPe's caption does), this just renders it consistently.
+function formatPayerLine(order) {
+  const name = [order.firstName, order.lastName].filter(Boolean).join(" ").trim() || "Unknown";
+  const usernameStr = order.username ? ` (@${esc(order.username)})` : "";
+  return `👤 <b>${esc(name)}</b>${usernameStr}`;
+}
 async function wait(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 // ── BharatPe payment verification (via Ilambit DevPort) ────────────────────────
@@ -1123,11 +1131,11 @@ app.post("/api/paytm/callback", async (req, res) => {
       order.status = "success"; order.txnId = status.txnId || params.TXNID || ""; await order.save();
       const batch = await grantBatchAccess(order.batchId, order.userId);
       await bot.sendMessage(parseInt(order.userId), `✅ <b>Payment Verified & Approved!</b>\n\nAccess to <b>${esc(batch?.name||order.batchId)}</b> unlocked! 🚀`, { parse_mode:"HTML", reply_markup:{ inline_keyboard:[[{text:"📚 Open App",web_app:{url:WEB_URL}}]] } }).catch(()=>{});
-      if (PAYMENT_GROUP_ID) bot.sendMessage(PAYMENT_GROUP_ID, `💸 <b>Paytm Payment Received</b>\n\n👤 UID: <code>${esc(order.userId)}</code>\n📚 Batch: <b>${esc(batch?.name||order.batchId)}</b>\n💰 Amount: <b>₹${esc(String(status.amount))}</b>\n🔖 Paytm Txn: <code>${esc(order.txnId)}</code>\n💳 Mode: ${esc(status.paymentMode||"N/A")} via ${esc(status.gatewayName||"N/A")}\n\n✅ <b>AUTO-APPROVED</b> (verified via DevPort)`, { parse_mode:"HTML" }).catch(()=>{});
+      if (PAYMENT_GROUP_ID) bot.sendMessage(PAYMENT_GROUP_ID, `💸 <b>Paytm Payment Received</b>\n\n${formatPayerLine(order)}\n🆔 UID: <code>${esc(order.userId)}</code>\n📚 Batch: <b>${esc(batch?.name||order.batchId)}</b>\n💰 Amount: <b>₹${esc(String(status.amount))}</b>\n🔖 Paytm Txn: <code>${esc(order.txnId)}</code>\n💳 Mode: ${esc(status.paymentMode||"N/A")} via ${esc(status.gatewayName||"N/A")}\n\n✅ <b>AUTO-APPROVED</b> (verified via DevPort)`, { parse_mode:"HTML" }).catch(()=>{});
       return resultPage(true, "Successful");
     } else {
       order.status = "failed"; await order.save();
-      if (PAYMENT_GROUP_ID) bot.sendMessage(PAYMENT_GROUP_ID, `⚠️ <b>Paytm Payment Failed/Unmatched</b>\n\n👤 UID: <code>${esc(order.userId)}</code>\nOrder: <code>${esc(orderId)}</code>\nStatus: ${esc(status.status||"unknown")}`, { parse_mode:"HTML" }).catch(()=>{});
+      if (PAYMENT_GROUP_ID) bot.sendMessage(PAYMENT_GROUP_ID, `⚠️ <b>Paytm Payment Failed/Unmatched</b>\n\n${formatPayerLine(order)}\n🆔 UID: <code>${esc(order.userId)}</code>\nOrder: <code>${esc(orderId)}</code>\nStatus: ${esc(status.status||"unknown")}`, { parse_mode:"HTML" }).catch(()=>{});
       return resultPage(false, status.status || "Payment Failed");
     }
   } catch (err) {
@@ -1189,7 +1197,7 @@ app.post("/api/razorpay/verify", async (req, res) => {
     order.status = "success"; order.paymentId = razorpay_payment_id; await order.save();
     const batch = await grantBatchAccess(order.batchId, order.userId);
     await bot.sendMessage(parseInt(order.userId), `✅ <b>Payment Verified & Approved!</b>\n\nAccess to <b>${esc(batch?.name||order.batchId)}</b> unlocked! 🚀`, { parse_mode:"HTML", reply_markup:{ inline_keyboard:[[{text:"📚 Open App",web_app:{url:WEB_URL}}]] } }).catch(()=>{});
-    if (PAYMENT_GROUP_ID) bot.sendMessage(PAYMENT_GROUP_ID, `💸 <b>Razorpay Payment Received</b>\n\n👤 UID: <code>${esc(order.userId)}</code>\n📚 Batch: <b>${esc(batch?.name||order.batchId)}</b>\n💰 Amount: <b>₹${esc(String(order.amount))}</b>\n🔖 Razorpay Payment: <code>${esc(razorpay_payment_id)}</code>\n\n✅ <b>AUTO-APPROVED</b> (signature verified)`, { parse_mode:"HTML" }).catch(()=>{});
+    if (PAYMENT_GROUP_ID) bot.sendMessage(PAYMENT_GROUP_ID, `💸 <b>Razorpay Payment Received</b>\n\n${formatPayerLine(order)}\n🆔 UID: <code>${esc(order.userId)}</code>\n📚 Batch: <b>${esc(batch?.name||order.batchId)}</b>\n💰 Amount: <b>₹${esc(String(order.amount))}</b>\n🔖 Razorpay Payment: <code>${esc(razorpay_payment_id)}</code>\n\n✅ <b>AUTO-APPROVED</b> (signature verified)`, { parse_mode:"HTML" }).catch(()=>{});
     return apiOk(res, { verified: true, batchName: batch?.name||order.batchId }, { service: "razorpay" });
   } catch (err) { console.error("Razorpay verify error:", err.message); apiErr(res, 500, "INTERNAL_ERROR", err.message); }
 });
@@ -1219,7 +1227,7 @@ app.post("/api/razorpay/webhook", async (req, res) => {
           order.status = "success"; order.paymentId = payment.id; await order.save();
           const batch = await grantBatchAccess(order.batchId, order.userId);
           await bot.sendMessage(parseInt(order.userId), `✅ <b>Payment Verified & Approved!</b>\n\nAccess to <b>${esc(batch?.name||order.batchId)}</b> unlocked! 🚀`, { parse_mode:"HTML", reply_markup:{ inline_keyboard:[[{text:"📚 Open App",web_app:{url:WEB_URL}}]] } }).catch(()=>{});
-          if (PAYMENT_GROUP_ID) bot.sendMessage(PAYMENT_GROUP_ID, `💸 <b>Razorpay Payment Received (webhook)</b>\n\n👤 UID: <code>${esc(order.userId)}</code>\n📚 Batch: <b>${esc(batch?.name||order.batchId)}</b>\n💰 Amount: <b>₹${esc(String(order.amount))}</b>\n🔖 Razorpay Payment: <code>${esc(payment.id)}</code>\n\n✅ <b>AUTO-APPROVED</b> (webhook verified)`, { parse_mode:"HTML" }).catch(()=>{});
+          if (PAYMENT_GROUP_ID) bot.sendMessage(PAYMENT_GROUP_ID, `💸 <b>Razorpay Payment Received (webhook)</b>\n\n${formatPayerLine(order)}\n🆔 UID: <code>${esc(order.userId)}</code>\n📚 Batch: <b>${esc(batch?.name||order.batchId)}</b>\n💰 Amount: <b>₹${esc(String(order.amount))}</b>\n🔖 Razorpay Payment: <code>${esc(payment.id)}</code>\n\n✅ <b>AUTO-APPROVED</b> (webhook verified)`, { parse_mode:"HTML" }).catch(()=>{});
         }
       }
     }
@@ -2241,6 +2249,48 @@ async function startBot() {
         { parse_mode: "HTML" }).catch(() => {});
     } catch (err) {
       console.error("giveadsfree error:", err.message);
+      bot.sendMessage(chatId, `❌ Failed: ${esc(err.message)}`, { parse_mode: "HTML" }).catch(() => {});
+    }
+  });
+
+  // ── /adsfreeusers ─────────────────────────────────────────────────────────
+  // Lists everyone with a currently-active Ads-Free subscription, soonest-
+  // expiring first, with how much time each has left — a quick way to see who
+  // to nudge about renewing before they're locked out again.
+  bot.onText(/\/adsfreeusers/, async (msg) => {
+    if (isGroupChat(msg) || !isOwner(msg.from?.id)) return;
+    const chatId = msg.chat.id;
+    try {
+      const active = db.adsFree.getAllActive();
+      if (!active.length) return bot.sendMessage(chatId, `📭 Koi bhi Ads-Free subscriber active nahi hai abhi.`);
+
+      const fmtRemaining = (ms) => {
+        const totalHours = Math.floor(ms / (60 * 60 * 1000));
+        const days = Math.floor(totalHours / 24);
+        const hours = totalHours % 24;
+        if (days === 0) return `${hours}h`;
+        return `${days}d ${hours}h`;
+      };
+
+      const now = Date.now();
+      const lines = active.map((row, i) => {
+        const u = db.user.findOne(row.userId);
+        const name = u ? [u.firstName, u.lastName].filter(Boolean).join(' ').trim() : 'Unknown';
+        const usernameStr = u && u.username ? ` (@${esc(u.username)})` : '';
+        const remaining = fmtRemaining(row.expiresAt - now);
+        const expDate = new Date(row.expiresAt).toLocaleDateString("en-IN", { day: "numeric", month: "short" });
+        return `${i + 1}. ${esc(name)}${usernameStr}\n   🆔 <code>${esc(row.userId)}</code> — ⏳ <b>${remaining}</b> left (till ${expDate})`;
+      });
+
+      await bot.sendMessage(chatId, `✨ <b>Active Ads-Free Subscribers (${active.length})</b>`, { parse_mode: "HTML" });
+      // Telegram caps messages at 4096 chars — chunk into batches of 25 lines
+      // so a large subscriber list never gets silently truncated or rejected.
+      const CHUNK = 25;
+      for (let i = 0; i < lines.length; i += CHUNK) {
+        await bot.sendMessage(chatId, lines.slice(i, i + CHUNK).join("\n\n"), { parse_mode: "HTML" });
+      }
+    } catch (err) {
+      console.error("adsfreeusers error:", err.message);
       bot.sendMessage(chatId, `❌ Failed: ${esc(err.message)}`, { parse_mode: "HTML" }).catch(() => {});
     }
   });

@@ -1541,6 +1541,11 @@ const adsFree = {
       ON CONFLICT(userId) DO UPDATE SET expiresAt=excluded.expiresAt`)
       .run(String(userId), new Date(expiresAt).getTime());
   },
+  // Everyone whose subscription hasn't lapsed yet, soonest-expiring first — used
+  // by /adsfreeusers so the admin can see who's about to need a renewal reminder.
+  getAllActive() {
+    return getDb().prepare(`SELECT * FROM ads_free_subscriptions WHERE expiresAt > ? ORDER BY expiresAt ASC`).all(Date.now());
+  },
 };
 
 // ── REWARD REDEMPTION Operations (points-spend ledger / history) ──────────────
