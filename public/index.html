@@ -482,6 +482,19 @@ body.ready{transition:none}
   </div>
 </div>
 
+<!-- MAINTENANCE GATE (shown instead of the app when the owner has maintenance
+     mode on via /maintenance in the bot — owner + allowlisted testers bypass) -->
+<div id="maintenanceGate" class="hidden">
+  <div class="ban-logo">🛠️</div>
+  <div class="ban-title">Under Maintenance</div>
+  <div class="ban-sub">We're making some improvements right now. Please check back in a little while — sorry for the inconvenience!</div>
+  <div style="margin-top:8px;text-align:center">
+    <button onclick="location.reload()" style="display:inline-flex;align-items:center;gap:7px;background:var(--accent);border:none;color:#fff;padding:11px 22px;border-radius:20px;font-size:14px;font-weight:700;cursor:pointer;">
+      🔄 Check Again
+    </button>
+  </div>
+</div>
+
 <!-- AD BLOCKER GATE (shown instead of the app if the ad SDK failed to load —
      browser extension ad-blocker, or DNS-level blocking like AdGuard DNS/NextDNS) -->
 <div id="adBlockGate" class="hidden">
@@ -504,6 +517,7 @@ body.ready{transition:none}
     <div style="display:flex;align-items:center;gap:10px;flex:1">
       <div style="width:34px;height:34px;background:linear-gradient(135deg,#4f8ef7,#7c5cbf);border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:17px">📚</div>
       <div><div style="font-size:15px;font-weight:700">EduBot</div><div style="font-size:10px;color:var(--text2)">Select Batch</div></div>
+      <span id="adsFreeBadge" style="display:none;font-size:9px;font-weight:700;background:linear-gradient(135deg,#8b5cf6,#6d28d9);color:#fff;padding:3px 8px;border-radius:20px;cursor:pointer;white-space:nowrap;align-items:center;gap:3px" onclick="switchNavTab('access')">✨ Ads-Free</span>
     </div>
     <button class="admin-btn" id="adminBtn" onclick="openAdmin()"><i class="ti ti-settings" style="font-size:13px"></i> Admin</button>
     <button class="bell-btn" id="bellBtn" onclick="openAnnouncements()"><i class="ti ti-bell"></i><span class="bell-badge" id="bellBadge"></span></button>
@@ -519,19 +533,6 @@ body.ready{transition:none}
       <i class="ti ti-search search-icon"></i>
       <input class="search-input" id="searchInput" placeholder="Search batches..." oninput="handleSearch(this.value)">
     </div>
-  </div>
-  <!-- Flicker Notice Banner -->
-  <div class="flicker-notice">
-    <div class="flicker-notice-left">
-      <span class="flicker-notice-icon">⚡</span>
-      <div>
-        <div class="flicker-notice-title">Experiencing flickering or blank screens?</div>
-        <div class="flicker-notice-sub">A quick reload will fix it instantly.</div>
-      </div>
-    </div>
-    <button class="flicker-reload-btn" onclick="hardReload()">
-      <i class="ti ti-refresh"></i> Reload
-    </button>
   </div>
   <!-- Home Access Timer Bar -->
   <div id="homeTimerBar" style="display:none;background:linear-gradient(90deg,#0f2a1a,#0a1f2e);border-bottom:1px solid var(--border);padding:8px 16px;flex-shrink:0;display:flex;align-items:center;justify-content:space-between;gap:10px">
@@ -588,18 +589,6 @@ body.ready{transition:none}
     <button class="back-btn" onclick="goBack()"><i class="ti ti-arrow-left"></i></button>
     <div style="flex:1;min-width:0"><div class="topbar-title" id="subjPageTitle"></div><div class="topbar-sub" id="subjPageSub"></div></div>
   </div>
-  <div class="flicker-notice">
-    <div class="flicker-notice-left">
-      <span class="flicker-notice-icon">⚡</span>
-      <div>
-        <div class="flicker-notice-title">Experiencing flickering or blank screens?</div>
-        <div class="flicker-notice-sub">A quick reload will fix it instantly.</div>
-      </div>
-    </div>
-    <button class="flicker-reload-btn" onclick="hardReload()">
-      <i class="ti ti-refresh"></i> Reload
-    </button>
-  </div>
   <div class="page-body">
     <div class="hero" id="batchHero"></div>
     <div class="sec-label">Subjects</div>
@@ -613,18 +602,6 @@ body.ready{transition:none}
     <button class="back-btn" onclick="goBack()"><i class="ti ti-arrow-left"></i></button>
     <div style="flex:1;min-width:0"><div class="topbar-title" id="chapPageTitle"></div><div class="topbar-sub" id="chapPageSub"></div></div>
   </div>
-  <div class="flicker-notice">
-    <div class="flicker-notice-left">
-      <span class="flicker-notice-icon">⚡</span>
-      <div>
-        <div class="flicker-notice-title">Experiencing flickering or blank screens?</div>
-        <div class="flicker-notice-sub">A quick reload will fix it instantly.</div>
-      </div>
-    </div>
-    <button class="flicker-reload-btn" onclick="hardReload()">
-      <i class="ti ti-refresh"></i> Reload
-    </button>
-  </div>
   <div class="page-body">
     <div class="sec-label">Chapters</div>
     <div class="list" id="chapterList"></div>
@@ -637,18 +614,6 @@ body.ready{transition:none}
     <button class="back-btn" onclick="goBack()"><i class="ti ti-arrow-left"></i></button>
     <div style="flex:1;min-width:0"><div class="topbar-title" id="unitPageTitle"></div><div class="topbar-sub" id="unitPageSub"></div></div>
   </div>
-  <div class="flicker-notice">
-    <div class="flicker-notice-left">
-      <span class="flicker-notice-icon">⚡</span>
-      <div>
-        <div class="flicker-notice-title">Experiencing flickering or blank screens?</div>
-        <div class="flicker-notice-sub">A quick reload will fix it instantly.</div>
-      </div>
-    </div>
-    <button class="flicker-reload-btn" onclick="hardReload()">
-      <i class="ti ti-refresh"></i> Reload
-    </button>
-  </div>
   <div class="page-body">
     <div class="sec-label" id="unitSecLabel">Content</div>
     <div class="list" id="unitList"></div>
@@ -660,18 +625,6 @@ body.ready{transition:none}
   <div class="topbar">
     <button class="back-btn" onclick="goBack()"><i class="ti ti-arrow-left"></i></button>
     <div style="flex:1;min-width:0"><div class="topbar-title" id="lecPageTitle"></div><div class="topbar-sub" id="lecPageSub"></div></div>
-  </div>
-  <div class="flicker-notice">
-    <div class="flicker-notice-left">
-      <span class="flicker-notice-icon">⚡</span>
-      <div>
-        <div class="flicker-notice-title">Experiencing flickering or blank screens?</div>
-        <div class="flicker-notice-sub">A quick reload will fix it instantly.</div>
-      </div>
-    </div>
-    <button class="flicker-reload-btn" onclick="hardReload()">
-      <i class="ti ti-refresh"></i> Reload
-    </button>
   </div>
   <div class="page-body">
     <div class="sec-label">Lectures</div>
@@ -687,18 +640,6 @@ body.ready{transition:none}
       <div class="topbar-title" id="lecDetailTitle">Lecture</div>
       <div class="topbar-sub" id="lecDetailSub"></div>
     </div>
-  </div>
-  <div class="flicker-notice">
-    <div class="flicker-notice-left">
-      <span class="flicker-notice-icon">⚡</span>
-      <div>
-        <div class="flicker-notice-title">Experiencing flickering or blank screens?</div>
-        <div class="flicker-notice-sub">A quick reload will fix it instantly.</div>
-      </div>
-    </div>
-    <button class="flicker-reload-btn" onclick="hardReload()">
-      <i class="ti ti-refresh"></i> Reload
-    </button>
   </div>
   <div class="page-body">
     <div id="lecDetailContent"></div>
@@ -892,22 +833,13 @@ body.ready{transition:none}
       <div><div style="font-size:15px;font-weight:700">Access</div><div style="font-size:10px;color:var(--text2)">Watch ad to unlock</div></div>
     </div>
   </div>
-  <div class="flicker-notice">
-    <div class="flicker-notice-left">
-      <span class="flicker-notice-icon">⚡</span>
-      <div>
-        <div class="flicker-notice-title">Experiencing flickering or blank screens?</div>
-        <div class="flicker-notice-sub">A quick reload will fix it instantly.</div>
-      </div>
-    </div>
-    <button class="flicker-reload-btn" onclick="hardReload()">
-      <i class="ti ti-refresh"></i> Reload
-    </button>
-  </div>
   <div class="page-body">
     <div class="access-page-wrap">
       <div class="access-card" id="accessCard">
         <!-- Rendered by JS -->
+      </div>
+      <div id="adsFreeBanner" style="margin-top:14px">
+        <!-- Rendered by JS: renderAdsFreeBanner() -->
       </div>
     </div>
   </div>
@@ -1148,17 +1080,14 @@ if (tg) {
   });
 }
 
-// Hard reload — uses Telegram's native reload to match the three-dot menu behaviour
-function hardReload() {
-  if (tg && tg.reload) {
-    tg.reload();
-  } else {
-    // Force a fresh navigation — bypasses WebView cache better than location.reload()
-    location.href = location.href.split('?')[0] + '?_r=' + Date.now();
-  }
-}
-
 var batches = [];
+// Sentinel "batchId"s used to sell the Ads-Free plan (2 durations) through the
+// exact same payment modal/flow as batches — see buyBatch()/buyAdsFreePlan()
+// below and getProductInfo()/grantBatchAccess() server-side. IDs deliberately
+// contain no underscores — BharatPe's admin-approval callback_data parsing
+// splits on "_", so an underscore in here would corrupt that parsing.
+var ADS_FREE_PLAN_IDS = { weekly: 'ADSFREEWEEKLY', monthly: 'ADSFREEPLAN' };
+function isAdsFreePlanId(id) { return id === ADS_FREE_PLAN_IDS.weekly || id === ADS_FREE_PLAN_IDS.monthly; }
 var _popupLectures = {}; // stores lectures for popup reference by _id
 var isAdmin = false;
 var pageStack = ['home'];
@@ -2269,6 +2198,7 @@ function _probeAdBlocker() {
 // decides whether THIS user should see the ad-blocker gate right now.
 async function _isAdBlockerActiveForUser() {
   if (isAdmin) return false;
+  if (window._adsFreeActive) return false; // Ads-Free subscribers are never shown the ad-blocker wall — they don't need ads at all
   try {
     var exemptData = await apiFetch('/api/adblock-exempt/me');
     if (exemptData && exemptData.exempt) return false;
@@ -2304,7 +2234,7 @@ async function checkAdBlocker() {
 // can actually confirm a genuine watch before granting a reward).
 var _inAppInterstitialStarted = false;
 function setupInAppInterstitial() {
-  if (_inAppInterstitialStarted || !_monetagReady()) return;
+  if (_inAppInterstitialStarted || !_monetagReady() || window._adsFreeActive) return;
   _inAppInterstitialStarted = true;
   try {
     _monetagShow({
@@ -2353,6 +2283,8 @@ async function checkAdminAccess() {
     if (config.contactLink) window._contactLink = config.contactLink;
     window._paymentProvider = config.paymentProvider || 'bharatpe';
     window._razorpayKeyId = config.razorpayKeyId || '';
+    window._adsFreeWeeklyPrice = config.adsFreeWeeklyPrice || 20;
+    window._adsFreeMonthlyPrice = config.adsFreeMonthlyPrice || 60;
     // Store force-join requirement
     _fjRequired = !!config.forceJoinRequired;
     loadMonetagSdk(config.monetagZoneId || '11502469'); // fire-and-forget, don't block init()
@@ -3105,7 +3037,11 @@ var _payOriginalPrice = 0;
 var _payAppliedCoupon = null; // { code, discountPct, finalAmount }
 
 function buyBatch(bid) {
-  var b = batches.find(x => x._id === bid);
+  var b = isAdsFreePlanId(bid)
+    ? (bid === ADS_FREE_PLAN_IDS.weekly
+        ? { _id: bid, name: 'Ads-Free Plan (1 week)', price: window._adsFreeWeeklyPrice || 20 }
+        : { _id: bid, name: 'Ads-Free Plan (1 month)', price: window._adsFreeMonthlyPrice || 60 })
+    : batches.find(x => x._id === bid);
   if (!b) return;
   _payBatchId = bid;
   _paySsBase64 = null;
@@ -3406,6 +3342,7 @@ async function payWithRazorpay() {
           var vd = await vr.json();
           if (!vd.success) throw new Error((vd.error && vd.error.message) || 'Verification failed');
           toast('✅ Payment verified instantly! Access unlocked 🚀', 'success');
+          if (isAdsFreePlanId(_payBatchId)) { await loadAdsFreeStatus(); renderAdsFreeBanner(); renderAccessCard(); }
           closePayModal();
         } catch(e) {
           toast('Payment received but verification failed — contact admin with your payment ID. (' + e.message + ')', 'error');
@@ -3563,6 +3500,7 @@ async function submitPayment() {
     if (!r.ok) throw new Error(d.error || 'Failed');
     if (d.autoApproved) {
       toast('✅ Payment verified instantly! Access unlocked 🚀', 'success');
+      if (isAdsFreePlanId(_payBatchId)) { await loadAdsFreeStatus(); renderAdsFreeBanner(); renderAccessCard(); }
     } else {
       toast('✅ Payment submitted! Admin will verify soon.', 'success');
     }
@@ -3964,7 +3902,7 @@ function _shouldShowAdForLectureClick() {
 async function openLecLink(codeOrLink, type) {
   if (!codeOrLink) return openLink('', type || 'lecture');
 
-  if ((type || 'lecture') === 'lecture' && _shouldShowAdForLectureClick()) {
+  if (!window._adsFreeActive && (type || 'lecture') === 'lecture' && _shouldShowAdForLectureClick()) {
     if (!_monetagReady() && !isAdmin && await _isAdBlockerActiveForUser()) {
       document.getElementById('adBlockGate').classList.remove('hidden');
       return;
@@ -4017,8 +3955,81 @@ function toggleFavoriteBatch(bid) {
 
 function hasAccess() {
   if (isAdmin) return true;
+  if (window._adsFreeActive) return true; // Ads-Free subscribers never need the watch-ad-for-access gate
   if (!accessExpiresAt) return false;
   return new Date(accessExpiresAt) > new Date();
+}
+
+// ── Ads-Free Plan ─────────────────────────────────────────────────────────────
+// Monthly, manually-renewed (no auto-debit) — see grantAdsFreeAccess in
+// server.js. Sold through the same buyBatch()/payment-modal flow used for
+// batches, via the ADS_FREE_PLAN_IDS sentinel "batchId"s.
+async function loadAdsFreeStatus() {
+  try {
+    var r = await fetch('/api/adsfree/status?userId=' + encodeURIComponent(getUserId()));
+    var d = await r.json();
+    if (d.success) {
+      window._adsFreeActive = !!d.data.active;
+      window._adsFreeExpiresAt = d.data.expiresAt || null;
+    }
+  } catch (e) { /* fail safe — treat as not-subscribed rather than block the app */ }
+  updateAdsFreeBadge();
+}
+
+// Small persistent pill next to the app title (visible on every screen, not
+// just the Access tab) so an Ads-Free subscriber always has a quick, at-a-
+// glance way to confirm it's on — tapping it jumps to the Access tab for
+// details/renewal.
+function updateAdsFreeBadge() {
+  var badge = document.getElementById('adsFreeBadge');
+  if (!badge) return;
+  badge.style.display = window._adsFreeActive ? 'inline-flex' : 'none';
+}
+
+function buyAdsFreePlan(plan) { buyBatch(plan === 'weekly' ? ADS_FREE_PLAN_IDS.weekly : ADS_FREE_PLAN_IDS.monthly); }
+
+function renderAdsFreeBanner() {
+  var el = document.getElementById('adsFreeBanner');
+  updateAdsFreeBadge();
+  if (!el || isAdmin) { if (el) el.innerHTML = ''; return; }
+
+  if (window._adsFreeActive) {
+    var exp = window._adsFreeExpiresAt ? new Date(window._adsFreeExpiresAt) : null;
+    var expStr = exp ? exp.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '';
+    el.innerHTML =
+      '<div class="access-card" style="background:linear-gradient(135deg,#8b5cf620,#6d28d920);border:1px solid #8b5cf650">' +
+        '<div class="access-card-header" style="padding-bottom:6px">' +
+          '<i class="ti ti-mood-smile" style="font-size:36px;display:block;margin-bottom:8px;color:#8b5cf6"></i>' +
+          '<h2 style="color:#8b5cf6;font-size:16px">Ads-Free Active 🎉</h2>' +
+          '<p style="font-size:12px">' + (expStr ? ('Valid till <b>' + expStr + '</b>') : 'Active') + '</p>' +
+        '</div>' +
+        '<div class="access-action" style="padding-top:4px;display:flex;gap:8px">' +
+          '<button class="watch-ad-btn" onclick="buyAdsFreePlan(\'weekly\')" style="background:linear-gradient(135deg,#8b5cf6,#6d28d9);flex:1">' +
+            '<i class="ti ti-refresh"></i> +1 Week (₹' + (window._adsFreeWeeklyPrice || 20) + ')' +
+          '</button>' +
+          '<button class="watch-ad-btn" onclick="buyAdsFreePlan(\'monthly\')" style="background:linear-gradient(135deg,#8b5cf6,#6d28d9);flex:1">' +
+            '<i class="ti ti-refresh"></i> +1 Month (₹' + (window._adsFreeMonthlyPrice || 60) + ')' +
+          '</button>' +
+        '</div>' +
+      '</div>';
+  } else {
+    el.innerHTML =
+      '<div class="access-card">' +
+        '<div class="access-card-header" style="padding-bottom:6px">' +
+          '<i class="ti ti-mood-smile" style="font-size:36px;display:block;margin-bottom:8px;color:#8b5cf6"></i>' +
+          '<h2 style="font-size:16px">Ads-Free Plan</h2>' +
+          '<p style="font-size:12px">Koi ambient ad, koi lecture-click ad, koi "watch ad to unlock" step nahi — poori app ad-free. Premium batches alag se hi kharidne padenge, yeh sirf ads hataata hai.</p>' +
+        '</div>' +
+        '<div class="access-action" style="padding-top:4px;display:flex;gap:8px">' +
+          '<button class="watch-ad-btn" onclick="buyAdsFreePlan(\'weekly\')" style="background:linear-gradient(135deg,#8b5cf6,#6d28d9);flex:1">' +
+            '<i class="ti ti-mood-smile"></i> ₹' + (window._adsFreeWeeklyPrice || 20) + '/week' +
+          '</button>' +
+          '<button class="watch-ad-btn" onclick="buyAdsFreePlan(\'monthly\')" style="background:linear-gradient(135deg,#8b5cf6,#6d28d9);flex:1">' +
+            '<i class="ti ti-mood-smile"></i> ₹' + (window._adsFreeMonthlyPrice || 60) + '/month' +
+          '</button>' +
+        '</div>' +
+      '</div>';
+  }
 }
 
 async function loadAccess() {
@@ -4138,6 +4149,7 @@ function switchNavTab(tab) {
     accEl.style.transform = 'translateX(0)';
     accEl.classList.add('active');
     renderAccessCard();
+    renderAdsFreeBanner();
     startCountdown();
   }
 }
@@ -4588,6 +4600,18 @@ async function verifyForceJoin() {
 function _animateVsBar(){var f=document.getElementById('vsFill');if(!f)return;setTimeout(function(){f.style.width='38%'},60);setTimeout(function(){f.style.width='72%'},700);setTimeout(function(){f.style.width='86%'},1400)}
 function _hideVS(cb){var el=document.getElementById('verifyingScreen');if(!el||el.classList.contains('vs-gone')){if(cb)cb();return}var f=document.getElementById('vsFill');if(f)f.style.width='100%';setTimeout(function(){el.classList.add('vs-hide');setTimeout(function(){el.classList.add('vs-gone');if(cb)cb()},350)},180)}
 
+async function checkMaintenanceMode() {
+  if (isAdmin) return false; // owner always bypasses, no network round-trip needed
+  try {
+    var res = await apiFetch('/api/maintenance/status?userId=' + encodeURIComponent(getUserId()));
+    if (res && res.success && res.data && res.data.show) {
+      document.getElementById('maintenanceGate').classList.remove('hidden');
+      return true;
+    }
+    return false;
+  } catch (e) { return false; } // fail open — a network hiccup here must never lock everyone out
+}
+
 async function checkBanStatus() {
   // Owner is never banned by this check — skip the network round-trip.
   if (isAdmin) return false;
@@ -4655,7 +4679,12 @@ async function init() {
   _loadWatchedLectures();
   _animateVsBar();
   await checkAdminAccess();
+
+  var underMaintenance = await checkMaintenanceMode();
+  if (underMaintenance) { _hideVS(); return; }
+
   if (!isAdmin) reportDeviceFingerprint(); // fire-and-forget, never blocks app load
+  if (!isAdmin) await loadAdsFreeStatus(); // must resolve before checkAdBlocker() below, which depends on window._adsFreeActive
 
   if (!isAdmin) {
     var adBlocked = await checkAdBlocker();
@@ -4965,29 +4994,6 @@ body.light-mode .popup-lec-btn-notes{background:var(--surface2);color:var(--text
 }
 body.light-mode .lec-mini-notes{background:var(--surface2);color:var(--text)}
 .lec-mini-btn i{font-size:11px}
-
-/* ── Flicker Notice Banner ────────────────────── */
-.flicker-notice{
-  display:flex;align-items:center;justify-content:space-between;gap:10px;
-  padding:9px 14px;
-  background:linear-gradient(90deg,rgba(79,142,247,0.12),rgba(124,92,191,0.10));
-  border-bottom:1px solid rgba(79,142,247,0.25);
-  flex-shrink:0;
-}
-.flicker-notice-left{display:flex;align-items:center;gap:9px;flex:1;min-width:0}
-.flicker-notice-icon{font-size:16px;flex-shrink:0}
-.flicker-notice-title{font-size:11px;font-weight:600;color:var(--text);line-height:1.3}
-.flicker-notice-sub{font-size:10px;color:var(--text2);margin-top:1px}
-.flicker-reload-btn{
-  display:flex;align-items:center;gap:5px;
-  background:var(--accent);color:#fff;
-  border:none;border-radius:20px;
-  padding:6px 12px;font-size:11px;font-weight:700;
-  cursor:pointer;flex-shrink:0;
-  transition:opacity 0.15s;
-}
-.flicker-reload-btn:active{opacity:0.75}
-.flicker-reload-btn i{font-size:12px}
 
 /* ── Announcement Bell ───────────────────────────── */
 .bell-btn{position:relative;width:36px;height:36px;border-radius:50%;background:var(--surface2);border:none;color:var(--text);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0;transition:background 0.2s}
