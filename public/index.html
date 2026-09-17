@@ -4795,7 +4795,8 @@ async function init() {
   updateHomeTimer();
   if (hasAccess()) startCountdown();
   _hideVS();
-  maybeShowGiveawayAd();
+  var giveawayShown = await maybeShowGiveawayAd();
+  if (!giveawayShown) maybeShowAdsFreeAd();
 }
 init();
 
@@ -4836,6 +4837,29 @@ function closeLecturePopupOutside(e) {}
       </div>
       <button class="giveaway-ad-join" onclick="joinFromAd()"><i class="ti ti-brand-telegram"></i> Join Giveaway</button>
       <div class="giveaway-ad-later" onclick="closeGiveawayAd()">Maybe later</div>
+    </div>
+  </div>
+</div>
+
+<!-- Ads-Free promo poster — shown once per app open (reuses the giveaway-ad
+     visual style) to non-subscribers, right after the app finishes loading -->
+<div id="adsFreeAdOverlay" class="giveaway-ad-overlay" onclick="if(event.target===this) closeAdsFreeAd()">
+  <div class="giveaway-ad-card">
+    <button class="giveaway-ad-close" onclick="closeAdsFreeAd()"><i class="ti ti-x"></i></button>
+    <div class="giveaway-ad-banner" style="background:linear-gradient(135deg,#8b5cf6,#6d28d9)">
+      <div class="giveaway-ad-badge">✨ NO ADS</div>
+      <div class="giveaway-ad-emoji">🚫📢</div>
+    </div>
+    <div class="giveaway-ad-body">
+      <div class="giveaway-ad-title">Remove Ads Forever!</div>
+      <div class="giveaway-ad-sub">Ambient ads, lecture-click ads, ad-blocker warning — sab band. Ek baar on karo, phir sirf padhai.</div>
+      <div class="giveaway-ad-prizes">
+        <div class="giveaway-ad-prize"><span>🔓</span> Free batches bina "watch ad" ke turant khulenge</div>
+        <div class="giveaway-ad-prize"><span>⚡</span> Koi background/interstitial ad nahi</div>
+        <div class="giveaway-ad-prize"><span>🛡️</span> Ad-blocker warning kabhi nahi dikhegi</div>
+      </div>
+      <button class="giveaway-ad-join" onclick="closeAdsFreeAd();openAdsFreePromo()" style="background:linear-gradient(135deg,#8b5cf6,#6d28d9)"><i class="ti ti-mood-smile"></i> Plans Dekho</button>
+      <div class="giveaway-ad-later" onclick="closeAdsFreeAd()">Maybe later</div>
     </div>
   </div>
 </div>
@@ -5539,26 +5563,43 @@ var _giveawayAdId = null;
 
 async function maybeShowGiveawayAd() {
   var uid = getUserId();
-  if (!uid) return;
+  if (!uid) return false;
   try {
     var r = await fetch('/api/giveaway/status/' + uid);
     var data = await r.json();
-    if (!data.active || data.participating || !data.giveawayId) return;
+    if (!data.active || data.participating || !data.giveawayId) return false;
     var dismissKey = 'giveawayAdDismissed_' + data.giveawayId;
-    if (localStorage.getItem(dismissKey) === '1') return;
+    if (localStorage.getItem(dismissKey) === '1') return false;
     _giveawayAdId = data.giveawayId;
     document.getElementById('giveawayAdOverlay').classList.add('show');
-  } catch (e) { console.error('Giveaway ad check error:', e); }
+    return true;
+  } catch (e) { console.error('Giveaway ad check error:', e); return false; }
 }
 
 function closeGiveawayAd() {
   document.getElementById('giveawayAdOverlay').classList.remove('show');
   if (_giveawayAdId) localStorage.setItem('giveawayAdDismissed_' + _giveawayAdId, '1');
+  maybeShowAdsFreeAd(); // sequenced, never stacked — shows right after this one closes
 }
 
 function joinFromAd() {
   closeGiveawayAd();
   openBotChat();
+}
+
+// Ads-Free promo poster — shown once per app open (fresh chance every time the
+// person opens the app; no permanent "don't show again" flag) to anyone who
+// isn't already subscribed and isn't the owner. Chained after the giveaway ad
+// above (never shown at the same time — see maybeShowGiveawayAd/closeGiveawayAd)
+// so the two overlays never stack on top of each other.
+function maybeShowAdsFreeAd() {
+  if (isAdmin || window._adsFreeActive) return;
+  setTimeout(function () {
+    document.getElementById('adsFreeAdOverlay').classList.add('show');
+  }, 400);
+}
+function closeAdsFreeAd() {
+  document.getElementById('adsFreeAdOverlay').classList.remove('show');
 }
 
 // ── Announcements ─────────────────────────────────────────────────────────────
