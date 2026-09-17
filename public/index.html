@@ -1660,10 +1660,43 @@ function renderRewardsCard() {
     tierRow('batch24h', '🎓', '24 Hour Batch Access', 'Pick any 1 premium batch — full access for 24 hours') +
     tierRow('batch7d', '👑', '7 Day Batch Access', 'Pick any 1 premium batch — full access for a full week');
 
+  // ── Referral-based Ads-Free reward — separate "currency" (raw referral
+  // count, not points), so it gets its own row outside the points tierRow()
+  // helper above. Every 5 referrals earns 1 week Ads-Free.
+  var raf = s.referralAdsFree || { referralsPerReward: 5, rewardDays: 7, progress: 0, available: 0 };
+  var rafAvailable = raf.available > 0;
+  var rafBtnLabel = rafAvailable
+    ? '<i class="ti ti-gift"></i> Redeem (' + raf.available + ')'
+    : (raf.progress + '/' + raf.referralsPerReward);
+  var referralAdsFreeHtml =
+    '<div class="reward-tier">' +
+      '<div class="reward-tier-icon">✨</div>' +
+      '<div class="reward-tier-info">' +
+        '<div class="reward-tier-title">' + raf.rewardDays + ' Day Ads-Free</div>' +
+        '<div class="reward-tier-desc">Har ' + raf.referralsPerReward + ' referrals pe 1 week Ads-Free \u2014 points nahi lagte, seedha referrals se</div>' +
+        '<div class="reward-tier-cost">🔗 ' + raf.progress + '/' + raf.referralsPerReward + ' referrals' + (rafAvailable ? ' \u2014 ' + raf.available + ' ready to redeem!' : '') + '</div>' +
+      '</div>' +
+      '<button class="reward-redeem-btn" ' + (rafAvailable ? '' : 'disabled') + ' onclick="redeemReferralAdsFree()">' + rafBtnLabel + '</button>' +
+    '</div>';
+
   body.innerHTML =
     activeHtml +
     tiersHtml +
+    referralAdsFreeHtml +
     '<button class="reward-view-history-btn" onclick="openRewardHistory()"><i class="ti ti-history"></i> View Redeem History</button>';
+}
+
+async function redeemReferralAdsFree() {
+  var uid = getUserId();
+  if (!uid) return;
+  try {
+    var r = await fetch('/api/rewards/redeem-referral-adsfree', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ userId: uid }) });
+    var d = await r.json();
+    if (!d.success) { toast(d.error || 'Redeem failed', 'error'); return; }
+    toast('✨ ' + d.daysGranted + ' din ka Ads-Free mil gaya! 🎉', 'success');
+    await loadRewardsSummary();
+    await _afterAdsFreePurchase();
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
 }
 
 // ── Live countdown ticking (only while the Refer tab is visible) ─────────────
