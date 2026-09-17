@@ -1570,6 +1570,12 @@ const rewardRedemption = {
       .all(userId, limit || 20)
       .map(r => ({ ...r, redeemedAt: new Date(r.redeemedAt), expiresAt: new Date(r.expiresAt) }));
   },
+  // How many times this user has redeemed a specific reward type — used for
+  // non-points rewards (like the every-5-referrals Ads-Free perk) where
+  // eligibility is "how many times have I already claimed this", not a balance.
+  countByTypeForUser(userId, rewardType) {
+    return getDb().prepare(`SELECT COUNT(*) as c FROM reward_redemptions WHERE userId=? AND rewardType=?`).get(userId, rewardType).c;
+  },
   count() {
     return getDb().prepare(`SELECT COUNT(*) as c FROM reward_redemptions`).get().c;
   },

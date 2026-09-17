@@ -1296,6 +1296,7 @@ async function startBot() {
   BOT_USERNAME = me.username;
   console.log(`Bot started: @${BOT_USERNAME}`);
   courseRoutes.setBot(bot);
+  courseRoutes.setGrantAdsFreeAccess(grantAdsFreeAccess);
 
   try {
     await fetch(`https://api.telegram.org/bot${TOKEN}/setChatMenuButton`, { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ menu_button:{ type:"web_app", text:"Open EduBot", web_app:{ url:WEB_URL } } }) });
