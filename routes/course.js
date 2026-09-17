@@ -14,6 +14,12 @@ const LOGS_GROUP_ID = process.env.LOGS_GROUP_ID ? parseInt(process.env.LOGS_GROU
 // so giveaway confirmation/reversal notifications can be sent from here.
 let _bot = null;
 function setBot(botInstance) { _bot = botInstance; }
+// Injected from server.js after grantAdsFreeAccess is defined there (same
+// setter pattern as setBot above) — lets the referral-based Ads-Free reward
+// below reuse the exact same grant logic Razorpay/Paytm/BharatPe purchases
+// use, instead of duplicating it here.
+let _grantAdsFreeAccess = null;
+function setGrantAdsFreeAccess(fn) { _grantAdsFreeAccess = fn; }
 const esc = (s) => String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 function formatIST(d) {
   const parts = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Kolkata', day: 'numeric', month: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true }).formatToParts(d);
@@ -1012,6 +1018,13 @@ const REWARD_CATALOG = {
   batch7d: { cost: 50, durationMs: 7 * 24 * 60 * 60 * 1000, label: '7 Day Premium Batch Access' },
 };
 
+// Every REFERRALS_PER_ADSFREE_WEEK referrals (raw count, NOT points — separate
+// currency, separate redeem button) earns one redeemable "1 week Ads-Free".
+// Stacks with any existing Ads-Free time (purchased or previously redeemed
+// this way), same as a real purchase. See /rewards/redeem-referral-adsfree.
+const REFERRALS_PER_ADSFREE_WEEK = 5;
+const REFERRAL_ADSFREE_DAYS = 7;
+
 // Single source of truth for the points formula — always fresh from the DB,
 // never trusts a client-sent value. referrals here is the raw referral COUNT;
 // points is the spendable balance (referrals*POINTS_PER_REFERRAL + spinEarned + adjustment - spent).
@@ -1068,7 +1081,64 @@ router.get('/rewards/summary/:userId', (req, res) => {
     const activeBatchRewards = db.batchRewardAccess.listActiveByUser(userId)
       .map(r => ({ batchId: r.batchId, batchName: r.batchName, expiresAt: r.expiresAt }));
 
-    res.json({ referrals, spent, points, accessPass, activeBatchRewards, catalog: REWARD_CATALOG });
+    // Referral-based Ads-Free reward — separate "currency" from points above,
+    // eligibility is purely floor(referrals / 5) minus however many they've
+    // already redeemed this way (never re-derived from points/spent).
+    const referralAdsFreeRedeemed = db.rewardRedemption.countByTypeForUser(userId, 'referralAdsFree');
+    const referralAdsFree = {
+      referralsPerReward: REFERRALS_PER_ADSFREE_WEEK,
+      rewardDays: REFERRAL_ADSFREE_DAYS,
+      progress: referrals % REFERRALS_PER_ADSFREE_WEEK,
+      available: Math.max(0, Math.floor(referrals / REFERRALS_PER_ADSFREE_WEEK) - referralAdsFreeRedeemed),
+    };
+
+    res.json({ referrals, spent, points, accessPass, activeBatchRewards, referralAdsFree, catalog: REWARD_CATALOG });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST — redeem one "5 referrals -> 1 week Ads-Free" reward. Pure referral-
+// count based, costs zero points (separate from REWARD_CATALOG/points above).
+router.post('/rewards/redeem-referral-adsfree', async (req, res) => {
+  try {
+    const { userId } = req.body;
+    if (!userId) return res.status(400).json({ error: 'userId required' });
+    if (!_grantAdsFreeAccess) return res.status(500).json({ error: 'Ads-Free grant is not wired up yet — restart the server.' });
+
+    // ── Critical section: no `await` between the eligibility check and the
+    // ledger insert, so two rapid clicks can't both pass the check and double-
+    // redeem the same batch of 5 referrals. Same pattern as /rewards/redeem.
+    const referrals = db.referral.countByReferrer(userId);
+    const alreadyRedeemed = db.rewardRedemption.countByTypeForUser(userId, 'referralAdsFree');
+    const available = Math.floor(referrals / REFERRALS_PER_ADSFREE_WEEK) - alreadyRedeemed;
+    if (available < 1) {
+      const needed = REFERRALS_PER_ADSFREE_WEEK - (referrals % REFERRALS_PER_ADSFREE_WEEK || REFERRALS_PER_ADSFREE_WEEK);
+      return res.status(400).json({
+        error: `Abhi eligible nahi ho. Har ${REFERRALS_PER_ADSFREE_WEEK} referrals pe 1 week Ads-Free milta hai — ${needed} aur referral chahiye.`,
+        referrals, available: 0,
+      });
+    }
+
+    const redeemedAt = new Date();
+    const id = db.generateId();
+    db.rewardRedemption.insert({
+      id, userId, rewardType: 'referralAdsFree', batchId: null, batchName: '',
+      pointsCost: 0, redeemedAt, expiresAt: redeemedAt, // placeholder; real expiry is the Ads-Free subscription's own, set below
+    });
+    // ── End critical section ─────────────────────────────────────────────
+
+    const expiresAt = await _grantAdsFreeAccess(userId, REFERRAL_ADSFREE_DAYS);
+
+    RewardRedemption.create({
+      userId, rewardType: 'referralAdsFree', batchId: null, batchName: '',
+      pointsCost: 0, redeemedAt, expiresAt: redeemedAt,
+    }).catch(() => {});
+    notifyOwnerOfRedemption({
+      userId, rewardType: 'referralAdsFree',
+      catalogEntry: { label: `${REFERRAL_ADSFREE_DAYS} Day Ads-Free (referral reward)` },
+      batchDoc: null, pointsCost: 0, pointsRemaining: getSpendablePoints(userId), expiresAt,
+    });
+
+    res.json({ success: true, redemptionId: id, rewardType: 'referralAdsFree', daysGranted: REFERRAL_ADSFREE_DAYS, adsFreeExpiresAt: expiresAt, referrals });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -1782,5 +1852,6 @@ module.exports = router;
 module.exports.getPointsBreakdown = getPointsBreakdown;
 module.exports.POINTS_PER_REFERRAL = POINTS_PER_REFERRAL;
 module.exports.setBot = setBot;
+module.exports.setGrantAdsFreeAccess = setGrantAdsFreeAccess;
 module.exports.getSpinStatus = getSpinStatus;
 module.exports.getSpinDailyLimit = getSpinDailyLimit;
