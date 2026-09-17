@@ -1575,6 +1575,18 @@ async function startBot() {
 • /startgiveaway — Launch a new giveaway
 • /endgiveaway — Conclude the active giveaway
 
+<b>✨ Ads-Free Plan</b>
+• /setadsfreeprice (weekly|monthly) (price) — Change the live price, no restart needed
+• /setadsfreeprice — Show current weekly/monthly prices
+• /giveadsfree (days) (userId) — Manually grant/revoke Ads-Free days (negative = revoke)
+• /adsfreeusers — List all active subscribers with time remaining
+
+<b>🛠 Maintenance Mode</b>
+• /maintenance — Show current status + allowed test users
+• /maintenance on / off — Toggle the full-screen maintenance gate for everyone except you
+• /maintenanceallow (userId) — Let a user use the app while maintenance is on
+• /maintenanceblock (userId) — Remove that user's access
+
 <b>📊 System</b>
 • /stats — View bot usage stats
 • /rmword (word) — Add a word to the auto-filter blocklist
