@@ -369,6 +369,34 @@ function getAdsFreeStatus(userId) {
   return { active, expiresAt: rec ? new Date(rec.expiresAt) : null };
 }
 
+// Logs complimentary/zero-rupee Ads-Free activations in the normal payment
+// group. Fire-and-forget: a Telegram notification failure must never undo the
+// actual subscription grant. Paid plans already have their own payment alerts.
+function notifyFreeAdsFreeGrant({ userId, days, expiresAt, source = "Free Grant" }) {
+  if (!PAYMENT_GROUP_ID || !bot || Number(days) <= 0) return;
+  try {
+    const u = db.user.findOne(String(userId));
+    const displayName = u ? ([u.firstName, u.lastName].filter(Boolean).join(' ').trim() || 'Unknown') : 'Unknown';
+    const usernameStr = u && u.username ? ` (@${u.username})` : '';
+    const expiry = new Date(expiresAt);
+    const expiryText = expiry.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium', timeStyle: 'short' });
+    const text =
+      `🎁 <b>FREE Ads-Free Subscription</b>\n\n` +
+      `👤 User: <b>${esc(displayName)}${esc(usernameStr)}</b>\n` +
+      `🆔 UID: <code>${esc(userId)}</code>\n` +
+      `🗓️ Granted: <b>${esc(days)} day(s)</b>\n` +
+      `💰 Amount: <b>₹0 (FREE)</b>\n` +
+      `🏷️ Source: <b>${esc(source)}</b>\n` +
+      `⏳ Ads-Free Until: <b>${esc(expiryText)}</b>\n\n` +
+      `✅ <b>ACTIVATED</b>`;
+    bot.sendMessage(PAYMENT_GROUP_ID, text, { parse_mode: 'HTML' }).catch((err) => {
+      console.error('Free Ads-Free payment-group notify error:', err.message);
+    });
+  } catch (err) {
+    console.error('Free Ads-Free payment-group notify error:', err.message);
+  }
+}
+
 // Resolves a "product" (a real batch, or an Ads-Free plan sentinel) to a
 // display name + price, used wherever a payment flow needs to show/charge an
 // amount without caring which of the two it actually is.
@@ -557,10 +585,12 @@ async function sendFile(bot, chatId, record) {
   // instead of the raw file_name — looked up via getLectureContext(record.code),
   // the same index used for the logs-group messages.
   const caption = buildLectureCaption(record);
-  // Forward-restriction (protect_content) should only apply to videos — other file types
-  // (photo, audio, voice, document) must stay freely forwardable even for non-owners.
+  // Forward-restriction (protect_content) should only apply to videos. The owner
+  // always bypasses it, and delegated admins can be given the separate
+  // `forwardVideos` permission without receiving unrelated admin powers.
+  // Other file types stay freely forwardable for everyone, as before.
   const isVideoType = record.file_type === "video" || record.file_type === "video_note";
-  const protect = isVideoType && !isOwner(chatId);
+  const protect = isVideoType && !hasBotAdminPower(chatId, 'forwardVideos');
   try {
     switch(record.file_type) {
       case "photo":      return await bot.sendPhoto(chatId, record.file_id, { caption, parse_mode: "HTML", protect_content: protect });
@@ -676,6 +706,10 @@ async function scheduleDelete(bot, chatId, messageId, deleteAt) {
 // the number evicted (0 if none) — no message sent here, callers combine this
 // into their own single "video sent" notice (see evictionNotice() below).
 async function enforceActiveVideoCap(bot, chatId) {
+  // Owner is intentionally exempt from the max-3 active lecture cap. Videos
+  // still keep their normal 6-hour auto-delete timer; only the rolling cap is
+  // bypassed for the owner account.
+  if (isOwner(Number(chatId))) return 0;
   const raw = db.pendingDelete.getByChatId(chatId);
   // De-dupe by message_id — any already-existing duplicate rows left over from
   // before the _id fix above (or any future resync edge case) must never be
@@ -1010,6 +1044,15 @@ app.get("/api/payment-qr", async (req, res) => {
 });
 
 const courseRoutes = require("./routes/course");
+function hasBotAdminPower(userId, power) {
+  return isOwner(Number(userId)) || !!(courseRoutes.hasAdminPower && courseRoutes.hasAdminPower(userId, power));
+}
+function canUseAutoLectureUpload(userId) {
+  // Upload Lecture is independent from web Admin Panel Access. A delegated
+  // uploader can save files at any time; if auto-save mode is currently active,
+  // those files are additionally attached to the selected course location.
+  return hasBotAdminPower(userId, 'uploadLectures');
+}
 const GiveawayInvite = mongoose.model("GiveawayInvite"); // schema lives in routes/course.js, registered at require-time above
 app.use("/api", courseRoutes);
 const autoLectureSession = courseRoutes.autoLectureSession;
@@ -1297,6 +1340,7 @@ async function startBot() {
   console.log(`Bot started: @${BOT_USERNAME}`);
   courseRoutes.setBot(bot);
   courseRoutes.setGrantAdsFreeAccess(grantAdsFreeAccess);
+  courseRoutes.setNotifyFreeAdsFreeGrant(notifyFreeAdsFreeGrant);
 
   try {
     await fetch(`https://api.telegram.org/bot${TOKEN}/setChatMenuButton`, { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ menu_button:{ type:"web_app", text:"Open EduBot", web_app:{ url:WEB_URL } } }) });
@@ -1514,9 +1558,25 @@ async function startBot() {
     } catch (_) {}
 
     const referLinkLine = isParticipating ? "" : `\n\n🔗 <b>Your Invite Link:</b> (tap to copy)\n<code>${referLink}</code>`;
+    const delegatedAdmin = !isOwner(userId) && !!(courseRoutes.isAnyAdmin && courseRoutes.isAnyAdmin(userId));
+    let delegatedAdminHelp = "";
+    if (delegatedAdmin) {
+      const lines = [];
+      if (hasBotAdminPower(userId, 'adminPanel')) lines.push(`⚙️ Admin Panel Access — app ka Admin button enabled`);
+      if (hasBotAdminPower(userId, 'uploadLectures')) lines.push(`⬆️ Upload Lecture — media/t.me link, /bulk, /done, /cancel, /rmword`);
+      if (hasBotAdminPower(userId, 'myfiles')) lines.push(`📂 MyFiles — /myfiles`);
+      if (hasBotAdminPower(userId, 'broadcast')) lines.push(`📡 Broadcast — /broadcast &lt;text&gt; or reply to media`);
+      if (hasBotAdminPower(userId, 'banUsers')) lines.push(`🚫 Ban / Unban — /ban, /unban, /banned`);
+      if (hasBotAdminPower(userId, 'adsFreeSubscribers')) lines.push(`✨ Ads-Free Subscribers — /giveadsfree, /adsfreeusers`);
+      if (hasBotAdminPower(userId, 'viewStats')) lines.push(`📊 View Stats — /stats`);
+      if (hasBotAdminPower(userId, 'forwardVideos')) lines.push(`📤 Forward Permission — lecture videos forward/save protection ke bina milenge`);
+      delegatedAdminHelp = `\n\n🛡️ <b>Your Admin Powers</b>\n${lines.length ? lines.join("\n") : "No operational powers enabled right now."}`;
+    }
     const welcomeText = (isOwner(userId)
-      ? `👋 Hello Admin!\n\nTap below to browse lectures! 📚\n\n📁 File Store:\n/bulk — bulk upload\n/myfiles — view files\n/delete &lt;code&gt; — delete file\n/rmword 'word' — remove word from names\n/cancel — cancel bulk\n\n📡 Broadcast:\n/broadcast &lt;text&gt; or reply to media${referLinkLine}`
-      : `👋 Hello ${msg.from.first_name}!\n\nTap below to browse all lectures! 📚${referLinkLine}${isParticipating ? "" : "\n\nShare karo aur har referral pe <b>5 points</b> kamao! 🎁"}`) + giveawayBanner;
+      ? `👋 Hello Owner!\n\nTap below to browse lectures! 📚\n\n📁 File Store:\n/bulk — bulk upload\n/myfiles — view files\n/delete &lt;code&gt; — delete file\n/rmword 'word' — remove word from names\n/cancel — cancel bulk\n\n📡 Broadcast:\n/broadcast &lt;text&gt; or reply to media${referLinkLine}`
+      : delegatedAdmin
+        ? `👋 Hello ${msg.from.first_name}!\n\nTap below to browse lectures! 📚${delegatedAdminHelp}${referLinkLine}`
+        : `👋 Hello ${msg.from.first_name}!\n\nTap below to browse all lectures! 📚${referLinkLine}${isParticipating ? "" : "\n\nShare karo aur har referral pe <b>5 points</b> kamao! 🎁"}`) + giveawayBanner;
     const shareUrl = (!isParticipating && referLink) ? `https://t.me/share/url?url=${encodeURIComponent(referLink)}&text=${encodeURIComponent("Join and get free lectures! 📚")}` : "";
     const startButtons = [[{ text:"📚 Browse Lectures", web_app:{ url:WEB_URL } }]];
     if (shareUrl) startButtons.push([{ text:"📤 Share & Earn Points", url: shareUrl }]);
@@ -1604,7 +1664,7 @@ async function startBot() {
   // attached — whichever happened last. Only one level deep by design (no
   // action history stack), so a second /undo right after says "nothing to undo".
   bot.onText(/\/undo/, async (msg) => {
-    if (isGroupChat(msg) || !isOwner(msg.from?.id)) return;
+    if (isGroupChat(msg) || !hasBotAdminPower(msg.from?.id, 'uploadLectures')) return;
     const chatId = msg.chat.id;
     if (!autoLectureSession.active) return bot.sendMessage(chatId, `⚠️ Auto-save mode isn't active right now.`);
     if (!autoLectureSession.lastLectureId || !autoLectureSession.lastActionType) return bot.sendMessage(chatId, `Nothing to undo — no action recorded yet this session.`);
@@ -1632,7 +1692,7 @@ async function startBot() {
   // Resets unit to none, lecture numbering to whatever already exists in that
   // chapter, and clears the undo pointer (nothing to undo across a switch).
   bot.onText(/\/nextchapter/, async (msg) => {
-    if (isGroupChat(msg) || !isOwner(msg.from?.id)) return;
+    if (isGroupChat(msg) || !hasBotAdminPower(msg.from?.id, 'uploadLectures')) return;
     const chatId = msg.chat.id;
     if (!autoLectureSession.active) return bot.sendMessage(chatId, `⚠️ Auto-save mode isn't active right now. Start it from the app first.`);
     try {
@@ -1667,7 +1727,7 @@ async function startBot() {
   // is currently at chapter-level (no unit selected), this moves to the
   // chapter's first unit rather than a "next" one.
   bot.onText(/\/nextunit/, async (msg) => {
-    if (isGroupChat(msg) || !isOwner(msg.from?.id)) return;
+    if (isGroupChat(msg) || !hasBotAdminPower(msg.from?.id, 'uploadLectures')) return;
     const chatId = msg.chat.id;
     if (!autoLectureSession.active) return bot.sendMessage(chatId, `⚠️ Auto-save mode isn't active right now. Start it from the app first.`);
     try {
@@ -1704,7 +1764,7 @@ async function startBot() {
 
   // ── /bulk ─────────────────────────────────────────────────────────────────
   bot.onText(/\/bulk/, async (msg) => {
-    if (isGroupChat(msg)||!isOwner(msg.from?.id)) return;
+    if (isGroupChat(msg)||!hasBotAdminPower(msg.from?.id, 'uploadLectures')) return;
     const chatId=msg.chat.id; const userId=msg.from.id;
     if (bulkSessions.has(userId)) return bot.sendMessage(chatId, `⚠️ Bulk mode already active! Use /done or /cancel.`);
     const timer = setTimeout(async () => { if(bulkSessions.has(userId)){bulkSessions.delete(userId);try{await bot.sendMessage(chatId,`⏰ Bulk session timed out. Use /bulk to start again.`);}catch(_){}} }, BULK_TIMEOUT_MS);
@@ -1714,7 +1774,7 @@ async function startBot() {
 
   // ── /done ─────────────────────────────────────────────────────────────────
   bot.onText(/\/done/, async (msg) => {
-    if (isGroupChat(msg)||!isOwner(msg.from?.id)) return;
+    if (isGroupChat(msg)||!hasBotAdminPower(msg.from?.id, 'uploadLectures')) return;
     const chatId=msg.chat.id; const userId=msg.from.id;
     const session=bulkSessions.get(userId);
     if (!session) return bot.sendMessage(chatId, `No active bulk session. Use /bulk to start.`);
@@ -1737,7 +1797,7 @@ async function startBot() {
 
   // ── /cancel ───────────────────────────────────────────────────────────────
   bot.onText(/\/cancel/, async (msg) => {
-    if (isGroupChat(msg)||!isOwner(msg.from?.id)) return;
+    if (isGroupChat(msg)||!hasBotAdminPower(msg.from?.id, 'uploadLectures')) return;
     const chatId=msg.chat.id; const userId=msg.from.id;
     const session=bulkSessions.get(userId);
     if (!session) return bot.sendMessage(chatId,`No active bulk session.`);
@@ -1772,7 +1832,7 @@ async function startBot() {
       else await bot.sendMessage(chatId,text,{disable_web_page_preview:true,reply_markup:rm});
     } catch(err){console.error("myfiles error:",err.message);bot.sendMessage(chatId,`Error occurred.`);}
   }
-  bot.onText(/\/myfiles/, async (msg) => { if(isGroupChat(msg)||!isOwner(msg.from?.id)) return; await sendMyFilesPage(msg.chat.id,msg.from.id,0); });
+  bot.onText(/\/myfiles/, async (msg) => { if(isGroupChat(msg)||!hasBotAdminPower(msg.from?.id, 'myfiles')) return; await sendMyFilesPage(msg.chat.id,msg.from.id,0); });
 
   // ── Callback queries ──────────────────────────────────────────────────────
   bot.on("callback_query", async (query) => {
@@ -1797,10 +1857,16 @@ async function startBot() {
       return;
     }
     if(query.message&&isGroupChat(query.message)) return bot.answerCallbackQuery(query.id);
-    if(!isOwner(userId)) return bot.answerCallbackQuery(query.id);
-    if(data.startsWith("myfiles_page_")){const page=parseInt(data.replace("myfiles_page_",""),10);await sendMyFilesPage(query.message.chat.id,userId,page,msgId);await bot.answerCallbackQuery(query.id);}
+    if(data.startsWith("myfiles_page_")){
+      if(!hasBotAdminPower(userId, 'myfiles')) return bot.answerCallbackQuery(query.id,{text:"❌ Not authorized"});
+      const page=parseInt(data.replace("myfiles_page_",""),10);
+      await sendMyFilesPage(query.message.chat.id,userId,page,msgId);
+      return bot.answerCallbackQuery(query.id);
+    }
     if(data.startsWith("ban_")){
+      if(!hasBotAdminPower(userId, 'banUsers')) return bot.answerCallbackQuery(query.id,{text:"❌ Not authorized"});
       const targetId=data.replace("ban_","");
+      if(!isOwner(userId) && courseRoutes.isAnyAdmin && courseRoutes.isAnyAdmin(targetId)) return bot.answerCallbackQuery(query.id,{text:"❌ Admin accounts can only be moderated by the owner"});
       try {
         db.bannedUser.ban({ userId: targetId, reason: "Suspicious activity (3+ lecture requests within 5 min)", bannedBy: String(userId) });
         const deletedCount = await deleteAllPendingVideosForUser(bot, parseInt(targetId,10));
@@ -1809,7 +1875,9 @@ async function startBot() {
         await bot.answerCallbackQuery(query.id,{text:"🚫 User banned"});
         bot.sendMessage(parseInt(targetId,10), `🚫 You have been banned from using this bot.\n\nContact the admin if you think this is a mistake.`).catch(() => {});
       } catch(err){ await bot.answerCallbackQuery(query.id,{text:"❌ Error: "+err.message}); }
+      return;
     }
+    if(!isOwner(userId)) return bot.answerCallbackQuery(query.id);
   });
 
   // ── /delete ───────────────────────────────────────────────────────────────
@@ -1825,12 +1893,13 @@ async function startBot() {
 
   // ── /ban <userId> [reason] ───────────────────────────────────────────────
   bot.onText(/\/ban (.+)/, async (msg,match) => {
-    if(isGroupChat(msg)||!isOwner(msg.from?.id)) return;
+    if(isGroupChat(msg)||!hasBotAdminPower(msg.from?.id, 'banUsers')) return;
     const chatId=msg.chat.id;
     const parts=match[1].trim().split(/\s+/);
     const targetId=parts.shift();
     const reason=parts.join(" ");
     if(!targetId||isNaN(parseInt(targetId,10))) return bot.sendMessage(chatId,`Usage: /ban <userId> [reason]`);
+    if(!isOwner(msg.from?.id) && courseRoutes.isAnyAdmin && courseRoutes.isAnyAdmin(targetId)) return bot.sendMessage(chatId,`❌ Admin accounts can only be banned by the owner.`);
     try {
       db.bannedUser.ban({ userId: targetId, reason, bannedBy: String(msg.from.id) });
       const deletedCount = await deleteAllPendingVideosForUser(bot, parseInt(targetId,10));
@@ -1840,7 +1909,7 @@ async function startBot() {
 
   // ── /unban <userId> ──────────────────────────────────────────────────────
   bot.onText(/\/unban (.+)/, async (msg,match) => {
-    if(isGroupChat(msg)||!isOwner(msg.from?.id)) return;
+    if(isGroupChat(msg)||!hasBotAdminPower(msg.from?.id, 'banUsers')) return;
     const chatId=msg.chat.id;
     const targetId=match[1].trim();
     try {
@@ -1851,7 +1920,7 @@ async function startBot() {
 
   // ── /banned ───────────────────────────────────────────────────────────────
   bot.onText(/\/banned/, async (msg) => {
-    if(isGroupChat(msg)||!isOwner(msg.from?.id)) return;
+    if(isGroupChat(msg)||!hasBotAdminPower(msg.from?.id, 'banUsers')) return;
     const chatId=msg.chat.id;
     try {
       const list=db.bannedUser.listAll();
@@ -1972,7 +2041,7 @@ async function startBot() {
 
   // ── /rmword ───────────────────────────────────────────────────────────────
   bot.onText(/\/rmword(.*)/, async (msg,match) => {
-    if(isGroupChat(msg)||!isOwner(msg.from?.id)) return;
+    if(isGroupChat(msg)||!hasBotAdminPower(msg.from?.id, 'uploadLectures')) return;
     const chatId=msg.chat.id; const arg=(match[1]||"").trim();
     if(arg.toLowerCase()==="list") return bot.sendMessage(chatId,rmWords.length?`📋 Words:\n${rmWords.map((w,i)=>`${i+1}. <code>${esc(w)}</code>`).join("\n")}`:`No words in list.`,{parse_mode:"HTML"});
     if(arg.toLowerCase()==="clear"){const c=rmWords.length;rmWords=[];return bot.sendMessage(chatId,`🗑️ Cleared ${c} word(s).`);}
@@ -2235,7 +2304,7 @@ async function startBot() {
   // outside the payment flow. Stacks on top of any existing remaining time,
   // same as a real purchase (see grantAdsFreeAccess).
   bot.onText(/\/giveadsfree(?:\s+(-?\d+)\s+(\S+))?/, async (msg, match) => {
-    if (isGroupChat(msg) || !isOwner(msg.from?.id)) return;
+    if (isGroupChat(msg) || !hasBotAdminPower(msg.from?.id, 'adsFreeSubscribers')) return;
     const chatId = msg.chat.id;
     const days = match[1] ? parseInt(match[1], 10) : NaN;
     const userId = match[2];
@@ -2250,6 +2319,14 @@ async function startBot() {
       const displayName = [u.firstName, u.lastName].filter(Boolean).join(' ').trim() || 'Unknown';
       const usernameStr = u.username ? ` (@${u.username})` : '';
       const active = expiresAt > new Date();
+      if (days > 0) {
+        notifyFreeAdsFreeGrant({
+          userId,
+          days,
+          expiresAt,
+          source: isOwner(msg.from?.id) ? 'Owner Gift (/giveadsfree)' : `Admin Grant (/giveadsfree) — ${msg.from.first_name || msg.from.id}`,
+        });
+      }
       await bot.sendMessage(chatId,
         `✅ ${days > 0 ? 'Granted' : 'Reduced'} <b>${Math.abs(days)}</b> Ads-Free day(s) for ${esc(displayName)}${esc(usernameStr)}\n` +
         `🆔 <code>${esc(userId)}</code>\n` +
@@ -2271,7 +2348,7 @@ async function startBot() {
   // expiring first, with how much time each has left — a quick way to see who
   // to nudge about renewing before they're locked out again.
   bot.onText(/\/adsfreeusers/, async (msg) => {
-    if (isGroupChat(msg) || !isOwner(msg.from?.id)) return;
+    if (isGroupChat(msg) || !hasBotAdminPower(msg.from?.id, 'adsFreeSubscribers')) return;
     const chatId = msg.chat.id;
     try {
       const active = db.adsFree.getAllActive();
@@ -2422,7 +2499,7 @@ async function startBot() {
   function enqueueFile(userId,task){const prev=fileQueues.get(userId)||Promise.resolve();const next=prev.then(task).catch(()=>{});fileQueues.set(userId,next);next.finally(()=>{if(fileQueues.get(userId)===next)fileQueues.delete(userId);});}
 
   bot.onText(TG_LINK_RE, (msg,match) => {
-    if(isGroupChat(msg)||!isOwner(msg.from?.id)) return;
+    if(isGroupChat(msg)||!canUseAutoLectureUpload(msg.from?.id)) return;
     enqueueFile(msg.from.id, async () => {
       const chatId=msg.chat.id; const userId=msg.from.id;
       const isPrivate=!!match[2]; const rawId=match[2]; const username=match[3]; const messageId=parseInt(match[4],10);
@@ -2495,7 +2572,7 @@ async function startBot() {
 
   // ── File upload handler ───────────────────────────────────────────────────
   bot.on("message", (msg) => {
-    if(isGroupChat(msg)||msg.text||!isOwner(msg.from?.id)) return;
+    if(isGroupChat(msg)||msg.text||!canUseAutoLectureUpload(msg.from?.id)) return;
     if(msg.text&&TG_LINK_RE.test(msg.text)) return;
     const chatId=msg.chat.id; const userId=msg.from.id;
     const fileInfo=extractFileInfo(msg);
@@ -2524,7 +2601,7 @@ async function startBot() {
 
   // ── /broadcast ────────────────────────────────────────────────────────────
   bot.onText(/\/broadcast(.*)/, async (msg,match) => {
-    if(isGroupChat(msg)||!isOwner(msg.from?.id)) return;
+    if(isGroupChat(msg)||!hasBotAdminPower(msg.from?.id, 'broadcast')) return;
     const chatId=msg.chat.id; const argRaw=(match[1]||"").trim();
     const pinFlag=argRaw.includes("--pin"); const forwardFlag=argRaw.includes("--f");
     const inlineText=argRaw.replace("--pin","").replace("--f","").trim();
@@ -2579,11 +2656,11 @@ async function startBot() {
   const nf = (n) => Number(n || 0).toLocaleString('en-IN');
 
   bot.onText(/\/stats/, async (msg) => {
-    if(isGroupChat(msg)||!isOwner(msg.from?.id)) return;
+    if(isGroupChat(msg)||!hasBotAdminPower(msg.from?.id, 'viewStats')) return;
     const chatId=msg.chat.id;
     const processing=await bot.sendMessage(chatId,"⏳ Fetching stats...");
     try {
-      const s=await (await fetch(`http://localhost:${PORT}/api/stats`)).json();
+      const s = courseRoutes.buildStatsSnapshot();
       const uptime=process.uptime(); const d=Math.floor(uptime/86400); const h=Math.floor((uptime%86400)/3600); const m=Math.floor((uptime%3600)/60);
       const uptimeStr = d>0 ? `${d}d ${h}h ${m}m` : `${h}h ${m}m`;
 
@@ -2606,6 +2683,12 @@ async function startBot() {
         `┣ Total Granted: ${nf(s.access.totalAccess)}`,
         `┣ Granted Today: +${nf(s.access.grantedToday)}`,
         `┗ Currently Active: ${nf(s.access.activeAccess)}`,
+        ``,
+        `✨ ADS-FREE`,
+        `┣ Active Subscribers: ${nf(s.adsFree?.active)}`,
+        `┣ Expiring in 24h: ${nf(s.adsFree?.expiring24h)}  |  7d: ${nf(s.adsFree?.expiring7d)}`,
+        `┣ Expired Records: ${nf(s.adsFree?.expired)}  |  Total Records: ${nf(s.adsFree?.totalRecords)}`,
+        `┗ Price: Weekly ₹${nf(s.adsFree?.weeklyPrice)}  |  Monthly ₹${nf(s.adsFree?.monthlyPrice)}`,
         ``,
         `👫 REFERRALS`,
         `┣ Total Referrals: ${nf(s.referrals.totalReferrals)}`,

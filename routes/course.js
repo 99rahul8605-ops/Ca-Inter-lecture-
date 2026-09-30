@@ -20,6 +20,11 @@ function setBot(botInstance) { _bot = botInstance; }
 // use, instead of duplicating it here.
 let _grantAdsFreeAccess = null;
 function setGrantAdsFreeAccess(fn) { _grantAdsFreeAccess = fn; }
+// Optional notifier injected by server.js so zero-rupee Ads-Free grants can be
+// logged in the same payment group as paid subscriptions without coupling this
+// route module to Telegram/payment-group configuration.
+let _notifyFreeAdsFreeGrant = null;
+function setNotifyFreeAdsFreeGrant(fn) { _notifyFreeAdsFreeGrant = fn; }
 const esc = (s) => String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 function formatIST(d) {
   const parts = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Kolkata', day: 'numeric', month: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true }).formatToParts(d);
@@ -35,55 +40,161 @@ function formatUserLabel(userId) {
   return name + (u.username ? ` (@${u.username})` : '');
 }
 
-// ── Admin verification ────────────────────────────────────────────────────────
-function verifyAdmin(req, res, next) {
-  const initData = req.headers["x-tg-init-data"];
-  if (!initData) return res.status(401).json({ error: "Unauthorized" });
-  try {
-    const params = new URLSearchParams(initData);
-    const hash = params.get("hash");
-    params.delete("hash");
-    const dataCheckString = Array.from(params.entries()).sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => `${k}=${v}`).join("\n");
-    const secretKey = crypto.createHmac("sha256", "WebAppData").update(BOT_TOKEN).digest();
-    const expectedHash = crypto.createHmac("sha256", secretKey).update(dataCheckString).digest("hex");
-    if (expectedHash !== hash) return res.status(401).json({ error: "Invalid signature" });
-    const user = JSON.parse(params.get("user") || "{}");
-    if (user.id !== OWNER_ID) return res.status(403).json({ error: "Forbidden" });
-    next();
-  } catch (e) { return res.status(401).json({ error: "Verification failed" }); }
+// ── Admin / role verification ───────────────────────────────────────────────
+// Admins are stored in SQLite's generic settings table so the owner can add or
+// revoke them instantly without a redeploy. The owner always has every power.
+const ADMIN_POWER_DEFS = [
+  { id: 'adminPanel', label: 'Admin Panel Access', description: 'Open and use the web admin panel (content, premium access, announcements, coupons and manual lecture management).' },
+  { id: 'forwardVideos', label: 'Forward Permission', description: 'Receive lecture videos without Telegram forward/save protection.' },
+  { id: 'uploadLectures', label: 'Upload Lecture', description: 'Upload files/lectures through the bot, use bulk upload, t.me import and auto-lecture upload commands.' },
+  { id: 'broadcast', label: 'Broadcast', description: 'Use /broadcast to send text or media to all users.' },
+  { id: 'myfiles', label: 'MyFiles Command', description: 'Use /myfiles and its pagination to view files uploaded by this admin.' },
+  { id: 'banUsers', label: 'Ban / Unban Users', description: 'Use /ban, /unban and /banned for user moderation.' },
+  { id: 'adsFreeSubscribers', label: 'Ads-Free Subscriber Control', description: 'Use /giveadsfree to add/reduce Ads-Free subscription time and /adsfreeusers to view active subscribers.' },
+  { id: 'viewStats', label: 'View Stats', description: 'Use /stats to view bot, content, access, referral and Ads-Free statistics.' },
+];
+const ADMIN_POWER_IDS = new Set(ADMIN_POWER_DEFS.map(p => p.id));
+
+function getAdminList() {
+  const raw = db.settings.get('web_admins', []);
+  return Array.isArray(raw) ? raw : [];
+}
+function saveAdminList(list) { db.settings.set('web_admins', list); }
+function getAdminRecord(userId) {
+  const uid = String(userId || '');
+  return getAdminList().find(a => String(a.userId) === uid && a.active !== false) || null;
+}
+function sanitizePermissions(perms) {
+  const arr = Array.isArray(perms) ? perms : [];
+  const out = [];
+  for (const p of arr) {
+    if (ADMIN_POWER_IDS.has(p)) out.push(p);
+    // Backward compatibility for admins created by older builds. Old web-panel
+    // permissions collapse into the new single Admin Panel Access switch.
+    if (['content','premium','announcements','coupons'].includes(p)) out.push('adminPanel');
+    if (p === 'autoLecture') { out.push('adminPanel'); out.push('uploadLectures'); }
+  }
+  return [...new Set(out)];
+}
+function hasAdminPower(userId, power) {
+  const n = Number(userId);
+  if (n && n === OWNER_ID) return true;
+  const rec = getAdminRecord(userId);
+  if (!rec) return false;
+  const perms = sanitizePermissions(rec.permissions);
+  if (perms.includes(power)) return true;
+  // Existing route names are kept as internal aliases so the owner-facing
+  // toggles remain simple without weakening backend authorization.
+  if (['content','premium','announcements','coupons'].includes(power)) return perms.includes('adminPanel');
+  if (power === 'autoLecture') return perms.includes('adminPanel') && perms.includes('uploadLectures');
+  // Registered sub-admins keep normal admin/viewer exemptions even when all
+  // operational powers are temporarily switched off.
+  if (power === 'bypassRestrictions') return true;
+  return false;
+}
+function isAnyAdmin(userId) {
+  const n = Number(userId);
+  if (n && n === OWNER_ID) return true;
+  return !!getAdminRecord(userId);
 }
 
-function isAdminRequest(req) {
-  const initData = req.headers["x-tg-init-data"];
-  if (!initData) return false;
-  try {
-    const params = new URLSearchParams(initData);
-    const hash = params.get("hash");
-    params.delete("hash");
-    const dataCheckString = Array.from(params.entries()).sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => `${k}=${v}`).join("\n");
-    const secretKey = crypto.createHmac("sha256", "WebAppData").update(BOT_TOKEN).digest();
-    const expectedHash = crypto.createHmac("sha256", secretKey).update(dataCheckString).digest("hex");
-    if (expectedHash !== hash) return false;
-    const user = JSON.parse(params.get("user") || "{}");
-    return user.id === OWNER_ID;
-  } catch (e) { return false; }
-}
-
-function getRequestUserId(req) {
-  const initData = req.headers["x-tg-init-data"];
+function getVerifiedWebAppUser(req) {
+  const initData = req.headers['x-tg-init-data'];
   if (!initData) return null;
   try {
     const params = new URLSearchParams(initData);
-    const hash = params.get("hash");
-    params.delete("hash");
-    const dataCheckString = Array.from(params.entries()).sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => `${k}=${v}`).join("\n");
-    const secretKey = crypto.createHmac("sha256", "WebAppData").update(BOT_TOKEN).digest();
-    const expectedHash = crypto.createHmac("sha256", secretKey).update(dataCheckString).digest("hex");
+    const hash = params.get('hash');
+    if (!hash) return null;
+    params.delete('hash');
+    const dataCheckString = Array.from(params.entries()).sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => `${k}=${v}`).join('\n');
+    const secretKey = crypto.createHmac('sha256', 'WebAppData').update(BOT_TOKEN).digest();
+    const expectedHash = crypto.createHmac('sha256', secretKey).update(dataCheckString).digest('hex');
     if (expectedHash !== hash) return null;
-    const user = JSON.parse(params.get("user") || "{}");
-    return user.id ? String(user.id) : null;
+    const user = JSON.parse(params.get('user') || '{}');
+    return user && user.id ? user : null;
   } catch (e) { return null; }
 }
+
+function verifyOwner(req, res, next) {
+  const user = getVerifiedWebAppUser(req);
+  if (!user) return res.status(401).json({ error: 'Unauthorized' });
+  if (Number(user.id) !== OWNER_ID) return res.status(403).json({ error: 'Owner only' });
+  req.tgUser = user;
+  next();
+}
+
+function verifyPower(power) {
+  return function(req, res, next) {
+    const user = getVerifiedWebAppUser(req);
+    if (!user) return res.status(401).json({ error: 'Unauthorized' });
+    if (!hasAdminPower(user.id, power)) return res.status(403).json({ error: `Missing admin permission: ${power}` });
+    req.tgUser = user;
+    next();
+  };
+}
+
+// Backwards-compatible alias for content-management routes. New non-content
+// admin features below use verifyPower(...) explicitly.
+const verifyAdmin = verifyPower('content');
+
+function isAdminRequest(req) {
+  const user = getVerifiedWebAppUser(req);
+  return !!user && hasAdminPower(user.id, 'content');
+}
+function getRequestUserId(req) {
+  const user = getVerifiedWebAppUser(req);
+  return user ? String(user.id) : null;
+}
+
+// Current role/permissions for the logged-in Telegram WebApp user.
+router.get('/admin/me', (req, res) => {
+  const user = getVerifiedWebAppUser(req);
+  if (!user) return res.json({ isOwner: false, isAdmin: false, permissions: [] });
+  const owner = Number(user.id) === OWNER_ID;
+  const rec = owner ? null : getAdminRecord(user.id);
+  const permissions = owner ? ADMIN_POWER_DEFS.map(p => p.id) : (rec ? sanitizePermissions(rec.permissions) : []);
+  res.json({ isOwner: owner, isAdmin: owner || !!rec, permissions });
+});
+
+// Owner-only admin manager. The owner cannot be removed or downgraded here.
+router.get('/admins', verifyOwner, (req, res) => {
+  res.json({ admins: getAdminList().map(a => ({ ...a, permissions: sanitizePermissions(a.permissions) })), powers: ADMIN_POWER_DEFS });
+});
+router.post('/admins', verifyOwner, (req, res) => {
+  const uid = String(req.body.userId || '').trim();
+  if (!/^\d+$/.test(uid)) return res.status(400).json({ error: 'Valid numeric Telegram user ID required' });
+  if (Number(uid) === OWNER_ID) return res.status(400).json({ error: 'Owner already has all permissions' });
+  const permissions = sanitizePermissions(req.body.permissions);
+  const list = getAdminList();
+  const idx = list.findIndex(a => String(a.userId) === uid);
+  const record = { userId: uid, label: String(req.body.label || '').trim().slice(0, 80), permissions, active: true, updatedAt: new Date().toISOString() };
+  if (idx >= 0) list[idx] = { ...list[idx], ...record }; else list.push(record);
+  saveAdminList(list);
+  res.json({ success: true, admin: record });
+});
+router.patch('/admins/:uid', verifyOwner, (req, res) => {
+  const uid = String(req.params.uid || '').trim();
+  const list = getAdminList();
+  const idx = list.findIndex(a => String(a.userId) === uid);
+  if (idx < 0) return res.status(404).json({ error: 'Admin not found' });
+  if (req.body.permissions !== undefined) {
+    const permissions = sanitizePermissions(req.body.permissions);
+    list[idx].permissions = permissions;
+  }
+  if (req.body.label !== undefined) list[idx].label = String(req.body.label || '').trim().slice(0, 80);
+  if (req.body.active !== undefined) list[idx].active = req.body.active !== false;
+  list[idx].updatedAt = new Date().toISOString();
+  saveAdminList(list);
+  res.json({ success: true, admin: { ...list[idx], permissions: sanitizePermissions(list[idx].permissions) } });
+});
+router.delete('/admins/:uid', verifyOwner, (req, res) => {
+  const uid = String(req.params.uid || '').trim();
+  const before = getAdminList();
+  const after = before.filter(a => String(a.userId) !== uid);
+  if (after.length === before.length) return res.status(404).json({ error: 'Admin not found' });
+  saveAdminList(after);
+  res.json({ success: true });
+});
 
 // ── Helper: strip premium links ───────────────────────────────────────────────
 function stripPremiumLinks(b) {
@@ -365,7 +476,7 @@ router.patch("/batches/:bid/edit", verifyAdmin, async (req, res) => {
 
 // ── Premium Users ─────────────────────────────────────────────────────────────
 
-router.get("/batches/:bid/premium-users", verifyAdmin, async (req, res) => {
+router.get("/batches/:bid/premium-users", verifyPower('premium'), async (req, res) => {
   try {
     const b = db.batch.getOne(req.params.bid);
     if (!b) return res.status(404).json({ error: "Batch not found" });
@@ -373,7 +484,7 @@ router.get("/batches/:bid/premium-users", verifyAdmin, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.post("/batches/:bid/premium-users", verifyAdmin, async (req, res) => {
+router.post("/batches/:bid/premium-users", verifyPower('premium'), async (req, res) => {
   try {
     const batch = await Batch.findById(req.params.bid);
     if (!batch) return res.status(404).json({ error: "Batch not found" });
@@ -386,7 +497,7 @@ router.post("/batches/:bid/premium-users", verifyAdmin, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.delete("/batches/:bid/premium-users/:uid", verifyAdmin, async (req, res) => {
+router.delete("/batches/:bid/premium-users/:uid", verifyPower('premium'), async (req, res) => {
   try {
     const batch = await Batch.findById(req.params.bid);
     if (!batch) return res.status(404).json({ error: "Batch not found" });
@@ -807,7 +918,7 @@ router.get("/announcements", (req, res) => {
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.post("/announcements", verifyAdmin, async (req, res) => {
+router.post("/announcements", verifyPower('announcements'), async (req, res) => {
   try {
     const { emoji, heading, body } = req.body;
     if (!heading || !body) return res.status(400).json({ error: "heading and body required" });
@@ -818,7 +929,7 @@ router.post("/announcements", verifyAdmin, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.delete("/announcements/:id", verifyAdmin, async (req, res) => {
+router.delete("/announcements/:id", verifyPower('announcements'), async (req, res) => {
   try {
     await Announcement.findByIdAndDelete(req.params.id);
     db.announcement.delete(req.params.id);
@@ -1127,6 +1238,14 @@ router.post('/rewards/redeem-referral-adsfree', async (req, res) => {
     // ── End critical section ─────────────────────────────────────────────
 
     const expiresAt = await _grantAdsFreeAccess(userId, REFERRAL_ADSFREE_DAYS);
+    if (_notifyFreeAdsFreeGrant) {
+      _notifyFreeAdsFreeGrant({
+        userId,
+        days: REFERRAL_ADSFREE_DAYS,
+        expiresAt,
+        source: `Referral Reward (${REFERRALS_PER_ADSFREE_WEEK} referrals)`,
+      });
+    }
 
     RewardRedemption.create({
       userId, rewardType: 'referralAdsFree', batchId: null, batchName: '',
@@ -1467,8 +1586,16 @@ const DEVICE_RETENTION_MS = 45 * 24 * 60 * 60 * 1000; // prune buffer
 function checkMultiAccount(userId, fingerprint, ip, fromUser) {
   try {
     const uidStr = String(userId);
-    const beforeFp = fingerprint ? db.deviceSighting.distinctUsersForFingerprint(fingerprint, DEVICE_CORRELATION_WINDOW_MS) : [];
-    const beforeIp = ip ? db.deviceSighting.distinctUsersForIp(ip, DEVICE_CORRELATION_WINDOW_MS) : [];
+
+    // Trusted staff accounts are intentionally excluded from same-device/IP
+    // correlation. This applies to every registered admin, regardless of their
+    // individual permissions, and prevents an admin's own phone/Wi-Fi from
+    // creating noisy multi-account alerts for the owner.
+    if (isAnyAdmin(userId)) return;
+    const nonAdminOnly = rows => (rows || []).filter(r => !isAnyAdmin(r.userId));
+
+    const beforeFp = fingerprint ? nonAdminOnly(db.deviceSighting.distinctUsersForFingerprint(fingerprint, DEVICE_CORRELATION_WINDOW_MS)) : [];
+    const beforeIp = ip ? nonAdminOnly(db.deviceSighting.distinctUsersForIp(ip, DEVICE_CORRELATION_WINDOW_MS)) : [];
     const wasNewToFp = fingerprint && !beforeFp.some(r => r.userId === uidStr);
     const wasNewToIp = ip && !beforeIp.some(r => r.userId === uidStr);
 
@@ -1481,8 +1608,8 @@ function checkMultiAccount(userId, fingerprint, ip, fromUser) {
     if (!wasNewToFp && !wasNewToIp) return;
 
     // Re-fetch AFTER the insert so the lists below include this request too.
-    const afterFp = wasNewToFp ? db.deviceSighting.distinctUsersForFingerprint(fingerprint, DEVICE_CORRELATION_WINDOW_MS) : null;
-    const afterIp = wasNewToIp ? db.deviceSighting.distinctUsersForIp(ip, DEVICE_CORRELATION_WINDOW_MS) : null;
+    const afterFp = wasNewToFp ? nonAdminOnly(db.deviceSighting.distinctUsersForFingerprint(fingerprint, DEVICE_CORRELATION_WINDOW_MS)) : null;
+    const afterIp = wasNewToIp ? nonAdminOnly(db.deviceSighting.distinctUsersForIp(ip, DEVICE_CORRELATION_WINDOW_MS)) : null;
     const fpQualifies = afterFp && afterFp.length >= 2;
     const ipQualifies = afterIp && afterIp.length >= 2;
     if (!fpQualifies && !ipQualifies) return;
@@ -1669,9 +1796,9 @@ router.post('/force-join/check', async (req, res) => {
 
 // ── Auto-Lecture ──────────────────────────────────────────────────────────────
 
-router.get('/auto-lecture/status', verifyAdmin, (req, res) => { res.json(autoLectureSession); });
+router.get('/auto-lecture/status', verifyPower('autoLecture'), (req, res) => { res.json(autoLectureSession); });
 
-router.post('/auto-lecture/start', verifyAdmin, async (req, res) => {
+router.post('/auto-lecture/start', verifyPower('autoLecture'), async (req, res) => {
   const { batchId, subjectId, chapterId, unitId, batchName, subjectName, chapterName, unitName } = req.body;
   if (!batchId || !subjectId || !chapterId) return res.status(400).json({ error: 'batchId, subjectId, chapterId required' });
   try {
@@ -1689,7 +1816,7 @@ router.post('/auto-lecture/start', verifyAdmin, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.post('/auto-lecture/stop', verifyAdmin, async (req, res) => {
+router.post('/auto-lecture/stop', verifyPower('autoLecture'), async (req, res) => {
   const totalAdded = autoLectureSession.lectureCount;
   Object.assign(autoLectureSession, { active: false, batchId: null, subjectId: null, chapterId: null, unitId: null, lectureCount: 0, batchName: '', subjectName: '', chapterName: '', unitName: '', lastLectureId: null, lastActionType: null });
   await _saveAutoSession();
@@ -1704,8 +1831,7 @@ router.saveAutoSession = _saveAutoSession;
 
 // ── Stats ─────────────────────────────────────────────────────────────────────
 
-router.get('/stats', (req, res) => {
-  try {
+function buildStatsSnapshot() {
     const batches = db.batch.getAll();
     const totalBatches = batches.length;
     const publicBatches = batches.filter(b => b.isPublic).length;
@@ -1735,7 +1861,7 @@ router.get('/stats', (req, res) => {
     const activeCoupons = coupons.filter(c => c.isActive && c.expiresAt.getTime() > Date.now()).length;
 
     const now = Date.now();
-    res.json({
+    return {
       content: { totalBatches, publicBatches, privateBatches: totalBatches - publicBatches, totalSubjects, totalChapters, totalLectures, totalPremiumUnlocks },
       users: {
         totalUsers: db.user.count(),
@@ -1747,6 +1873,18 @@ router.get('/stats', (req, res) => {
         activeAccess: db.access.countActive(),
         grantedToday: db.access.countClaimedOnDay(new Date().toISOString().slice(0, 10)),
       },
+      adsFree: (() => {
+        const activeRows = db.adsFree.getAllActive();
+        const allRows = db.adsFree.getAll();
+        const dayMs = 24 * 60 * 60 * 1000;
+        const active = activeRows.length;
+        const expiring24h = activeRows.filter(r => Number(r.expiresAt) <= now + dayMs).length;
+        const expiring7d = activeRows.filter(r => Number(r.expiresAt) <= now + 7 * dayMs).length;
+        const expired = allRows.filter(r => Number(r.expiresAt) <= now).length;
+        const weeklyPrice = Number(db.settings.get('adsFreePrice_weekly', Number(process.env.ADS_FREE_WEEKLY_PRICE || 20)));
+        const monthlyPrice = Number(db.settings.get('adsFreePrice_monthly', Number(process.env.ADS_FREE_MONTHLY_PRICE || 60)));
+        return { active, expiring24h, expiring7d, expired, totalRecords: allRows.length, weeklyPrice, monthlyPrice };
+      })(),
       referrals: (() => {
         const totalReferrals = db.referral.count();
         const uniqueReferrers = db.referral.distinctReferrers();
@@ -1786,8 +1924,12 @@ router.get('/stats', (req, res) => {
       },
       coupons: { total: coupons.length, active: activeCoupons },
       pendingDeletes: db.pendingDelete.getAll().length,
-    });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+    };
+}
+
+router.get('/stats', verifyPower('viewStats'), (req, res) => {
+  try { res.json(buildStatsSnapshot()); }
+  catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 
@@ -1796,12 +1938,12 @@ router.get('/stats', (req, res) => {
 const couponSchema = new mongoose.Schema({ code: { type: String, required: true, unique: true, uppercase: true, trim: true }, discountPct: { type: Number, required: true }, expiresAt: { type: Date, required: true }, isActive: { type: Boolean, default: true }, usageCount: { type: Number, default: 0 }, batchIds: [{ type: String }], createdAt: { type: Date, default: Date.now } });
 const Coupon = mongoose.model('Coupon', couponSchema);
 
-router.get('/coupons', verifyAdmin, (req, res) => {
+router.get('/coupons', verifyPower('coupons'), (req, res) => {
   try { res.json(db.coupon.getAll()); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.post('/coupons', verifyAdmin, async (req, res) => {
+router.post('/coupons', verifyPower('coupons'), async (req, res) => {
   try {
     const { code, discountPct, expiresAt, isActive, batchIds } = req.body;
     if (!code || !discountPct || !expiresAt) return res.status(400).json({ error: 'code, discountPct, expiresAt required' });
@@ -1815,7 +1957,7 @@ router.post('/coupons', verifyAdmin, async (req, res) => {
   }
 });
 
-router.delete('/coupons/:id', verifyAdmin, async (req, res) => {
+router.delete('/coupons/:id', verifyPower('coupons'), async (req, res) => {
   try {
     await Coupon.findByIdAndDelete(req.params.id);
     db.coupon.delete(req.params.id);
@@ -1823,7 +1965,7 @@ router.delete('/coupons/:id', verifyAdmin, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.patch('/coupons/:id/toggle', verifyAdmin, async (req, res) => {
+router.patch('/coupons/:id/toggle', verifyPower('coupons'), async (req, res) => {
   try {
     const c = db.coupon.toggle(req.params.id);
     if (!c) return res.status(404).json({ error: 'Not found' });
@@ -1853,5 +1995,10 @@ module.exports.getPointsBreakdown = getPointsBreakdown;
 module.exports.POINTS_PER_REFERRAL = POINTS_PER_REFERRAL;
 module.exports.setBot = setBot;
 module.exports.setGrantAdsFreeAccess = setGrantAdsFreeAccess;
+module.exports.setNotifyFreeAdsFreeGrant = setNotifyFreeAdsFreeGrant;
 module.exports.getSpinStatus = getSpinStatus;
 module.exports.getSpinDailyLimit = getSpinDailyLimit;
+module.exports.hasAdminPower = hasAdminPower;
+module.exports.isAnyAdmin = isAnyAdmin;
+module.exports.ADMIN_POWER_DEFS = ADMIN_POWER_DEFS;
+module.exports.buildStatsSnapshot = buildStatsSnapshot;

@@ -1546,6 +1546,12 @@ const adsFree = {
   getAllActive() {
     return getDb().prepare(`SELECT * FROM ads_free_subscriptions WHERE expiresAt > ? ORDER BY expiresAt ASC`).all(Date.now());
   },
+  getAll() {
+    return getDb().prepare(`SELECT * FROM ads_free_subscriptions ORDER BY expiresAt ASC`).all();
+  },
+  count() {
+    return getDb().prepare(`SELECT COUNT(*) AS c FROM ads_free_subscriptions`).get().c;
+  },
 };
 
 // ── REWARD REDEMPTION Operations (points-spend ledger / history) ──────────────

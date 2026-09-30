@@ -661,13 +661,15 @@ body.ready{transition:none}
     <button class="modal-close" onclick="closeAdmin()"><i class="ti ti-x"></i></button>
     <div class="modal-title"><i class="ti ti-settings"></i>Admin Panel</div>
     <div class="tabs">
-      <button class="tab-btn active" onclick="switchTab('batch')">+ Batch</button>
-      <button class="tab-btn" onclick="switchTab('subject')">+ Subject</button>
-      <button class="tab-btn" onclick="switchTab('chapter')">+ Chapter</button>
-      <button class="tab-btn" onclick="switchTab('unit')">+ Unit</button>
-      <button class="tab-btn" onclick="switchTab('lecture')">+ Lecture</button>
-      <button class="tab-btn" onclick="switchTab('manage')">Manage</button>
-      <button class="tab-btn" onclick="switchTab('coupons')">🎟 Coupons</button>
+      <button class="tab-btn active" id="adminTabBatch" onclick="switchTab('batch')">+ Batch</button>
+      <button class="tab-btn" id="adminTabSubject" onclick="switchTab('subject')">+ Subject</button>
+      <button class="tab-btn" id="adminTabChapter" onclick="switchTab('chapter')">+ Chapter</button>
+      <button class="tab-btn" id="adminTabUnit" onclick="switchTab('unit')">+ Unit</button>
+      <button class="tab-btn" id="adminTabLecture" onclick="switchTab('lecture')">+ Lecture</button>
+      <button class="tab-btn" id="adminTabManage" onclick="switchTab('manage')">Manage</button>
+      <button class="tab-btn" id="adminTabPremium" onclick="switchTab('premium')">👑 Access</button>
+      <button class="tab-btn" id="adminTabCoupons" onclick="switchTab('coupons')">🎟 Coupons</button>
+      <button class="tab-btn" id="adminTabAdmins" onclick="switchTab('admins')" style="display:none">🛡 Admins</button>
     </div>
 
     <!-- Add Batch -->
@@ -751,10 +753,13 @@ body.ready{transition:none}
 
     <!-- Add Lecture -->
     <div class="tab-content" id="tab-lecture">
+      <div id="lectureTargetAdminSection">
       <div class="form-group"><label class="form-label">Batch</label><select class="form-select" id="lBatch" onchange="_saveSel('lBatch',this.value);updateLSubjectSelect()"></select></div>
       <div class="form-group"><label class="form-label">Subject</label><select class="form-select" id="lSubject" onchange="_saveSel('lSubject',this.value);updateLChapterSelect()"></select></div>
       <div class="form-group"><label class="form-label">Chapter</label><select class="form-select" id="lChapter" onchange="_saveSel('lChapter',this.value);updateLUnitSelect()"></select></div>
       <div class="form-group"><label class="form-label">Unit (optional — leave empty if no unit)</label><select class="form-select" id="lUnit" onchange="_saveSel('lUnit',this.value)"></select></div>
+      </div>
+      <div id="lectureManualAdminSection">
       <div class="form-group"><label class="form-label">Lecture Name</label><input class="form-input" id="lName" placeholder="e.g. Introduction to Limits"></div>
       <div class="form-group"><label class="form-label">Bot Link</label><input class="form-input" id="lLink" placeholder="https://t.me/YourBot?start=CODE"></div>
       <div class="form-group"><label class="form-label">Class Notes Link <span style="color:var(--text3);font-weight:400">(optional)</span></label><input class="form-input" id="lNotes" placeholder="https://t.me/YourBot?start=NOTES_CODE"></div>
@@ -766,9 +771,10 @@ body.ready{transition:none}
         </label>
       </div>
       <button class="btn-add" id="btnLecture" onclick="addLecture()"><i class="ti ti-plus"></i> Add Lecture</button>
+      </div>
 
       <!-- ── Auto Mode ─────────────────────────────────────────────────── -->
-      <div style="border-top:1px solid var(--border);margin-top:16px;padding-top:14px">
+      <div id="autoLectureAdminSection" style="border-top:1px solid var(--border);margin-top:16px;padding-top:14px">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
           <div>
             <div style="font-size:13px;font-weight:700;display:flex;align-items:center;gap:6px">
@@ -829,6 +835,25 @@ body.ready{transition:none}
         <div style="font-size:12px;font-weight:600;color:var(--text2);margin-bottom:8px;letter-spacing:0.5px">EXISTING COUPONS</div>
         <div id="couponList"><div class="loading"><i class="ti ti-loader-2"></i></div></div>
       </div>
+    </div>
+
+    <!-- Premium access management -->
+    <div class="tab-content" id="tab-premium">
+      <div style="font-size:12px;color:var(--text2);line-height:1.5;margin-bottom:12px">Premium batches ke users ko yahan se grant/remove karo.</div>
+      <div id="premiumAdminList"><div class="loading"><i class="ti ti-loader-2"></i></div></div>
+    </div>
+
+    <!-- Owner-only admin manager -->
+    <div class="tab-content" id="tab-admins">
+      <div style="padding:12px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);margin-bottom:14px">
+        <div style="font-size:13px;font-weight:700;margin-bottom:10px;display:flex;align-items:center;gap:6px"><i class="ti ti-user-shield"></i> Add Admin</div>
+        <div class="form-group"><label class="form-label">Telegram User ID</label><input class="form-input" id="newAdminUid" inputmode="numeric" placeholder="e.g. 123456789"></div>
+        <div class="form-group"><label class="form-label">Name / Label <span style="color:var(--text3);font-weight:400">(optional)</span></label><input class="form-input" id="newAdminLabel" placeholder="e.g. Content Manager"></div>
+        <div class="form-group"><label class="form-label">Permissions</label><div id="newAdminPowers" style="display:grid;gap:8px"></div></div>
+        <button class="btn-add" onclick="ownerAddAdmin()"><i class="ti ti-plus"></i> Add Admin</button>
+      </div>
+      <div style="font-size:12px;font-weight:700;color:var(--text2);margin:4px 0 8px;letter-spacing:.5px">CURRENT ADMINS</div>
+      <div id="adminUsersList"><div class="loading"><i class="ti ti-loader-2"></i></div></div>
     </div>
   </div>
 </div>
@@ -1098,6 +1123,18 @@ var ADS_FREE_PLAN_IDS = { weekly: 'ADSFREEWEEKLY', monthly: 'ADSFREEPLAN' };
 function isAdsFreePlanId(id) { return id === ADS_FREE_PLAN_IDS.weekly || id === ADS_FREE_PLAN_IDS.monthly; }
 var _popupLectures = {}; // stores lectures for popup reference by _id
 var isAdmin = false;
+var isOwner = false;
+var adminPermissions = [];
+function hasAdminPower(power) {
+  if (isOwner) return true;
+  if (adminPermissions.includes(power)) return true;
+  if (['content','premium','announcements','coupons'].includes(power)) return adminPermissions.includes('adminPanel');
+  if (power === 'autoLecture') return adminPermissions.includes('adminPanel') && adminPermissions.includes('uploadLectures');
+  if (power === 'bypassRestrictions') return isAdmin;
+  return false;
+}
+function canManageContent() { return hasAdminPower('adminPanel'); }
+function canBypassRestrictions() { return isAdmin; }
 var pageStack = ['home'];
 var picBase64 = '';
 
@@ -1406,7 +1443,7 @@ function switchBatchTab(tab) {
 
 function _batchCard(b, isPremiumLocked) {
   // isPremiumLocked = user does not have access to this premium batch
-  var adminDraftBadge = (isAdmin && b.isPublic !== true)
+  var adminDraftBadge = (canManageContent() && b.isPublic !== true)
     ? '<div style="position:absolute;top:36px;left:6px;background:rgba(0,0,0,0.7);border-radius:6px;padding:3px 7px;font-size:10px;font-weight:700;color:#aaa;display:flex;align-items:center;gap:4px;z-index:6"><i class="ti ti-lock" style="font-size:10px"></i>Private</div>'
     : '';
   var premiumBadge = b.isPremium
@@ -1416,7 +1453,7 @@ function _batchCard(b, isPremiumLocked) {
     ? '<div class="premium-lock-overlay"><i class="ti ti-lock" style="font-size:26px;color:#f59e0b"></i></div>' +
       '<div class="premium-locked-msg"><div class="premium-locked-text">🔒 Premium — Access Required</div></div>'
     : '';
-  var cardStyle = (isAdmin && b.isPublic !== true) ? 'opacity:0.6;border-style:dashed;' : '';
+  var cardStyle = (canManageContent() && b.isPublic !== true) ? 'opacity:0.6;border-style:dashed;' : '';
   if (b.isPremium) cardStyle += 'border-color:rgba(245,158,11,0.35);';
   var buyBtn = isPremiumLocked
     ? '<button class="batch-buy-btn" data-bid="' + b._id + '" onclick="event.stopPropagation();buyBatch(this.dataset.bid)"><i class="ti ti-shopping-cart" style="font-size:12px"></i> Buy' + (b.price ? ' ₹' + b.price : '') + '</button>'
@@ -1437,7 +1474,7 @@ function _batchCard(b, isPremiumLocked) {
   // Reward-granted (temporary) access gets its own badge, distinct from permanent
   // ownership, so the user knows this specific batch will re-lock once the timer runs out.
   var rewardMetaHtml = '';
-  if (!isPremiumLocked && b.isPremium && !isAdmin) {
+  if (!isPremiumLocked && b.isPremium && !canBypassRestrictions()) {
     var isPermanentOwner = b.premiumUsers && b.premiumUsers.includes(String(getUserId()));
     if (!isPermanentOwner && hasBatchRewardAccess(b._id)) {
       var rewardMsLeft = myActiveBatchRewards[b._id] - new Date();
@@ -1463,7 +1500,7 @@ function _batchCard(b, isPremiumLocked) {
 
 function renderBatches(list) {
   // Determine which batches are visible
-  var visible = isAdmin ? list : list.filter(b => b.isPublic === true);
+  var visible = canManageContent() ? list : list.filter(b => b.isPublic === true);
 
   // New to old — reverse order
   visible = visible.slice().reverse();
@@ -1495,7 +1532,7 @@ function renderBatches(list) {
   if (premEl && premium.length) {
     premEl.innerHTML = premium.map(b => {
       var isPermanentOwner = !!(b.premiumUsers && b.premiumUsers.includes(String(curUid)));
-      var locked = !isAdmin && !isPermanentOwner && !hasBatchRewardAccess(b._id);
+      var locked = !canBypassRestrictions() && !isPermanentOwner && !hasBatchRewardAccess(b._id);
       return _batchCard(b, locked);
     }).join('');
   } else if (premEl) {
@@ -1512,7 +1549,7 @@ function renderBatches(list) {
       ? favBatches.map(b => {
           if (!b.isPremium) return _batchCard(b, false);
           var isPermanentOwner = !!(b.premiumUsers && b.premiumUsers.includes(String(curUid)));
-          var locked = !isAdmin && !isPermanentOwner && !hasBatchRewardAccess(b._id);
+          var locked = !canBypassRestrictions() && !isPermanentOwner && !hasBatchRewardAccess(b._id);
           return _batchCard(b, locked);
         }).join('')
       : '<div class="empty" style="grid-column:1/-1"><i class="ti ti-heart"></i>No favorites yet — tap the ❤️ on any batch</div>';
@@ -2050,7 +2087,7 @@ async function startSpin() {
     _spinToken = null;
     _spinInProgress = false;
     renderSpinStatusBar();
-    if (!isAdmin && await _isAdBlockerActiveForUser()) { document.getElementById('adBlockGate').classList.remove('hidden'); return; }
+    if (!canBypassRestrictions() && await _isAdBlockerActiveForUser()) { document.getElementById('adBlockGate').classList.remove('hidden'); return; }
     toast('Ad load nahi hua. Ad blocker band karo aur try karo.', 'error');
     return;
   }
@@ -2238,7 +2275,7 @@ function _probeAdBlocker() {
 // Shared by both the initial check and every periodic re-check below —
 // decides whether THIS user should see the ad-blocker gate right now.
 async function _isAdBlockerActiveForUser() {
-  if (isAdmin) return false;
+  if (canBypassRestrictions()) return false;
   if (window._adsFreeActive) return false; // Ads-Free subscribers are never shown the ad-blocker wall — they don't need ads at all
   try {
     var exemptData = await apiFetch('/api/adblock-exempt/me');
@@ -2296,7 +2333,7 @@ function setupInAppInterstitial() {
 // of the session. Re-shows the gate the moment blocking is detected again.
 var _adBlockerMonitorInterval = null;
 function startAdBlockerMonitoring() {
-  if (_adBlockerMonitorInterval || isAdmin) return;
+  if (_adBlockerMonitorInterval || canBypassRestrictions()) return;
   var recheck = async function() {
     if (document.getElementById('adBlockGate') && !document.getElementById('adBlockGate').classList.contains('hidden')) return; // already showing
     if (await _isAdBlockerActiveForUser()) document.getElementById('adBlockGate').classList.remove('hidden');
@@ -2317,7 +2354,6 @@ function startAdBlockerMonitoring() {
 async function checkAdminAccess() {
   try {
     var config = await (await fetch('/api/config')).json();
-    var ownerId = config.ownerId;
     if (config.botUsername) window._botUsername = config.botUsername;
     if (config.upiId) window._upiId = config.upiId;
     if (config.upiName) window._upiName = config.upiName;
@@ -2326,14 +2362,23 @@ async function checkAdminAccess() {
     window._razorpayKeyId = config.razorpayKeyId || '';
     window._adsFreeWeeklyPrice = config.adsFreeWeeklyPrice || 20;
     window._adsFreeMonthlyPrice = config.adsFreeMonthlyPrice || 60;
-    // Store force-join requirement
     _fjRequired = !!config.forceJoinRequired;
-    loadMonetagSdk(config.monetagZoneId || '11502469'); // fire-and-forget, don't block init()
-    if (!ownerId) return;
-    var tgUser = tg && tg.initDataUnsafe && tg.initDataUnsafe.user;
-    var curId = tgUser ? tgUser.id : null;
-    if (curId && curId === ownerId) { isAdmin = true; document.getElementById('adminBtn').classList.add('visible'); }
-  } catch(e) {}
+    window._monetagZoneConfig = config.monetagZoneId || '11502469';
+
+    // Role state comes from a signed Telegram initData check on the server.
+    // Never trust a client-side UID comparison for delegated admins.
+    var roleRes = await fetch('/api/admin/me', { headers: { 'x-tg-init-data': tg ? tg.initData : '' } });
+    var role = await roleRes.json();
+    isOwner = !!role.isOwner;
+    isAdmin = !!role.isAdmin;
+    adminPermissions = Array.isArray(role.permissions) ? role.permissions : [];
+    var hasPanelSection = isOwner || adminPermissions.includes('adminPanel');
+    if (hasPanelSection) document.getElementById('adminBtn').classList.add('visible');
+    else document.getElementById('adminBtn').classList.remove('visible');
+    syncAdminUiPermissions();
+  } catch(e) {
+    isOwner = false; isAdmin = false; adminPermissions = [];
+  }
 }
 
 async function apiFetch(url, method, body) {
@@ -2353,15 +2398,37 @@ async function apiFetch(url, method, body) {
   }
 }
 
+function _adminTabAllowed(name) {
+  if (name === 'admins') return isOwner;
+  if (['batch','subject','chapter','unit','lecture','manage','premium','coupons'].includes(name)) return hasAdminPower('adminPanel');
+  return false;
+}
+
+function syncAdminUiPermissions() {
+  var panel = hasAdminPower('adminPanel');
+  ['Batch','Subject','Chapter','Unit','Lecture','Manage','Premium','Coupons'].forEach(function(k){ var el=document.getElementById('adminTab'+k); if(el) el.style.display=panel?'':'none'; });
+  var adminsTab = document.getElementById('adminTabAdmins'); if (adminsTab) adminsTab.style.display = isOwner ? '' : 'none';
+  var targetSec = document.getElementById('lectureTargetAdminSection'); if (targetSec) targetSec.style.display = panel ? '' : 'none';
+  var manual = document.getElementById('lectureManualAdminSection'); if (manual) manual.style.display = panel ? '' : 'none';
+  // Auto-save upload control needs BOTH panel access and Upload Lecture power.
+  var autoSec = document.getElementById('autoLectureAdminSection'); if (autoSec) autoSec.style.display = (panel && hasAdminPower('uploadLectures')) ? '' : 'none';
+}
+
+function _firstAllowedAdminTab() {
+  return ['batch','lecture','manage','premium','coupons','admins'].find(_adminTabAllowed) || null;
+}
+
 function openAdmin(tab) {
   if (!isAdmin) return;
+  syncAdminUiPermissions();
+  var chosen = tab && _adminTabAllowed(tab) ? tab : _firstAllowedAdminTab();
+  if (!chosen) return;
   document.getElementById('adminModal').classList.add('show');
   var cb = document.getElementById('contactBtn'); if (cb) cb.style.display = 'none';
   populateAllSelects();
-  switchTab(tab||'batch');
-  // Instantly restore UI from memory, then refresh from server
-  if (_autoModeActive && _lastAutoInfo) _setAutoModeUI(true, _lastAutoInfo);
-  _syncAutoModeStatus();
+  switchTab(chosen);
+  if (hasAdminPower('adminPanel') && hasAdminPower('uploadLectures') && _autoModeActive && _lastAutoInfo) _setAutoModeUI(true, _lastAutoInfo);
+  if (hasAdminPower('adminPanel') && hasAdminPower('uploadLectures')) _syncAutoModeStatus();
 }
 function closeAdmin() {
   document.getElementById('adminModal').classList.remove('show');
@@ -2370,13 +2437,73 @@ function closeAdmin() {
 function closeModalOutside(e) { if (e.target.id==='adminModal') closeAdmin(); }
 
 function switchTab(name) {
-  var tabs = ['batch','subject','chapter','unit','lecture','manage','coupons'];
-  document.querySelectorAll('.tab-btn').forEach((b,i)=>b.classList.toggle('active',tabs[i]===name));
-  document.querySelectorAll('.tab-content').forEach(t=>t.classList.remove('active'));
-  document.getElementById('tab-'+name).classList.add('active');
+  if (!_adminTabAllowed(name)) { toast('You do not have permission for this section.', 'error'); return; }
+  var tabs = ['batch','subject','chapter','unit','lecture','manage','premium','coupons','admins'];
+  document.querySelectorAll('#adminModal .tab-btn').forEach((b,i)=>b.classList.toggle('active',tabs[i]===name));
+  document.querySelectorAll('#adminModal .tab-content').forEach(t=>t.classList.remove('active'));
+  var target = document.getElementById('tab-'+name); if (target) target.classList.add('active');
   if (name==='manage') renderManage();
-  if (name==='lecture') _syncAutoModeStatus();
+  if (name==='lecture' && hasAdminPower('adminPanel') && hasAdminPower('uploadLectures')) _syncAutoModeStatus();
+  if (name==='premium') renderPremiumAccessAdmin();
   if (name==='coupons') adminLoadCoupons();
+  if (name==='admins') adminLoadAdmins();
+}
+
+function renderPremiumAccessAdmin() {
+  var el = document.getElementById('premiumAdminList');
+  if (!el || !hasAdminPower('premium')) return;
+  var list = batches.filter(function(b){ return b.isPremium; });
+  el.innerHTML = list.length ? list.map(function(b){
+    return '<div class="manage-item"><span class="manage-item-icon">👑</span><div class="manage-item-info"><div class="manage-item-name">'+_escHtml(b.name)+'</div><div class="manage-item-sub">'+((b.premiumUsers||[]).length)+' permanent users</div></div><button class="edit-btn" onclick="openPremiumUsers(\''+b._id+'\')"><i class="ti ti-users"></i> Users</button></div>';
+  }).join('') : '<div class="empty"><i class="ti ti-crown"></i>No premium batches yet</div>';
+}
+
+var _adminPowerDefs = [];
+function _powerChecksHtml(selected, prefix) {
+  selected = Array.isArray(selected) ? selected : [];
+  return _adminPowerDefs.map(function(p){
+    var id = prefix + '_' + p.id;
+    return '<label for="'+id+'" style="display:flex;gap:9px;align-items:flex-start;padding:9px 10px;background:var(--surface);border:1px solid var(--border);border-radius:9px;cursor:pointer"><input type="checkbox" id="'+id+'" value="'+p.id+'" '+(selected.includes(p.id)?'checked':'')+' style="margin-top:2px;accent-color:var(--accent)"><span><b style="font-size:12px">'+_escHtml(p.label)+'</b><span style="display:block;font-size:10px;color:var(--text2);line-height:1.4;margin-top:2px">'+_escHtml(p.description||'')+'</span></span></label>';
+  }).join('');
+}
+function _selectedPowers(containerId) {
+  var box = document.getElementById(containerId); if (!box) return [];
+  return Array.from(box.querySelectorAll('input[type=checkbox]:checked')).map(function(x){return x.value;});
+}
+async function adminLoadAdmins() {
+  if (!isOwner) return;
+  var listEl = document.getElementById('adminUsersList');
+  try {
+    var data = await apiFetch('/api/admins');
+    _adminPowerDefs = data.powers || [];
+    var newBox = document.getElementById('newAdminPowers'); if (newBox) newBox.innerHTML = _powerChecksHtml([], 'newadm');
+    var admins = data.admins || [];
+    listEl.innerHTML = admins.length ? admins.map(function(a){
+      var uid = String(a.userId);
+      var cid = 'powers_' + uid;
+      return '<div style="padding:12px;background:var(--surface2);border:1px solid var(--border);border-radius:12px;margin-bottom:10px">'+
+        '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px"><div><div style="font-size:13px;font-weight:700">'+_escHtml(a.label||('Admin '+uid))+'</div><div style="font-size:10px;color:var(--text2)">UID: <code>'+uid+'</code></div></div><button class="del-btn" onclick="ownerRemoveAdmin(\''+uid+'\')"><i class="ti ti-trash"></i></button></div>'+
+        '<div id="'+cid+'" style="display:grid;gap:7px">'+_powerChecksHtml(a.permissions||[], 'adm'+uid)+'</div>'+
+        '<button class="btn-add" style="margin-top:10px" onclick="ownerSaveAdmin(\''+uid+'\',\''+cid+'\')"><i class="ti ti-device-floppy"></i> Save Powers</button></div>';
+    }).join('') : '<div class="empty"><i class="ti ti-user-shield"></i>No delegated admins yet</div>';
+  } catch(e) { if (listEl) listEl.innerHTML = '<div class="empty">Could not load admins</div>'; toast('Admins load failed', 'error'); }
+}
+async function ownerAddAdmin() {
+  if (!isOwner) return;
+  var uid=(document.getElementById('newAdminUid').value||'').trim();
+  var label=(document.getElementById('newAdminLabel').value||'').trim();
+  var permissions=_selectedPowers('newAdminPowers');
+  if (!/^\d+$/.test(uid)) return toast('Valid numeric Telegram UID enter karo.', 'error');
+  try { await apiFetch('/api/admins','POST',{userId:uid,label:label,permissions:permissions}); document.getElementById('newAdminUid').value=''; document.getElementById('newAdminLabel').value=''; toast('Admin added','success'); adminLoadAdmins(); } catch(e) { toast('Admin add failed: '+e.message,'error'); }
+}
+async function ownerSaveAdmin(uid, containerId) {
+  if (!isOwner) return;
+  var permissions=_selectedPowers(containerId);
+  try { await apiFetch('/api/admins/'+uid,'PATCH',{permissions:permissions}); toast('Permissions updated','success'); adminLoadAdmins(); } catch(e) { toast('Update failed: '+e.message,'error'); }
+}
+async function ownerRemoveAdmin(uid) {
+  if (!isOwner || !confirm('Remove this admin?')) return;
+  try { await apiFetch('/api/admins/'+uid,'DELETE'); toast('Admin removed','success'); adminLoadAdmins(); } catch(e) { toast('Remove failed: '+e.message,'error'); }
 }
 
 function batchOpts() { return batches.map(b=>`<option value="${b._id}">${b.name}</option>`).join('')||'<option>Add a batch first</option>'; }
@@ -2628,7 +2755,7 @@ async function toggleAutoMode(checked) {
 
 // Restore auto-mode status when admin panel opens
 async function _syncAutoModeStatus() {
-  if (!isAdmin) return;
+  if (!hasAdminPower('autoLecture')) return;
   try {
     var r = await apiFetch('/api/auto-lecture/status', 'GET');
     if (r && r.active) {
@@ -2668,7 +2795,7 @@ function _renderManageLevel() {
         ? '<span style="font-size:9px;background:rgba(124,92,191,0.15);color:var(--accent2);border:1px solid rgba(124,92,191,0.3);border-radius:20px;padding:1px 6px;font-weight:700;margin-left:4px">⭐ ' +
           (b.redeemCost24h != null ? b.redeemCost24h : '—') + '/24h · ' + (b.redeemCost7d != null ? b.redeemCost7d : '—') + '/7d</span>'
         : '';
-      var manageUsersBtn = b.isPremium ? `<button class="edit-btn" title="Manage Premium Users" onclick="openPremiumUsers('${b._id}')" style="border-color:rgba(245,158,11,0.4);color:#f59e0b"><i class="ti ti-users"></i></button>` : '';
+      var manageUsersBtn = (b.isPremium && hasAdminPower('premium')) ? `<button class="edit-btn" title="Manage Premium Users" onclick="openPremiumUsers('${b._id}')" style="border-color:rgba(245,158,11,0.4);color:#f59e0b"><i class="ti ti-users"></i></button>` : '';
       html += `<div class="manage-item">
         <span class="manage-item-icon">🎓</span>
         <div class="manage-item-info" style="cursor:pointer" onclick="_mDrill('subjects','${b._id}')">
@@ -3944,7 +4071,7 @@ async function openLecLink(codeOrLink, type) {
   if (!codeOrLink) return openLink('', type || 'lecture');
 
   if (!window._adsFreeActive && (type || 'lecture') === 'lecture' && _shouldShowAdForLectureClick()) {
-    if (!_monetagReady() && !isAdmin && await _isAdBlockerActiveForUser()) {
+    if (!_monetagReady() && !canBypassRestrictions() && await _isAdBlockerActiveForUser()) {
       document.getElementById('adBlockGate').classList.remove('hidden');
       return;
     }
@@ -3995,7 +4122,7 @@ function toggleFavoriteBatch(bid) {
 }
 
 function hasAccess() {
-  if (isAdmin) return true;
+  if (canBypassRestrictions()) return true;
   if (window._adsFreeActive) return true; // Ads-Free subscribers never need the watch-ad-for-access gate
   if (!accessExpiresAt) return false;
   return new Date(accessExpiresAt) > new Date();
@@ -4062,16 +4189,22 @@ async function _afterAdsFreePurchase() {
   await loadAdsFreeStatus();
   renderAdsFreeBanner();
   renderAccessCard();
-  var gate = document.getElementById('adBlockGate');
-  if (gate && !gate.classList.contains('hidden')) {
-    setTimeout(function () { location.reload(); }, 1800);
+
+  // Monetag's in-app format is a self-scheduling stream. Once started there
+  // is no reliable client-side cancel API in this integration, so merely
+  // setting _adsFreeActive=true cannot stop ads already queued by the SDK.
+  // After a confirmed Ads-Free activation, reload into a clean session. On
+  // the next init() Ads-Free status is resolved first and Monetag is never
+  // loaded at all.
+  if (window._adsFreeActive) {
+    setTimeout(function () { location.reload(); }, 700);
   }
 }
 
 function renderAdsFreeBanner() {
   var el = document.getElementById('adsFreeBanner');
   updateAdsFreeBadge();
-  if (!el || isAdmin) { if (el) el.innerHTML = ''; return; }
+  if (!el || canBypassRestrictions()) { if (el) el.innerHTML = ''; return; }
 
   if (window._adsFreeActive) {
     var exp = window._adsFreeExpiresAt ? new Date(window._adsFreeExpiresAt) : null;
@@ -4113,7 +4246,7 @@ function renderAdsFreeBanner() {
 }
 
 async function loadAccess() {
-  if (isAdmin) return;
+  if (canBypassRestrictions()) return;
 
   // Load from cache instantly — prevents timer blink
   try {
@@ -4280,7 +4413,7 @@ function renderAccessCard() {
   var card = document.getElementById('accessCard');
   if (!card) return;
 
-  if (isAdmin) {
+  if (canBypassRestrictions()) {
     card.innerHTML = '<div style="padding:40px;text-align:center;color:var(--text2)"><i class="ti ti-shield-check" style="font-size:48px;color:var(--green);display:block;margin-bottom:12px"></i><div style="font-size:16px;font-weight:600">Admin Access</div><div style="font-size:13px;margin-top:6px">You have permanent access.</div></div>';
     return;
   }
@@ -4414,7 +4547,7 @@ async function watchAd() {
     _adToken = null;
     _adWatching = false;
     _setAdBtns(false);
-    if (!isAdmin && await _isAdBlockerActiveForUser()) { document.getElementById('adBlockGate').classList.remove('hidden'); return; }
+    if (!canBypassRestrictions() && await _isAdBlockerActiveForUser()) { document.getElementById('adBlockGate').classList.remove('hidden'); return; }
     toast('Ad load nahi hua. Ad blocker band karo aur try karo.', 'error');
     return;
   }
@@ -4511,7 +4644,7 @@ var _origOpenBatch = openBatch;
 openBatch = function(bid) {
   var b = batches.find(x => x._id === bid);
   // Premium batch — check permanent access OR active reward-granted access
-  if (b && b.isPremium && !isAdmin) {
+  if (b && b.isPremium && !canBypassRestrictions()) {
     var curUid = String(getUserId());
     var hasP = (b.premiumUsers && b.premiumUsers.includes(curUid)) || hasBatchRewardAccess(bid);
     if (!hasP) {
@@ -4526,7 +4659,7 @@ openBatch = function(bid) {
   // it WAS premium, they're still in premiumUsers — that permanent access should
   // keep working even after the admin flips the batch back to free, so they're
   // never made to sit through the ad-gate for a batch they already paid for.
-  if (b && !isAdmin && b.premiumUsers && b.premiumUsers.includes(String(getUserId()))) {
+  if (b && !canBypassRestrictions() && b.premiumUsers && b.premiumUsers.includes(String(getUserId()))) {
     _origOpenBatch(bid);
     return;
   }
@@ -4545,7 +4678,7 @@ var _fjPassed = false;
 
 async function checkForceJoin() {
   // If admin, skip force join
-  if (isAdmin) return true;
+  if (canBypassRestrictions()) return true;
 
   // Check if force join is required from config (already fetched in checkAdminAccess)
   if (!_fjRequired) return true;
@@ -4681,7 +4814,7 @@ function _animateVsBar(){var f=document.getElementById('vsFill');if(!f)return;se
 function _hideVS(cb){var el=document.getElementById('verifyingScreen');if(!el||el.classList.contains('vs-gone')){if(cb)cb();return}var f=document.getElementById('vsFill');if(f)f.style.width='100%';setTimeout(function(){el.classList.add('vs-hide');setTimeout(function(){el.classList.add('vs-gone');if(cb)cb()},350)},180)}
 
 async function checkMaintenanceMode() {
-  if (isAdmin) return false; // owner always bypasses, no network round-trip needed
+  if (canBypassRestrictions()) return false; // owner always bypasses, no network round-trip needed
   try {
     var res = await apiFetch('/api/maintenance/status?userId=' + encodeURIComponent(getUserId()));
     if (res && res.success && res.data && res.data.show) {
@@ -4694,7 +4827,7 @@ async function checkMaintenanceMode() {
 
 async function checkBanStatus() {
   // Owner is never banned by this check — skip the network round-trip.
-  if (isAdmin) return false;
+  if (canBypassRestrictions()) return false;
   try {
     var data = await apiFetch('/api/banned/me');
     if (data && data.banned) {
@@ -4763,10 +4896,17 @@ async function init() {
   var underMaintenance = await checkMaintenanceMode();
   if (underMaintenance) { _hideVS(); return; }
 
-  if (!isAdmin) reportDeviceFingerprint(); // fire-and-forget, never blocks app load
-  if (!isAdmin) await loadAdsFreeStatus(); // must resolve before checkAdBlocker() below, which depends on window._adsFreeActive
+  if (!isAdmin) reportDeviceFingerprint(); // staff accounts are excluded from same-device/IP alerts
+  if (!canBypassRestrictions()) await loadAdsFreeStatus(); // resolve paid state BEFORE any ad SDK is loaded
 
-  if (!isAdmin) {
+  // Only free users should ever load Monetag. This prevents a paid Ads-Free
+  // user from inheriting an SDK/session that was initialized before their
+  // subscription status was known.
+  if (!canBypassRestrictions() && !window._adsFreeActive) {
+    loadMonetagSdk(window._monetagZoneConfig || '11502469');
+  }
+
+  if (!canBypassRestrictions()) {
     var adBlocked = await checkAdBlocker();
     if (adBlocked) { _hideVS(); return; }
   }
@@ -5593,7 +5733,7 @@ function joinFromAd() {
 // above (never shown at the same time — see maybeShowGiveawayAd/closeGiveawayAd)
 // so the two overlays never stack on top of each other.
 function maybeShowAdsFreeAd() {
-  if (isAdmin || window._adsFreeActive) return;
+  if (canBypassRestrictions() || window._adsFreeActive) return;
   setTimeout(function () {
     document.getElementById('adsFreeAdOverlay').classList.add('show');
   }, 400);
@@ -5650,7 +5790,7 @@ function _escHtml(str) {
 
 function openAnnouncements() {
   var adminForm = document.getElementById('annAdminForm');
-  if (adminForm) adminForm.style.display = isAdmin ? 'block' : 'none';
+  if (adminForm) adminForm.style.display = hasAdminPower('announcements') ? 'block' : 'none';
   localStorage.setItem('ann_last_seen', new Date().toISOString());
   _updateBellBadge();
   _renderAnnList();
@@ -5677,7 +5817,7 @@ function _renderAnnList() {
       '</div>' +
       '<div class="ann-card-footer">' +
         '<span class="ann-card-date"><i class="ti ti-clock" style="font-size:11px"></i> ' + _relativeTime(a.createdAt) + '</span>' +
-        (isAdmin
+        (hasAdminPower('announcements')
           ? '<button onclick="deleteAnnouncement(\'' + a._id + '\')" style="background:none;border:none;color:var(--text3);cursor:pointer;padding:3px 6px;border-radius:6px;display:flex;align-items:center;gap:3px;font-size:13px"><i class="ti ti-trash"></i></button>'
           : (isNew ? '<span class="ann-new-badge">NEW</span>' : '')) +
       '</div>' +
