@@ -27,7 +27,8 @@ let _notifyFreeAdsFreeGrant = null;
 function setNotifyFreeAdsFreeGrant(fn) { _notifyFreeAdsFreeGrant = fn; }
 // Injected by server.js after the Telegram bot starts. Whenever the owner adds,
 // edits or removes a delegated admin, refresh that user's private-chat command
-// menu immediately so Telegram shows only the commands they can actually use.
+// menu immediately. Delegated admins deliberately keep the same /start-only
+// command menu as normal users; only the owner sees management commands.
 let _syncBotCommandMenu = null;
 function setBotCommandMenuSync(fn) { _syncBotCommandMenu = typeof fn === 'function' ? fn : null; }
 function refreshBotCommandMenu(userId) {

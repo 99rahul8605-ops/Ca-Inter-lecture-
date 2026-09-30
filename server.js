@@ -1055,11 +1055,10 @@ function canUseAutoLectureUpload(userId) {
 }
 
 // ── Telegram command-menu scopes ─────────────────────────────────────────────
-// Telegram's slash-command menu can be scoped per private chat. Keep the global
-// default deliberately tiny so regular users see only /start. Owner gets every
-// management command; delegated admins get the complete delegated-admin command
-// catalogue. Their permission toggles still control execution. Backend checks
-// remain authoritative, so showing a command never grants that power.
+// Keep Telegram's textbox-side slash-command menu intentionally private:
+// only the owner gets the management command catalogue. Every other account —
+// including delegated/sub-admins — gets only /start. Admin powers still work
+// when a permitted command is typed manually; the menu is presentation only.
 const USER_BOT_COMMANDS = [
   { command: 'start', description: 'Open bot and browse lectures' },
 ];
@@ -1105,37 +1104,8 @@ const OWNER_BOT_COMMANDS = [
   { command: 'exemptadslist', description: 'List ad-block gate exemptions' },
 ];
 
-const DELEGATED_ADMIN_BOT_COMMANDS = [
-  ...USER_BOT_COMMANDS,
-  { command: 'bulk', description: 'Start bulk lecture/file upload' },
-  { command: 'done', description: 'Finish current bulk upload' },
-  { command: 'cancel', description: 'Cancel current bulk upload' },
-  { command: 'undo', description: 'Undo last auto-lecture action' },
-  { command: 'nextchapter', description: 'Move auto-save to next chapter' },
-  { command: 'nextunit', description: 'Move auto-save to next unit' },
-  { command: 'rmword', description: 'Manage filename auto-filter words' },
-  { command: 'myfiles', description: 'List your uploaded files' },
-  { command: 'broadcast', description: 'Broadcast text or replied media' },
-  { command: 'ban', description: 'Ban a user by Telegram UID' },
-  { command: 'unban', description: 'Unban a user by Telegram UID' },
-  { command: 'banned', description: 'List banned users' },
-  { command: 'giveadsfree', description: 'Grant or revoke Ads-Free days' },
-  { command: 'adsfreeusers', description: 'List active Ads-Free subscribers' },
-  { command: 'stats', description: 'View bot and Ads-Free statistics' },
-];
-
-function delegatedAdminBotCommands() {
-  // Show the complete delegated-admin command catalogue in Telegram, as
-  // requested. Individual toggles still decide whether a command executes;
-  // hiding a command is not used as a security boundary.
-  return DELEGATED_ADMIN_BOT_COMMANDS;
-}
-
 function botCommandsForUser(userId) {
-  const uid = Number(userId);
-  if (isOwner(uid)) return OWNER_BOT_COMMANDS;
-  if (courseRoutes.isAnyAdmin && courseRoutes.isAnyAdmin(uid)) return delegatedAdminBotCommands(uid);
-  return USER_BOT_COMMANDS;
+  return isOwner(Number(userId)) ? OWNER_BOT_COMMANDS : USER_BOT_COMMANDS;
 }
 
 async function setTelegramCommandScope(commands, scope) {
@@ -1155,7 +1125,7 @@ async function syncBotCommandMenu(userId) {
 }
 
 async function initializeBotCommandMenus() {
-  // Default scope is inherited by every ordinary user: only /start.
+  // Default scope is inherited by every non-owner account (including sub-admins): only /start.
   await setTelegramCommandScope(USER_BOT_COMMANDS, { type: 'default' });
   await syncBotCommandMenu(OWNER_ID).catch((e) => console.error('Owner command menu sync failed:', e.message));
   const admins = db.settings.get('web_admins', []);
@@ -1458,7 +1428,7 @@ async function startBot() {
   if (courseRoutes.setBotCommandMenuSync) courseRoutes.setBotCommandMenuSync(syncBotCommandMenu);
 
   // Configure Telegram's slash-command menu. Ordinary users inherit only
-  // /start; owner/admin private chats receive their scoped management list.
+  // /start; only the owner private chat receives the management command list.
   try {
     await initializeBotCommandMenus();
     console.log('Telegram command menus synced');
@@ -1487,7 +1457,7 @@ async function startBot() {
     const userId = msg.from?.id;
     const param = (match[1] || "").trim();
     // Refresh this private chat's command scope on every /start so role/power
-    // changes are reflected even if Telegram cached an older menu client-side.
+    // changes are reflected even if Telegram cached an older menu client-side. Sub-admins stay on /start-only.
     if (userId) syncBotCommandMenu(userId).catch((e) => console.error('Command menu refresh on /start failed:', e.message));
     const isNewUser = userId ? !db.user.findOne(String(userId)) : false;
 
