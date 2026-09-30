@@ -25,6 +25,15 @@ function setGrantAdsFreeAccess(fn) { _grantAdsFreeAccess = fn; }
 // route module to Telegram/payment-group configuration.
 let _notifyFreeAdsFreeGrant = null;
 function setNotifyFreeAdsFreeGrant(fn) { _notifyFreeAdsFreeGrant = fn; }
+// Injected by server.js after the Telegram bot starts. Whenever the owner adds,
+// edits or removes a delegated admin, refresh that user's private-chat command
+// menu immediately so Telegram shows only the commands they can actually use.
+let _syncBotCommandMenu = null;
+function setBotCommandMenuSync(fn) { _syncBotCommandMenu = typeof fn === 'function' ? fn : null; }
+function refreshBotCommandMenu(userId) {
+  if (!_syncBotCommandMenu) return;
+  Promise.resolve(_syncBotCommandMenu(String(userId))).catch((e) => console.error('Command menu refresh error:', e.message));
+}
 const esc = (s) => String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 function formatIST(d) {
   const parts = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Kolkata', day: 'numeric', month: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true }).formatToParts(d);
@@ -170,6 +179,7 @@ router.post('/admins', verifyOwner, (req, res) => {
   const record = { userId: uid, label: String(req.body.label || '').trim().slice(0, 80), permissions, active: true, updatedAt: new Date().toISOString() };
   if (idx >= 0) list[idx] = { ...list[idx], ...record }; else list.push(record);
   saveAdminList(list);
+  refreshBotCommandMenu(uid);
   res.json({ success: true, admin: record });
 });
 router.patch('/admins/:uid', verifyOwner, (req, res) => {
@@ -185,6 +195,7 @@ router.patch('/admins/:uid', verifyOwner, (req, res) => {
   if (req.body.active !== undefined) list[idx].active = req.body.active !== false;
   list[idx].updatedAt = new Date().toISOString();
   saveAdminList(list);
+  refreshBotCommandMenu(uid);
   res.json({ success: true, admin: { ...list[idx], permissions: sanitizePermissions(list[idx].permissions) } });
 });
 router.delete('/admins/:uid', verifyOwner, (req, res) => {
@@ -193,6 +204,7 @@ router.delete('/admins/:uid', verifyOwner, (req, res) => {
   const after = before.filter(a => String(a.userId) !== uid);
   if (after.length === before.length) return res.status(404).json({ error: 'Admin not found' });
   saveAdminList(after);
+  refreshBotCommandMenu(uid);
   res.json({ success: true });
 });
 
@@ -1996,6 +2008,7 @@ module.exports.POINTS_PER_REFERRAL = POINTS_PER_REFERRAL;
 module.exports.setBot = setBot;
 module.exports.setGrantAdsFreeAccess = setGrantAdsFreeAccess;
 module.exports.setNotifyFreeAdsFreeGrant = setNotifyFreeAdsFreeGrant;
+module.exports.setBotCommandMenuSync = setBotCommandMenuSync;
 module.exports.getSpinStatus = getSpinStatus;
 module.exports.getSpinDailyLimit = getSpinDailyLimit;
 module.exports.hasAdminPower = hasAdminPower;

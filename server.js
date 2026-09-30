@@ -1053,6 +1053,120 @@ function canUseAutoLectureUpload(userId) {
   // those files are additionally attached to the selected course location.
   return hasBotAdminPower(userId, 'uploadLectures');
 }
+
+// ── Telegram command-menu scopes ─────────────────────────────────────────────
+// Telegram's slash-command menu can be scoped per private chat. Keep the global
+// default deliberately tiny so regular users see only /start. Owner gets every
+// management command; delegated admins get the complete delegated-admin command
+// catalogue. Their permission toggles still control execution. Backend checks
+// remain authoritative, so showing a command never grants that power.
+const USER_BOT_COMMANDS = [
+  { command: 'start', description: 'Open bot and browse lectures' },
+];
+
+const OWNER_BOT_COMMANDS = [
+  { command: 'start', description: 'Open bot and browse lectures' },
+  { command: 'admin', description: 'Show full admin command reference' },
+  { command: 'bulk', description: 'Start bulk lecture/file upload' },
+  { command: 'done', description: 'Finish current bulk upload' },
+  { command: 'cancel', description: 'Cancel current bulk upload' },
+  { command: 'myfiles', description: 'List your uploaded files' },
+  { command: 'delete', description: 'Delete file/batch by code' },
+  { command: 'undo', description: 'Undo last auto-lecture action' },
+  { command: 'nextchapter', description: 'Move auto-save to next chapter' },
+  { command: 'nextunit', description: 'Move auto-save to next unit' },
+  { command: 'rmword', description: 'Manage filename auto-filter words' },
+  { command: 'migrate', description: 'Migrate old stored files' },
+  { command: 'sync', description: 'Sync SQLite and MongoDB data' },
+  { command: 'ban', description: 'Ban a user by Telegram UID' },
+  { command: 'unban', description: 'Unban a user by Telegram UID' },
+  { command: 'banned', description: 'List banned users' },
+  { command: 'resetlimit', description: 'Reset a user daily lecture limit' },
+  { command: 'suspiciousrules', description: 'Show suspicious-activity rules' },
+  { command: 'addsuspiciousrule', description: 'Add suspicious-activity rule' },
+  { command: 'delsuspiciousrule', description: 'Delete suspicious-activity rule' },
+  { command: 'resetsuspiciousrules', description: 'Restore default suspicious rules' },
+  { command: 'addpoints', description: 'Add or deduct user points' },
+  { command: 'addspins', description: 'Adjust a user daily spin limit' },
+  { command: 'setspinlimit', description: 'Set global daily spin limit' },
+  { command: 'points', description: 'View points and leaderboard summary' },
+  { command: 'broadcast', description: 'Broadcast text or replied media' },
+  { command: 'startgiveaway', description: 'Start a giveaway' },
+  { command: 'endgiveaway', description: 'End active giveaway' },
+  { command: 'setadsfreeprice', description: 'View/change Ads-Free prices' },
+  { command: 'giveadsfree', description: 'Grant or revoke Ads-Free days' },
+  { command: 'adsfreeusers', description: 'List active Ads-Free subscribers' },
+  { command: 'maintenance', description: 'View/toggle maintenance mode' },
+  { command: 'maintenanceallow', description: 'Allow user during maintenance' },
+  { command: 'maintenanceblock', description: 'Remove maintenance allowance' },
+  { command: 'stats', description: 'View bot and Ads-Free statistics' },
+  { command: 'exemptads', description: 'Add ad-block gate exemption' },
+  { command: 'unexemptads', description: 'Remove ad-block gate exemption' },
+  { command: 'exemptadslist', description: 'List ad-block gate exemptions' },
+];
+
+const DELEGATED_ADMIN_BOT_COMMANDS = [
+  ...USER_BOT_COMMANDS,
+  { command: 'bulk', description: 'Start bulk lecture/file upload' },
+  { command: 'done', description: 'Finish current bulk upload' },
+  { command: 'cancel', description: 'Cancel current bulk upload' },
+  { command: 'undo', description: 'Undo last auto-lecture action' },
+  { command: 'nextchapter', description: 'Move auto-save to next chapter' },
+  { command: 'nextunit', description: 'Move auto-save to next unit' },
+  { command: 'rmword', description: 'Manage filename auto-filter words' },
+  { command: 'myfiles', description: 'List your uploaded files' },
+  { command: 'broadcast', description: 'Broadcast text or replied media' },
+  { command: 'ban', description: 'Ban a user by Telegram UID' },
+  { command: 'unban', description: 'Unban a user by Telegram UID' },
+  { command: 'banned', description: 'List banned users' },
+  { command: 'giveadsfree', description: 'Grant or revoke Ads-Free days' },
+  { command: 'adsfreeusers', description: 'List active Ads-Free subscribers' },
+  { command: 'stats', description: 'View bot and Ads-Free statistics' },
+];
+
+function delegatedAdminBotCommands() {
+  // Show the complete delegated-admin command catalogue in Telegram, as
+  // requested. Individual toggles still decide whether a command executes;
+  // hiding a command is not used as a security boundary.
+  return DELEGATED_ADMIN_BOT_COMMANDS;
+}
+
+function botCommandsForUser(userId) {
+  const uid = Number(userId);
+  if (isOwner(uid)) return OWNER_BOT_COMMANDS;
+  if (courseRoutes.isAnyAdmin && courseRoutes.isAnyAdmin(uid)) return delegatedAdminBotCommands(uid);
+  return USER_BOT_COMMANDS;
+}
+
+async function setTelegramCommandScope(commands, scope) {
+  const resp = await fetch(`https://api.telegram.org/bot${TOKEN}/setMyCommands`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ commands, scope }),
+  });
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok || data.ok === false) throw new Error(data.description || `Telegram setMyCommands failed (${resp.status})`);
+}
+
+async function syncBotCommandMenu(userId) {
+  const uid = Number(userId);
+  if (!Number.isSafeInteger(uid) || uid <= 0) return;
+  await setTelegramCommandScope(botCommandsForUser(uid), { type: 'chat', chat_id: uid });
+}
+
+async function initializeBotCommandMenus() {
+  // Default scope is inherited by every ordinary user: only /start.
+  await setTelegramCommandScope(USER_BOT_COMMANDS, { type: 'default' });
+  await syncBotCommandMenu(OWNER_ID).catch((e) => console.error('Owner command menu sync failed:', e.message));
+  const admins = db.settings.get('web_admins', []);
+  if (Array.isArray(admins)) {
+    for (const admin of admins) {
+      if (admin && admin.active !== false && /^\d+$/.test(String(admin.userId || ''))) {
+        await syncBotCommandMenu(admin.userId).catch((e) => console.error(`Admin command menu sync failed (${admin.userId}):`, e.message));
+      }
+    }
+  }
+}
 const GiveawayInvite = mongoose.model("GiveawayInvite"); // schema lives in routes/course.js, registered at require-time above
 app.use("/api", courseRoutes);
 const autoLectureSession = courseRoutes.autoLectureSession;
@@ -1341,10 +1455,26 @@ async function startBot() {
   courseRoutes.setBot(bot);
   courseRoutes.setGrantAdsFreeAccess(grantAdsFreeAccess);
   courseRoutes.setNotifyFreeAdsFreeGrant(notifyFreeAdsFreeGrant);
+  if (courseRoutes.setBotCommandMenuSync) courseRoutes.setBotCommandMenuSync(syncBotCommandMenu);
+
+  // Configure Telegram's slash-command menu. Ordinary users inherit only
+  // /start; owner/admin private chats receive their scoped management list.
+  try {
+    await initializeBotCommandMenus();
+    console.log('Telegram command menus synced');
+  } catch (e) {
+    console.error('Telegram command menu setup failed:', e.message);
+  }
 
   try {
-    await fetch(`https://api.telegram.org/bot${TOKEN}/setChatMenuButton`, { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ menu_button:{ type:"web_app", text:"Open EduBot", web_app:{ url:WEB_URL } } }) });
-    console.log("Menu button set:", WEB_URL);
+    // Keep Telegram's textbox-side menu as the native command list. The WebApp
+    // remains available from the Browse Lectures button sent by /start.
+    await fetch(`https://api.telegram.org/bot${TOKEN}/setChatMenuButton`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ menu_button: { type: "commands" } }),
+    });
+    console.log("Menu button set to Telegram commands list");
   } catch (_) {}
 
   await recoverPendingDeletes(bot);
@@ -1356,6 +1486,9 @@ async function startBot() {
     const chatId = msg.chat.id;
     const userId = msg.from?.id;
     const param = (match[1] || "").trim();
+    // Refresh this private chat's command scope on every /start so role/power
+    // changes are reflected even if Telegram cached an older menu client-side.
+    if (userId) syncBotCommandMenu(userId).catch((e) => console.error('Command menu refresh on /start failed:', e.message));
     const isNewUser = userId ? !db.user.findOne(String(userId)) : false;
 
     // Banned users get a short refusal and nothing else — no lecture delivery,
