@@ -62,6 +62,7 @@ const ADMIN_POWER_DEFS = [
   { id: 'banUsers', label: 'Ban / Unban Users', description: 'Use /ban, /unban and /banned for user moderation.' },
   { id: 'adsFreeSubscribers', label: 'Ads-Free Subscriber Control', description: 'Use /giveadsfree to add/reduce Ads-Free subscription time and /adsfreeusers to view active subscribers.' },
   { id: 'viewStats', label: 'View Stats', description: 'Use /stats to view bot, content, access, referral and Ads-Free statistics.' },
+  { id: 'bypassDailyVideoLimit', label: 'Bypass 10 Video Limit', description: 'Remove the 10-videos-per-day watch limit for this admin. The 6-hour auto-delete and active-video cap stay unchanged.' },
 ];
 const ADMIN_POWER_IDS = new Set(ADMIN_POWER_DEFS.map(p => p.id));
 

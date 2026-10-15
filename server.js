@@ -101,7 +101,7 @@ const RAZORPAY_KEY_SECRET = process.env.RAZORPAY_KEY_SECRET || "";
 // Optional but recommended — enables /api/razorpay/webhook as a second, server-to-
 // server confirmation path that grants access even if the user closes the app right
 // after paying (before the Checkout.js success handler's /verify call can fire).
-const RAZORPAY_WEBHOOK_SECRET = process.env.RAZORPAY_WEBHOOK_SECRET || "";
+const RAZORPAY_WEBHOOK_SECRET = (process.env.RAZORPAY_WEBHOOK_SECRET || "").trim();
 
 let PaytmChecksum = null;
 if (PAYMENT_PROVIDER === "paytm") {
@@ -116,6 +116,7 @@ if (PAYMENT_PROVIDER === "razorpay") {
     if (RAZORPAY_KEY_ID && RAZORPAY_KEY_SECRET) razorpayClient = new Razorpay({ key_id: RAZORPAY_KEY_ID, key_secret: RAZORPAY_KEY_SECRET });
     else console.warn("RAZORPAY_KEY_ID/RAZORPAY_KEY_SECRET not set — Razorpay payments will be unavailable.");
   } catch (e) { console.warn("razorpay not installed — Razorpay payments will be unavailable. Run `npm install razorpay --save`."); }
+  if (WEB_URL) console.log(`Razorpay webhook URL: ${String(WEB_URL).replace(/\/$/, "")}/api/razorpay/webhook (${RAZORPAY_WEBHOOK_SECRET ? "secret configured" : "NO secret configured"})`);
 }
 
 let BOT_USERNAME = "";
@@ -346,20 +347,71 @@ function getAdsFreePlans() {
   }
   return out;
 }
-const adsFreeSchema = new mongoose.Schema({ userId: { type: String, required: true, unique: true }, expiresAt: { type: Date, required: true } });
+const adsFreeSchema = new mongoose.Schema({
+  userId: { type: String, required: true, unique: true },
+  expiresAt: { type: Date, required: true },
+  // Paid gateway grants carry a stable idempotency key (for Razorpay this is
+  // the order id). Keeping the key on the subscription itself makes a retry,
+  // webhook/verify race, or process restart safe for stackable Ads-Free days.
+  appliedGrantKeys: { type: [String], default: [] },
+});
 const AdsFreeSubscription = mongoose.model("AdsFreeSubscription", adsFreeSchema);
 
 // Extends (or starts) a user's Ads-Free subscription by `days`, stacking on top
-// of any still-active remaining time rather than resetting it — so renewing a
-// few days early never wastes what's left. Returns the new expiry Date.
-async function grantAdsFreeAccess(userId, days) {
+// of any still-active remaining time rather than resetting it. When grantKey is
+// supplied, Mongo performs the extension atomically only if that exact grant has
+// not already been applied. This prevents double days when Razorpay /verify and
+// payment.captured arrive together or the server retries after a crash.
+async function grantAdsFreeAccess(userId, days, grantKey = '') {
   const uid = String(userId);
-  const existing = db.adsFree.find(uid);
-  const now = Date.now();
-  const base = (existing && existing.expiresAt > now) ? existing.expiresAt : now;
-  const expiresAt = new Date(base + days * 24 * 60 * 60 * 1000);
+  const daysMs = Number(days) * 24 * 60 * 60 * 1000;
+  const now = new Date();
+  let expiresAt;
+
+  if (grantKey) {
+    const key = String(grantKey);
+    const rec = await AdsFreeSubscription.findOneAndUpdate(
+      { userId: uid },
+      [
+        { $set: {
+          userId: uid,
+          appliedGrantKeys: {
+            $setUnion: [ { $ifNull: ["$appliedGrantKeys", []] }, [key] ]
+          },
+          expiresAt: {
+            $cond: [
+              { $in: [ key, { $ifNull: ["$appliedGrantKeys", []] } ] },
+              { $ifNull: ["$expiresAt", now] },
+              {
+                $add: [
+                  {
+                    $cond: [
+                      { $gt: [ { $ifNull: ["$expiresAt", now] }, now ] },
+                      { $ifNull: ["$expiresAt", now] },
+                      now
+                    ]
+                  },
+                  daysMs
+                ]
+              }
+            ]
+          }
+        } }
+      ],
+      { upsert: true, new: true }
+    );
+    expiresAt = new Date(rec.expiresAt);
+  } else {
+    // Manual/free grants keep the existing stacking behaviour.
+    const existing = db.adsFree.find(uid);
+    const base = (existing && existing.expiresAt > Date.now()) ? existing.expiresAt : Date.now();
+    expiresAt = new Date(base + daysMs);
+    await AdsFreeSubscription.findOneAndUpdate({ userId: uid }, { $set: { userId: uid, expiresAt } }, { upsert: true, new: true });
+  }
+
+  // SQLite is the fast read cache used by getAdsFreeStatus(); mirror the exact
+  // authoritative Mongo expiry after the atomic update above.
   db.adsFree.upsert({ userId: uid, expiresAt });
-  AdsFreeSubscription.findOneAndUpdate({ userId: uid }, { userId: uid, expiresAt }, { upsert: true }).catch(() => {});
   return expiresAt;
 }
 
@@ -405,6 +457,53 @@ function getProductInfo(batchId) {
   if (plans[batchId]) return { name: plans[batchId].label, price: plans[batchId].price };
   const b = db.batch.getOne(batchId);
   return { name: b ? b.name : batchId, price: b && b.price != null ? Number(b.price) : null };
+}
+
+// Payment amounts are always calculated on the server. Never trust finalAmount or
+// discountPct sent by the WebView: both can be changed from DevTools/a forged
+// request. The client only sends the coupon code; we re-read and validate the
+// authoritative coupon record here before creating a gateway order.
+function resolveTrustedCheckoutAmount(batchId, couponCode) {
+  const product = getProductInfo(batchId);
+  const originalAmount = Number(product.price);
+  if (!Number.isFinite(originalAmount) || originalAmount <= 0) {
+    const e = new Error('Could not determine a valid amount for this product');
+    e.code = 'INVALID_AMOUNT';
+    throw e;
+  }
+
+  let amount = originalAmount;
+  let trustedCouponCode = '';
+  let discountPct = 0;
+  const requestedCode = String(couponCode || '').trim();
+  if (requestedCode) {
+    const coupon = db.coupon.findByCode(requestedCode);
+    if (!coupon || !coupon.isActive || new Date(coupon.expiresAt).getTime() < Date.now()) {
+      const e = new Error('Coupon is invalid, inactive or expired');
+      e.code = 'INVALID_COUPON';
+      throw e;
+    }
+    if (coupon.batchIds && coupon.batchIds.length > 0 && !coupon.batchIds.map(String).includes(String(batchId))) {
+      const e = new Error('This coupon is not valid for this product');
+      e.code = 'INVALID_COUPON';
+      throw e;
+    }
+    discountPct = Number(coupon.discountPct);
+    if (!Number.isFinite(discountPct) || discountPct <= 0 || discountPct >= 100) {
+      const e = new Error('Coupon discount must be between 1 and 99 percent for online checkout');
+      e.code = 'INVALID_COUPON';
+      throw e;
+    }
+    trustedCouponCode = String(coupon.code || requestedCode).toUpperCase();
+    amount = Math.round((originalAmount * (1 - discountPct / 100)) * 100) / 100;
+  }
+
+  if (!Number.isFinite(amount) || amount <= 0) {
+    const e = new Error('Calculated checkout amount is invalid');
+    e.code = 'INVALID_AMOUNT';
+    throw e;
+  }
+  return { amount, originalAmount, couponCode: trustedCouponCode, discountPct };
 }
 
 // ── Giveaway ──────────────────────────────────────────────────────────────────
@@ -478,7 +577,10 @@ const razorpayOrderSchema = new mongoose.Schema({
   couponCode: String,
   discountPct: Number,
   status: { type: String, enum: ["pending","success","failed"], default: "pending" },
-  paymentId: String, // Razorpay's own pay_... id, filled in on success
+  paymentId: { type: String, default: "" }, // Razorpay's own pay_... id
+  verifiedAt: { type: Date, default: null },
+  verifiedBy: { type: String, default: "" }, // checkout | webhook
+  paymentNotifiedAt: { type: Date, default: null },
   createdAt: { type: Date, default: Date.now },
 });
 const RazorpayOrder = mongoose.model("RazorpayOrder", razorpayOrderSchema);
@@ -871,19 +973,21 @@ async function verifyBharatPePayment(utr) {
 // (see getAdsFreePlans() above) so every existing caller — BharatPe admin
 // approval, Paytm callback, Razorpay verify/webhook — supports selling either
 // Ads-Free duration for free, with no changes needed at any of those call sites.
-async function grantBatchAccess(batchId, targetUserId) {
+async function grantBatchAccess(batchId, targetUserId, grantKey = '') {
   const adsFreePlans = getAdsFreePlans();
   if (adsFreePlans[batchId]) {
-    const expiresAt = await grantAdsFreeAccess(targetUserId, adsFreePlans[batchId].days);
+    const expiresAt = await grantAdsFreeAccess(targetUserId, adsFreePlans[batchId].days, grantKey);
     return { _id: batchId, name: `Ads-Free Plan (active till ${expiresAt.toLocaleDateString("en-IN")})` };
   }
   const Batch = require("./models/Course");
-  const batch = await Batch.findById(batchId);
-  if (batch) {
-    if (!batch.premiumUsers) batch.premiumUsers = [];
-    if (!batch.premiumUsers.includes(String(targetUserId))) { batch.premiumUsers.push(String(targetUserId)); await batch.save(); }
-    db.batch.upsert(batch.toObject());
-  }
+  // $addToSet is naturally idempotent, so a retry/race can never add duplicate
+  // premium access entries for the same user.
+  const batch = await Batch.findByIdAndUpdate(
+    batchId,
+    { $addToSet: { premiumUsers: String(targetUserId) } },
+    { new: true }
+  );
+  if (batch) db.batch.upsert(batch.toObject());
   return batch;
 }
 
@@ -1052,6 +1156,13 @@ function canUseAutoLectureUpload(userId) {
   // uploader can save files at any time; if auto-save mode is currently active,
   // those files are additionally attached to the selected course location.
   return hasBotAdminPower(userId, 'uploadLectures');
+}
+
+function bypassesDailyVideoLimit(userId) {
+  // Owner always bypasses the 10-videos/day watch cap. Delegated admins only
+  // bypass it when the owner explicitly enables the dedicated permission.
+  // This does NOT bypass the 6-hour auto-delete timer or max-active-video cap.
+  return isOwner(Number(userId)) || hasBotAdminPower(userId, 'bypassDailyVideoLimit');
 }
 
 // ── Telegram command-menu scopes ─────────────────────────────────────────────
@@ -1271,62 +1382,246 @@ app.post("/api/paytm/callback", async (req, res) => {
   }
 });
 
+// ── Razorpay hardened checkout helpers ───────────────────────────────────────
+// Payments are bound to the Telegram account that opened the Mini App. Never
+// trust userId/name fields from JSON: anyone can forge those in DevTools. The
+// x-tg-init-data header is HMAC-signed by Telegram using the bot token.
+function getVerifiedTelegramCheckoutUser(req) {
+  const initData = String(req.headers["x-tg-init-data"] || "");
+  if (!initData) return null;
+  try {
+    const params = new URLSearchParams(initData);
+    const receivedHash = String(params.get("hash") || "");
+    if (!receivedHash) return null;
+    params.delete("hash");
+
+    const dataCheckString = Array.from(params.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([k, v]) => `${k}=${v}`)
+      .join("\n");
+    const secretKey = crypto.createHmac("sha256", "WebAppData").update(TOKEN).digest();
+    const expectedHash = crypto.createHmac("sha256", secretKey).update(dataCheckString).digest("hex");
+    const a = Buffer.from(expectedHash, "utf8");
+    const b = Buffer.from(receivedHash, "utf8");
+    if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
+
+    // Reject indefinitely replayable old Mini-App payloads. 24h is generous
+    // enough for a long study session while still putting a hard ceiling on a
+    // stolen initData blob. Allow a small future skew for clock differences.
+    const authDate = Number(params.get("auth_date") || 0);
+    const nowSec = Math.floor(Date.now() / 1000);
+    if (!authDate || authDate < nowSec - 24 * 60 * 60 || authDate > nowSec + 5 * 60) return null;
+
+    const user = JSON.parse(params.get("user") || "{}");
+    if (!user || !user.id) return null;
+    return user;
+  } catch (_) {
+    return null;
+  }
+}
+
+// Checkout success from the browser is not enough on its own. Fetch both the
+// payment and order from Razorpay's authenticated server API and confirm their
+// immutable fields before granting anything.
+async function fetchAndValidateRazorpayPayment(order, paymentId) {
+  if (!razorpayClient) throw Object.assign(new Error("Razorpay client unavailable"), { code: "NOT_CONFIGURED" });
+  const expectedPaise = Math.round(Number(order.amount) * 100);
+  let payment = null, gatewayOrder = null;
+
+  // Razorpay can take a moment to reflect captured/paid state immediately after
+  // Checkout's success callback. Retry the authoritative lookup briefly so the
+  // direct path remains reliable even when webhooks are disabled.
+  for (let attempt = 0; attempt < 3; attempt++) {
+    [payment, gatewayOrder] = await Promise.all([
+      razorpayClient.payments.fetch(String(paymentId)),
+      razorpayClient.orders.fetch(String(order.orderId)),
+    ]);
+
+    if (!payment || String(payment.id) !== String(paymentId)) throw Object.assign(new Error("Payment not found"), { code: "PAYMENT_NOT_FOUND" });
+    if (String(payment.order_id || "") !== String(order.orderId)) throw Object.assign(new Error("Payment belongs to a different order"), { code: "ORDER_MISMATCH" });
+    if (Number(payment.amount) !== expectedPaise || String(payment.currency || "").toUpperCase() !== "INR") {
+      throw Object.assign(new Error("Captured payment amount/currency does not match the order"), { code: "AMOUNT_MISMATCH" });
+    }
+
+    if (!gatewayOrder || String(gatewayOrder.id) !== String(order.orderId)) throw Object.assign(new Error("Razorpay order not found"), { code: "ORDER_NOT_FOUND" });
+    if (Number(gatewayOrder.amount) !== expectedPaise || String(gatewayOrder.currency || "").toUpperCase() !== "INR") {
+      throw Object.assign(new Error("Razorpay order amount/currency mismatch"), { code: "ORDER_AMOUNT_MISMATCH" });
+    }
+
+    const paymentCaptured = String(payment.status || "").toLowerCase() === "captured" && payment.captured !== false;
+    const orderPaid = String(gatewayOrder.status || "").toLowerCase() === "paid" && Number(gatewayOrder.amount_paid || 0) >= expectedPaise;
+    if (paymentCaptured && orderPaid) break;
+    if (attempt < 2) await wait(900 * (attempt + 1));
+  }
+
+  if (String(payment?.status || "").toLowerCase() !== "captured" || payment?.captured === false) {
+    throw Object.assign(new Error("Payment is not captured yet"), { code: "PAYMENT_NOT_CAPTURED" });
+  }
+  if (String(gatewayOrder?.status || "").toLowerCase() !== "paid" || Number(gatewayOrder?.amount_paid || 0) < expectedPaise) {
+    throw Object.assign(new Error("Razorpay order is not paid yet"), { code: "ORDER_NOT_PAID" });
+  }
+
+  // Notes were written by our server when creating the gateway order. They are
+  // an extra cross-check, not the primary source of identity.
+  const notes = gatewayOrder.notes || {};
+  if (notes.batchId && String(notes.batchId) !== String(order.batchId)) throw Object.assign(new Error("Order product mismatch"), { code: "PRODUCT_MISMATCH" });
+  if (notes.userId && String(notes.userId) !== String(order.userId)) throw Object.assign(new Error("Order user mismatch"), { code: "USER_MISMATCH" });
+  return { payment, gatewayOrder };
+}
+
+async function notifyRazorpayPaymentSuccess(order, batch, paymentId, source) {
+  await bot.sendMessage(parseInt(order.userId), `✅ <b>Payment Verified & Approved!</b>\n\nAccess to <b>${esc(batch?.name||order.batchId)}</b> unlocked! 🚀`, {
+    parse_mode:"HTML",
+    reply_markup:{ inline_keyboard:[[{text:"📚 Open App",web_app:{url:WEB_URL}}]] }
+  }).catch(()=>{});
+
+  if (PAYMENT_GROUP_ID) {
+    try {
+      await bot.sendMessage(PAYMENT_GROUP_ID, `💸 <b>Razorpay Payment Received</b>\n\n${formatPayerLine(order)}\n🆔 UID: <code>${esc(order.userId)}</code>\n📚 Batch: <b>${esc(batch?.name||order.batchId)}</b>\n💰 Amount: <b>₹${esc(String(order.amount))}</b>\n🔖 Razorpay Payment: <code>${esc(paymentId)}</code>\n🔐 Verified via: <b>${source === "webhook" ? "Signed Webhook" : "Checkout + Razorpay API"}</b>\n\n✅ <b>AUTO-APPROVED</b>`, { parse_mode:"HTML" });
+      await RazorpayOrder.updateOne({ orderId: order.orderId, paymentNotifiedAt: null }, { $set: { paymentNotifiedAt: new Date() } });
+    } catch (e) {
+      console.error(`Razorpay payment-group notify error for ${order.orderId}:`, e.message);
+    }
+  }
+}
+
+// Idempotent fulfilment shared by browser verification and webhook. We grant
+// first using a stable order-level idempotency key, then atomically transition
+// the tracked order to success. Concurrent callers can both reach the grant,
+// but the grant itself is idempotent and only one caller wins the status update
+// and sends the payment notification.
+async function completeRazorpayOrder(order, paymentId, source) {
+  const grantKey = `razorpay:${order.orderId}`;
+  const batch = await grantBatchAccess(order.batchId, order.userId, grantKey);
+  if (!batch) throw Object.assign(new Error("Purchased product no longer exists"), { code: "PRODUCT_NOT_FOUND" });
+
+  const completed = await RazorpayOrder.findOneAndUpdate(
+    { orderId: order.orderId, status: { $ne: "success" } },
+    { $set: { status: "success", paymentId: String(paymentId), verifiedAt: new Date(), verifiedBy: source } },
+    { new: true }
+  );
+
+  if (completed) {
+    await notifyRazorpayPaymentSuccess(completed, batch, paymentId, source);
+    return { newlyCompleted: true, order: completed, batch };
+  }
+
+  const current = await RazorpayOrder.findOne({ orderId: order.orderId });
+  return { newlyCompleted: false, order: current || order, batch };
+}
+
 // ── Razorpay: create order ────────────────────────────────────────────────────
-// Creates a Razorpay order (amount in paise) + a tracked RazorpayOrder row, and
-// hands the frontend what it needs to open the official Checkout.js popup.
+// Creates a Razorpay order using server-authoritative product/coupon pricing and
+// a Telegram-signed user identity. Client-supplied userId/amount fields cannot
+// influence who receives access or how much is charged.
 app.post("/api/razorpay/create-order", async (req, res) => {
   try {
     if (PAYMENT_PROVIDER !== "razorpay") return apiErr(res, 400, "SERVICE_DISABLED", "Razorpay is not the active payment provider");
     if (!razorpayClient) return apiErr(res, 500, "NOT_CONFIGURED", "Razorpay not configured (missing RAZORPAY_KEY_ID/RAZORPAY_KEY_SECRET or razorpay package)");
-    const { batchId, userId, firstName, lastName, username, couponCode, discountPct, finalAmount } = req.body;
-    if (!batchId || !userId) return apiErr(res, 400, "MISSING_FIELDS", "batchId and userId are required");
-    const amount = finalAmount != null ? Number(finalAmount) : getProductInfo(batchId).price;
-    if (!amount || amount <= 0) return apiErr(res, 400, "INVALID_AMOUNT", "Could not determine a valid amount for this batch");
+
+    const tgUser = getVerifiedTelegramCheckoutUser(req);
+    if (!tgUser) return apiErr(res, 401, "TELEGRAM_AUTH_INVALID", "Open payment from the Telegram Mini App and try again");
+
+    const { batchId, couponCode } = req.body || {};
+    if (!batchId) return apiErr(res, 400, "MISSING_FIELDS", "batchId is required");
+    // If an older frontend still sends userId, reject a mismatch instead of
+    // silently accepting a forged identity.
+    if (req.body?.userId != null && String(req.body.userId) !== String(tgUser.id)) {
+      return apiErr(res, 403, "USER_MISMATCH", "Telegram user mismatch");
+    }
+
+    let pricing;
+    try { pricing = resolveTrustedCheckoutAmount(batchId, couponCode); }
+    catch (e) { return apiErr(res, 400, e.code || "INVALID_AMOUNT", e.message); }
+    const { amount, couponCode: trustedCouponCode, discountPct } = pricing;
+    const userId = String(tgUser.id);
 
     const rpOrder = await razorpayClient.orders.create({
-      amount: Math.round(amount * 100), // paise
+      amount: Math.round(amount * 100),
       currency: "INR",
       receipt: `ORD${Date.now()}${Math.floor(Math.random()*1000)}`,
-      notes: { batchId, userId: String(userId), couponCode: couponCode || "" },
+      notes: { batchId: String(batchId), userId, couponCode: trustedCouponCode },
     });
 
-    await RazorpayOrder.create({ orderId: rpOrder.id, batchId, userId: String(userId), firstName, lastName, username, amount, couponCode, discountPct, status: "pending" });
+    await RazorpayOrder.create({
+      orderId: rpOrder.id,
+      batchId: String(batchId),
+      userId,
+      firstName: tgUser.first_name || "",
+      lastName: tgUser.last_name || "",
+      username: tgUser.username || "",
+      amount,
+      couponCode: trustedCouponCode,
+      discountPct,
+      status: "pending"
+    });
 
     return apiOk(res, { orderId: rpOrder.id, amount: rpOrder.amount, currency: rpOrder.currency, keyId: RAZORPAY_KEY_ID }, { service: "razorpay" });
-  } catch (err) { console.error("Razorpay create-order error:", err.message); apiErr(res, 500, "INTERNAL_ERROR", err.message); }
+  } catch (err) {
+    console.error("Razorpay create-order error:", err.message);
+    return apiErr(res, 500, "INTERNAL_ERROR", "Could not create payment order");
+  }
 });
 
 // ── Razorpay: verify payment ──────────────────────────────────────────────────
-// Called by the frontend's Checkout.js success handler with razorpay_order_id,
-// razorpay_payment_id, razorpay_signature. The signature is an HMAC-SHA256 of
-// "order_id|payment_id" keyed with our Key Secret — Razorpay's own recommended
-// way to authoritatively confirm a payment without any extra API call. Never
-// trust the presence of a success callback alone; always verify this signature
-// before granting access.
+// Primary fulfilment path. It requires all three independent checks:
+//   1) signed Telegram Mini-App identity == order owner,
+//   2) Checkout signature is valid,
+//   3) Razorpay server API says payment=captured and order=paid with exact amount.
+// Webhook availability is NOT required for this path.
 app.post("/api/razorpay/verify", async (req, res) => {
   try {
     if (PAYMENT_PROVIDER !== "razorpay") return apiErr(res, 400, "SERVICE_DISABLED", "Razorpay is not the active payment provider");
-    if (!RAZORPAY_KEY_SECRET) return apiErr(res, 500, "NOT_CONFIGURED", "Razorpay not configured");
-    const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
+    if (!razorpayClient || !RAZORPAY_KEY_SECRET) return apiErr(res, 500, "NOT_CONFIGURED", "Razorpay not configured");
+
+    const tgUser = getVerifiedTelegramCheckoutUser(req);
+    if (!tgUser) return apiErr(res, 401, "TELEGRAM_AUTH_INVALID", "Telegram session verification failed. Re-open the Mini App and try again.");
+
+    const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body || {};
     if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) return apiErr(res, 400, "MISSING_FIELDS", "Missing Razorpay payment fields");
 
-    const order = await RazorpayOrder.findOne({ orderId: razorpay_order_id });
+    const order = await RazorpayOrder.findOne({ orderId: String(razorpay_order_id) });
     if (!order) return apiErr(res, 404, "NOT_FOUND", "Order not found");
-    if (order.status === "success") return apiOk(res, { alreadyVerified: true }, { service: "razorpay" }); // idempotent
+    if (String(order.userId) !== String(tgUser.id)) return apiErr(res, 403, "USER_MISMATCH", "This payment order belongs to a different Telegram account");
 
-    const expectedSignature = crypto.createHmac("sha256", RAZORPAY_KEY_SECRET).update(`${razorpay_order_id}|${razorpay_payment_id}`).digest("hex");
-    const valid = expectedSignature.length === razorpay_signature.length && crypto.timingSafeEqual(Buffer.from(expectedSignature), Buffer.from(razorpay_signature));
+    // Always reject a payment id that conflicts with a payment already recorded
+    // against this order, even on an idempotent retry.
+    if (order.status === "success") {
+      if (order.paymentId && String(order.paymentId) !== String(razorpay_payment_id)) return apiErr(res, 409, "PAYMENT_MISMATCH", "Order was already completed by a different payment");
+      return apiOk(res, { alreadyVerified: true }, { service: "razorpay" });
+    }
+
+    const expectedSignature = crypto.createHmac("sha256", RAZORPAY_KEY_SECRET)
+      .update(`${razorpay_order_id}|${razorpay_payment_id}`)
+      .digest("hex");
+    const sigA = Buffer.from(expectedSignature, "utf8");
+    const sigB = Buffer.from(String(razorpay_signature), "utf8");
+    const valid = sigA.length === sigB.length && crypto.timingSafeEqual(sigA, sigB);
     if (!valid) {
       console.error(`Razorpay signature mismatch for order ${razorpay_order_id}`);
       return apiErr(res, 400, "SIGNATURE_INVALID", "Payment verification failed");
     }
 
-    order.status = "success"; order.paymentId = razorpay_payment_id; await order.save();
-    const batch = await grantBatchAccess(order.batchId, order.userId);
-    await bot.sendMessage(parseInt(order.userId), `✅ <b>Payment Verified & Approved!</b>\n\nAccess to <b>${esc(batch?.name||order.batchId)}</b> unlocked! 🚀`, { parse_mode:"HTML", reply_markup:{ inline_keyboard:[[{text:"📚 Open App",web_app:{url:WEB_URL}}]] } }).catch(()=>{});
-    if (PAYMENT_GROUP_ID) bot.sendMessage(PAYMENT_GROUP_ID, `💸 <b>Razorpay Payment Received</b>\n\n${formatPayerLine(order)}\n🆔 UID: <code>${esc(order.userId)}</code>\n📚 Batch: <b>${esc(batch?.name||order.batchId)}</b>\n💰 Amount: <b>₹${esc(String(order.amount))}</b>\n🔖 Razorpay Payment: <code>${esc(razorpay_payment_id)}</code>\n\n✅ <b>AUTO-APPROVED</b> (signature verified)`, { parse_mode:"HTML" }).catch(()=>{});
-    return apiOk(res, { verified: true, batchName: batch?.name||order.batchId }, { service: "razorpay" });
-  } catch (err) { console.error("Razorpay verify error:", err.message); apiErr(res, 500, "INTERNAL_ERROR", err.message); }
+    try {
+      await fetchAndValidateRazorpayPayment(order, razorpay_payment_id);
+    } catch (e) {
+      console.error(`Razorpay authoritative verify failed for ${razorpay_order_id}:`, e.code || e.message);
+      const code = e.code || "PAYMENT_STATUS_UNVERIFIED";
+      // Do not mark the order failed. A captured webhook can still arrive later,
+      // and a user can safely retry verification without being double-granted.
+      return apiErr(res, code === "PAYMENT_NOT_CAPTURED" || code === "ORDER_NOT_PAID" ? 409 : 400, code, e.message);
+    }
+
+    const result = await completeRazorpayOrder(order, razorpay_payment_id, "checkout");
+    return apiOk(res, {
+      verified: true,
+      alreadyVerified: !result.newlyCompleted,
+      batchName: result.batch?.name || order.batchId
+    }, { service: "razorpay" });
+  } catch (err) {
+    console.error("Razorpay verify error:", err.message);
+    return apiErr(res, 500, "INTERNAL_ERROR", "Payment verification temporarily failed");
+  }
 });
 
 // ── Razorpay: webhook (redundant server-to-server confirmation) ──────────────
@@ -1335,31 +1630,87 @@ app.post("/api/razorpay/verify", async (req, res) => {
 // This grants access even if the user closes the WebView right after paying,
 // before the Checkout.js success handler's /verify call reaches our server.
 // Idempotent with /verify — whichever arrives first wins, the other is a no-op.
+// Lightweight diagnostic endpoint. Use this in a browser/uptime checker to
+// confirm that the deployed URL is reachable and that a webhook secret exists.
+// It intentionally never returns the secret itself.
+app.get("/api/razorpay/webhook/health", (req, res) => {
+  res.status(200).json({
+    ok: true,
+    provider: PAYMENT_PROVIDER,
+    webhookSecretConfigured: !!RAZORPAY_WEBHOOK_SECRET,
+    rawBodyCapture: true,
+    time: new Date().toISOString(),
+  });
+});
+
 app.post("/api/razorpay/webhook", async (req, res) => {
   try {
-    if (!RAZORPAY_WEBHOOK_SECRET) return res.status(200).send("ignored"); // not configured — ack so Razorpay stops retrying
-    const signature = req.headers["x-razorpay-signature"];
-    const expected = crypto.createHmac("sha256", RAZORPAY_WEBHOOK_SECRET).update(req.rawBody || Buffer.from(JSON.stringify(req.body))).digest("hex");
-    if (!signature || expected.length !== signature.length || !crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(signature))) {
-      console.error("Razorpay webhook signature mismatch");
+    // If the secret is intentionally not configured, acknowledge deliveries so
+    // Razorpay does not keep retrying an integration that is disabled locally.
+    if (!RAZORPAY_WEBHOOK_SECRET) {
+      console.warn("Razorpay webhook received but RAZORPAY_WEBHOOK_SECRET is not configured");
+      return res.status(200).send("ignored");
+    }
+
+    const signature = String(req.headers["x-razorpay-signature"] || "").trim();
+    const rawBody = req.rawBody;
+    if (!Buffer.isBuffer(rawBody)) {
+      console.error("Razorpay webhook raw body missing — signature cannot be verified safely");
+      return res.status(500).send("raw body unavailable");
+    }
+    const expected = crypto.createHmac("sha256", RAZORPAY_WEBHOOK_SECRET).update(rawBody).digest("hex");
+    const sigOk = signature.length === expected.length && crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(signature));
+    if (!sigOk) {
+      console.error("Razorpay webhook signature mismatch — check Dashboard webhook secret vs RAZORPAY_WEBHOOK_SECRET");
       return res.status(400).send("invalid signature");
     }
-    const event = req.body;
-    if (event.event === "payment.captured") {
-      const payment = event.payload?.payment?.entity;
-      const orderId = payment?.order_id;
-      if (orderId) {
-        const order = await RazorpayOrder.findOne({ orderId });
-        if (order && order.status !== "success") {
-          order.status = "success"; order.paymentId = payment.id; await order.save();
-          const batch = await grantBatchAccess(order.batchId, order.userId);
-          await bot.sendMessage(parseInt(order.userId), `✅ <b>Payment Verified & Approved!</b>\n\nAccess to <b>${esc(batch?.name||order.batchId)}</b> unlocked! 🚀`, { parse_mode:"HTML", reply_markup:{ inline_keyboard:[[{text:"📚 Open App",web_app:{url:WEB_URL}}]] } }).catch(()=>{});
-          if (PAYMENT_GROUP_ID) bot.sendMessage(PAYMENT_GROUP_ID, `💸 <b>Razorpay Payment Received (webhook)</b>\n\n${formatPayerLine(order)}\n🆔 UID: <code>${esc(order.userId)}</code>\n📚 Batch: <b>${esc(batch?.name||order.batchId)}</b>\n💰 Amount: <b>₹${esc(String(order.amount))}</b>\n🔖 Razorpay Payment: <code>${esc(payment.id)}</code>\n\n✅ <b>AUTO-APPROVED</b> (webhook verified)`, { parse_mode:"HTML" }).catch(()=>{});
-        }
-      }
+
+    const event = req.body || {};
+    // Unknown/unsubscribed event types are valid webhook deliveries. ACK them
+    // instead of turning harmless events into delivery failures.
+    if (event.event !== "payment.captured") return res.status(200).send("ok");
+
+    const payment = event.payload?.payment?.entity;
+    const orderId = payment?.order_id;
+    if (!orderId) {
+      console.warn("Razorpay payment.captured webhook missing order_id");
+      return res.status(200).send("ignored");
     }
-    res.status(200).send("ok");
-  } catch (err) { console.error("Razorpay webhook error:", err.message); res.status(500).send("error"); }
+
+    const order = await RazorpayOrder.findOne({ orderId });
+    // A Razorpay account can have payments created by other apps/integrations.
+    // They are not failures for this webhook endpoint, so just acknowledge them.
+    if (!order) {
+      console.warn(`Razorpay webhook order not tracked by this app: ${orderId}`);
+      return res.status(200).send("ignored");
+    }
+
+    // Do not grant access unless the signed event itself is a captured payment
+    // and its immutable amount/currency exactly matches our server-created order.
+    const expectedPaise = Math.round(Number(order.amount) * 100);
+    if (!payment?.id || String(payment.status || "").toLowerCase() !== "captured" || payment.captured === false) {
+      console.error(`Razorpay webhook contained a non-captured payment for ${orderId}`);
+      return res.status(200).send("not captured");
+    }
+    if (Number(payment.amount) !== expectedPaise || String(payment.currency || "").toUpperCase() !== "INR") {
+      console.error(`Razorpay webhook amount mismatch for ${orderId}: expected ${expectedPaise} INR paise, got ${payment.amount} ${payment.currency}`);
+      return res.status(200).send("amount mismatch");
+    }
+
+    if (order.status === "success" && order.paymentId && String(order.paymentId) !== String(payment.id)) {
+      console.error(`Razorpay webhook payment mismatch for already-completed order ${orderId}`);
+      return res.status(200).send("already completed");
+    }
+
+    // Uses the same idempotent fulfilment primitive as /verify. If both arrive
+    // together, Ads-Free days/access are still granted exactly once and only the
+    // caller that wins the atomic success transition sends the payment alert.
+    await completeRazorpayOrder(order, payment.id, "webhook");
+    return res.status(200).send("ok");
+  } catch (err) {
+    console.error("Razorpay webhook error:", err.message);
+    return res.status(500).send("error");
+  }
 });
 
 // ── Monetag SDK proxy ────────────────────────────────────────────────────────
@@ -1547,13 +1898,14 @@ async function startBot() {
             const isVideoFile = f.file_type==="video"||f.file_type==="video_note";
             // Same daily cap enforced on the single-file path below — this loop
             // was missing it entirely, letting a batch of N videos bypass the
-            // per-day limit completely regardless of N. Non-owner + video only;
-            // non-video files in the batch are unaffected, same as single-file.
+            // per-day limit completely regardless of N. Video only; owner and
+            // admins with Bypass 10 Video Limit are exempt. Non-video files are
+            // unaffected, same as the single-file path.
             // Reserve BEFORE sending (atomic, no await gap) so parallel requests
             // can't all pass the check before any of them commit — see
             // tryReserveVideoSlot() for why.
             let reserved = false;
-            if (isVideoFile && !isOwner(userId)) {
+            if (isVideoFile && !bypassesDailyVideoLimit(userId)) {
               const limCheck = tryReserveVideoSlot(userId);
               if (!limCheck.allowed) { limitBlockedCount++; continue; }
               reserved = true;
@@ -1592,7 +1944,7 @@ async function startBot() {
         if (!record) return bot.sendMessage(chatId, `File not found. Link may be invalid.`);
         const isVideo = record.file_type==="video"||record.file_type==="video_note";
         if (isVideo && db.fileRecord.isDeliveryActive(record.id, chatId, 6*60*60*1000)) return bot.sendMessage(chatId, `⚠️ This video was already delivered. You can request it again after 6 hours.`);
-        if (isVideo && !isOwner(userId)) {
+        if (isVideo && !bypassesDailyVideoLimit(userId)) {
           const limCheck = tryReserveVideoSlot(userId);
           if (!limCheck.allowed) return bot.sendMessage(chatId, `🚫 <b>Daily limit reached!</b>\n\nYou've watched <b>${DAILY_VIDEO_LIMIT} videos</b> today.\n📅 Resets at midnight.`, { parse_mode:"HTML" });
           let sentMsg;

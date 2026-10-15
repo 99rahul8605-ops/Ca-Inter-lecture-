@@ -54,6 +54,10 @@ RAZORPAY_KEY_SECRET=
 # You choose this value yourself (any strong random string) and enter the SAME
 # value in Razorpay Dashboard → Settings → Webhooks when adding the webhook
 # (URL: <WEB_URL>/api/razorpay/webhook, event: payment.captured).
+# IMPORTANT: a different Dashboard secret makes every delivery fail signature
+# verification (HTTP 400), which can cause Razorpay to auto-disable the webhook
+# after repeated unsuccessful deliveries. Do not wrap the value in quotes.
+# Health check after deploy: <WEB_URL>/api/razorpay/webhook/health
 RAZORPAY_WEBHOOK_SECRET=
 
 # ── Ads-Free Plan ────────────────────────────────────────────────────────────

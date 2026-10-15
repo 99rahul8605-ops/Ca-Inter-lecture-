@@ -3531,7 +3531,7 @@ async function payWithRazorpay() {
       discountPct: _payAppliedCoupon ? _payAppliedCoupon.discountPct : null,
       finalAmount: _payAppliedCoupon ? _payAppliedCoupon.finalAmount : null,
     };
-    var r = await fetch('/api/razorpay/create-order', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+    var r = await fetch('/api/razorpay/create-order', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-tg-init-data': tg ? tg.initData : '' }, body: JSON.stringify(payload) });
     var d = await r.json();
     if (!d.success) throw new Error((d.error && d.error.message) || 'Could not start checkout');
     var data = d.data;
@@ -3548,7 +3548,7 @@ async function payWithRazorpay() {
       handler: async function (response) {
         btn.innerHTML = '<i class="ti ti-loader-2" style="animation:spin 0.8s linear infinite;display:inline-block"></i> Verifying payment...';
         try {
-          var vr = await fetch('/api/razorpay/verify', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(response) });
+          var vr = await fetch('/api/razorpay/verify', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-tg-init-data': tg ? tg.initData : '' }, body: JSON.stringify(response) });
           var vd = await vr.json();
           if (!vd.success) throw new Error((vd.error && vd.error.message) || 'Verification failed');
           toast('✅ Payment verified instantly! Access unlocked 🚀', 'success');
