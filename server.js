@@ -1191,6 +1191,7 @@ const OWNER_BOT_COMMANDS = [
   { command: 'ban', description: 'Ban a user by Telegram UID' },
   { command: 'unban', description: 'Unban a user by Telegram UID' },
   { command: 'banned', description: 'List banned users' },
+  { command: 'info', description: 'Inspect user and device/IP matches' },
   { command: 'resetlimit', description: 'Reset a user daily lecture limit' },
   { command: 'suspiciousrules', description: 'Show suspicious-activity rules' },
   { command: 'addsuspiciousrule', description: 'Add suspicious-activity rule' },
@@ -2068,6 +2069,7 @@ async function startBot() {
 • /ban (userId) [reason] — Ban a user (also deletes all their pending DM videos immediately)
 • /unban (userId) — Remove a user's ban
 • /banned — List all currently banned users
+• /info (userId) — Show user details + matching device/browser fingerprint/IP accounts
 • /resetlimit (userId) — Reset a user's daily video-watch limit
 
 <b>⚠️ Suspicious Activity Detection</b>
@@ -2887,6 +2889,107 @@ async function startBot() {
         ? `✅ <code>${esc(userId)}</code> can now use the app during maintenance.`
         : `✅ <code>${esc(userId)}</code> removed — they'll see the maintenance screen like everyone else now.`,
       { parse_mode: "HTML" });
+  });
+
+  // ── /info <uid> ───────────────────────────────────────────────────────
+  // Owner-only investigation view. Device ID is high confidence, browser
+  // fingerprint is a supporting signal (can collide on identical devices), and
+  // IP is network-level evidence only. Nothing here auto-bans a user.
+  bot.onText(/^\/info(?:\s+(\d+))?\s*$/, async (msg, match) => {
+    if (isGroupChat(msg) || !isOwner(msg.from?.id)) return;
+    const chatId = msg.chat.id;
+    const uid = String(match?.[1] || '').trim();
+    if (!uid) return bot.sendMessage(chatId, `Usage: <code>/info &lt;user_id&gt;</code>`, { parse_mode: 'HTML' });
+
+    try {
+      const u = db.user.findOne(uid);
+      const banned = db.bannedUser.findOne(uid);
+      const adsFree = db.adsFree.find(uid);
+      const daily = db.dailyVideoLimit.find(uid);
+      const points = courseRoutes.getPointsBreakdown(uid);
+      const premiumBatches = db.batch.getAll().filter(b => Array.isArray(b.premiumUsers) && b.premiumUsers.map(String).includes(uid));
+      const role = isOwner(Number(uid)) ? 'Owner' : ((courseRoutes.isAnyAdmin && courseRoutes.isAnyAdmin(uid)) ? 'Admin' : 'User');
+
+      const WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
+      const sightings = db.deviceSighting.listForUser(uid, WINDOW_MS, 500);
+      const deviceIds = [...new Set(sightings.map(r => r.fingerprint).filter(v => /^dev2_/.test(v || '')))];
+      const browserFps = [...new Set(sightings.map(r => r.browserFingerprint).filter(v => /^bfp2_/.test(v || '')))];
+      const ips = [...new Set(sightings.map(r => r.ip).filter(Boolean))];
+
+      // Aggregate every other account sharing at least one signal with this user.
+      const matches = new Map();
+      const addMatches = (rows, reason) => {
+        for (const row of rows || []) {
+          const otherId = String(row.userId);
+          if (!otherId || otherId === uid) continue;
+          let m = matches.get(otherId);
+          if (!m) m = { userId: otherId, reasons: new Set(), lastSeen: 0 };
+          m.reasons.add(reason);
+          m.lastSeen = Math.max(m.lastSeen, Number(row.lastSeen) || 0);
+          matches.set(otherId, m);
+        }
+      };
+      for (const id of deviceIds) addMatches(db.deviceSighting.distinctUsersForFingerprint(id, WINDOW_MS), 'device');
+      for (const fp of browserFps) addMatches(db.deviceSighting.distinctUsersForBrowserFingerprint(fp, WINDOW_MS), 'browser');
+      for (const ip of ips) addMatches(db.deviceSighting.distinctUsersForIp(ip, WINDOW_MS), 'ip');
+
+      const fmtDate = (v) => v ? formatIST(new Date(Number(v))) : '—';
+      const short = (v) => {
+        v = String(v || '');
+        if (!v) return '—';
+        return v.length > 26 ? `${v.slice(0, 13)}…${v.slice(-8)}` : v;
+      };
+      const name = u ? ([u.firstName, u.lastName].filter(Boolean).join(' ').trim() || 'Unknown') : 'Unknown / not in user table';
+      const username = u?.username ? `@${u.username}` : '—';
+      const adsExpiry = adsFree?.expiresAt ? Number(adsFree.expiresAt) : 0;
+      const adsStatus = adsExpiry > Date.now() ? `✅ Active till ${fmtDate(adsExpiry)}` : (adsExpiry ? `❌ Expired ${fmtDate(adsExpiry)}` : 'No subscription record');
+      const premiumNames = premiumBatches.slice(0, 5).map(b => esc(b.name || String(b._id))).join(', ');
+
+      let text = `🔎 <b>User Info</b>\n\n` +
+        `👤 <b>${esc(name)}</b>\n` +
+        `Username: ${esc(username)}\n` +
+        `UID: <code>${esc(uid)}</code>\n` +
+        `Role: <b>${esc(role)}</b>\n` +
+        `First seen: ${u?.firstSeen ? esc(fmtDate(u.firstSeen)) : '—'}\n` +
+        `Last seen: ${u?.lastSeen ? esc(fmtDate(u.lastSeen)) : '—'}\n` +
+        `Ban: ${banned ? `🚫 Yes — ${esc(banned.reason || 'No reason')} (${esc(fmtDate(banned.bannedAt))})` : '✅ No'}\n\n` +
+        `✨ <b>Access / Usage</b>\n` +
+        `Ads-Free: ${esc(adsStatus)}\n` +
+        `Premium batches: <b>${premiumBatches.length}</b>${premiumNames ? ` — ${premiumNames}${premiumBatches.length > 5 ? '…' : ''}` : ''}\n` +
+        `Points: <b>${Number(points?.points || 0)}</b>\n` +
+        `Daily video count: <b>${Number(daily?.count || 0)}</b>${daily?.resetDate ? ` (reset key: ${esc(String(daily.resetDate))})` : ''}\n\n` +
+        `📱 <b>Device Signals — last 30 days</b>\n` +
+        `Persistent device IDs: <b>${deviceIds.length}</b>${deviceIds[0] ? ` — <code>${esc(short(deviceIds[0]))}</code>` : ''}\n` +
+        `Browser fingerprints: <b>${browserFps.length}</b>${browserFps[0] ? ` — <code>${esc(short(browserFps[0]))}</code>` : ''}\n` +
+        `IP addresses: <b>${ips.length}</b>${ips.length ? ` — ${ips.slice(0, 3).map(ip => `<code>${esc(ip)}</code>`).join(', ')}${ips.length > 3 ? '…' : ''}` : ''}\n` +
+        `Sightings recorded: <b>${sightings.length}</b>`;
+
+      const rows = [...matches.values()].sort((a,b) => b.lastSeen - a.lastSeen);
+      text += `\n\n🔗 <b>Matching Accounts (${rows.length})</b>`;
+      if (!rows.length) {
+        text += `\nNo other account matched this user's stored signals.`;
+      } else {
+        for (const m of rows.slice(0, 15)) {
+          const other = db.user.findOne(m.userId);
+          const otherName = other ? ([other.firstName, other.lastName].filter(Boolean).join(' ').trim() || `User ${m.userId}`) : `User ${m.userId}`;
+          const tags = [];
+          if (m.reasons.has('device')) tags.push('🔴 device ID');
+          if (m.reasons.has('browser')) tags.push('🟠 browser FP');
+          if (m.reasons.has('ip')) tags.push('🟡 IP');
+          text += `\n• ${esc(otherName)}${other?.username ? ` (@${esc(other.username)})` : ''} — <code>${esc(m.userId)}</code>\n  ${tags.join(' + ')} · last ${esc(fmtDate(m.lastSeen))}`;
+        }
+        if (rows.length > 15) text += `\n…and ${rows.length - 15} more matched account(s).`;
+        text += `\n\n<i>🔴 persistent ID = high confidence. 🟠 browser fingerprint can collide on same-model devices. 🟡 IP can be shared WiFi/carrier NAT.</i>`;
+      }
+
+      // Stay comfortably below Telegram's 4096-char limit. The match section is
+      // the only part that can grow, and it is already capped to 15 accounts.
+      if (text.length > 4000) text = text.slice(0, 3950) + `\n…(truncated)`;
+      await bot.sendMessage(chatId, text, { parse_mode: 'HTML' });
+    } catch (err) {
+      console.error('/info error:', err.message);
+      bot.sendMessage(chatId, `❌ Failed to inspect user: ${esc(err.message)}`, { parse_mode: 'HTML' }).catch(() => {});
+    }
   });
 
   bot.onText(/\/points/, async (msg) => {

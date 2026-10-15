@@ -1586,18 +1586,18 @@ async function confirmGiveawayInviteOnFirstWatch(userId) {
 
 // ── Multi-account (shared device/IP) detection ──────────────────────────────
 // Telegram's Bot API never exposes device info or IP to the bot side — this
-// signal only exists because the Mini App talks to our own server over HTTP,
-// so every /device-check call legitimately carries the caller's real IP
-// (given app.set('trust proxy', true) in server.js) plus a browser fingerprint
-// the frontend computes locally. Fingerprint match = high confidence (same
-// physical device/browser); IP-only match = lower confidence (could just be
-// shared WiFi/hostel/college NAT) — the alert says which one fired so the
-// owner can judge for themselves. This is a heuristic for manual review, not
-// an auto-ban trigger.
+// signal only exists because the Mini App talks to our own server over HTTP.
+// Every /device-check carries the caller's IP, a persistent random browser/WebView
+// installation ID, and a hashed browser/environment fingerprint. The persistent
+// ID is the high-confidence installation signal. Browser fingerprint is retained
+// only as supporting evidence because identical phone models can collide; it is
+// never labelled as 'Same Device' by itself. IP is lower confidence again due to
+// shared WiFi/hostel/college/carrier NAT. This is manual-review evidence only and
+// never auto-bans a user.
 const DEVICE_CORRELATION_WINDOW_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 const DEVICE_RETENTION_MS = 45 * 24 * 60 * 60 * 1000; // prune buffer
 
-function checkMultiAccount(userId, fingerprint, ip, fromUser) {
+function checkMultiAccount(userId, deviceId, browserFingerprint, ip, fromUser) {
   try {
     const uidStr = String(userId);
 
@@ -1608,32 +1608,48 @@ function checkMultiAccount(userId, fingerprint, ip, fromUser) {
     if (isAnyAdmin(userId)) return;
     const nonAdminOnly = rows => (rows || []).filter(r => !isAnyAdmin(r.userId));
 
-    const beforeFp = fingerprint ? nonAdminOnly(db.deviceSighting.distinctUsersForFingerprint(fingerprint, DEVICE_CORRELATION_WINDOW_MS)) : [];
+    const beforeDevice = deviceId ? nonAdminOnly(db.deviceSighting.distinctUsersForFingerprint(deviceId, DEVICE_CORRELATION_WINDOW_MS)) : [];
+    const beforeBrowser = browserFingerprint ? nonAdminOnly(db.deviceSighting.distinctUsersForBrowserFingerprint(browserFingerprint, DEVICE_CORRELATION_WINDOW_MS)) : [];
     const beforeIp = ip ? nonAdminOnly(db.deviceSighting.distinctUsersForIp(ip, DEVICE_CORRELATION_WINDOW_MS)) : [];
-    const wasNewToFp = fingerprint && !beforeFp.some(r => r.userId === uidStr);
+    const wasNewToDevice = deviceId && !beforeDevice.some(r => r.userId === uidStr);
+    const wasNewToBrowser = browserFingerprint && !beforeBrowser.some(r => r.userId === uidStr);
     const wasNewToIp = ip && !beforeIp.some(r => r.userId === uidStr);
 
-    db.deviceSighting.insert({ id: db.generateId(), userId: uidStr, fingerprint, ip, seenAt: Date.now() });
+    db.deviceSighting.insert({
+      id: db.generateId(), userId: uidStr,
+      fingerprint: deviceId, browserFingerprint, ip, seenAt: Date.now()
+    });
     db.deviceSighting.pruneOlderThan(DEVICE_RETENTION_MS);
 
     if (!OWNER_ID || !_bot) return;
-    // Nothing new to report — this exact userId was already part of both
-    // clusters before this request, so re-alerting would just be noise.
-    if (!wasNewToFp && !wasNewToIp) return;
+    if (!wasNewToDevice && !wasNewToBrowser && !wasNewToIp) return;
 
-    // Re-fetch AFTER the insert so the lists below include this request too.
-    const afterFp = wasNewToFp ? nonAdminOnly(db.deviceSighting.distinctUsersForFingerprint(fingerprint, DEVICE_CORRELATION_WINDOW_MS)) : null;
-    const afterIp = wasNewToIp ? nonAdminOnly(db.deviceSighting.distinctUsersForIp(ip, DEVICE_CORRELATION_WINDOW_MS)) : null;
-    const fpQualifies = afterFp && afterFp.length >= 2;
-    const ipQualifies = afterIp && afterIp.length >= 2;
-    if (!fpQualifies && !ipQualifies) return;
+    // Re-fetch after inserting this sighting so every cluster includes the
+    // current account. Persistent device-ID is high confidence. Browser
+    // fingerprint alone is NOT enough for an automatic alert because two
+    // identical phones can collide; it is promoted to a medium-confidence
+    // signal only when the same accounts also share the current IP.
+    const deviceCluster = deviceId ? nonAdminOnly(db.deviceSighting.distinctUsersForFingerprint(deviceId, DEVICE_CORRELATION_WINDOW_MS)) : [];
+    const browserCluster = browserFingerprint ? nonAdminOnly(db.deviceSighting.distinctUsersForBrowserFingerprint(browserFingerprint, DEVICE_CORRELATION_WINDOW_MS)) : [];
+    const ipCluster = ip ? nonAdminOnly(db.deviceSighting.distinctUsersForIp(ip, DEVICE_CORRELATION_WINDOW_MS)) : [];
 
-    sendMultiAccountAlert(fpQualifies ? afterFp : null, ipQualifies ? afterIp : null);
+    const deviceAccounts = wasNewToDevice && deviceCluster.length >= 2 ? deviceCluster : null;
+    const ipAccounts = wasNewToIp && ipCluster.length >= 2 ? ipCluster : null;
+
+    let browserAccounts = null;
+    if (wasNewToBrowser && browserCluster.length >= 2 && ipCluster.length >= 2) {
+      const ipIds = new Set(ipCluster.map(r => String(r.userId)));
+      const overlap = browserCluster.filter(r => ipIds.has(String(r.userId)));
+      if (overlap.length >= 2) browserAccounts = overlap;
+    }
+
+    if (!deviceAccounts && !browserAccounts && !ipAccounts) return;
+    sendMultiAccountAlert(deviceAccounts, browserAccounts, ipAccounts);
   } catch (err) { console.error("Multi-account check error:", err.message); }
 }
 
 // Formats the FULL member list for a cluster (every account currently sharing
-// that device/IP, not just the newest one) — name, username, and userId each.
+// that signal, not just the newest one) — name, username, and userId each.
 function _formatAccountList(accounts) {
   const rows = accounts.slice(0, 15).map(a => {
     const u = db.user.findOne(a.userId);
@@ -1644,37 +1660,43 @@ function _formatAccountList(accounts) {
   return rows.join("\n");
 }
 
-// One combined message per event — clearly separated "Same Device" and "Same
-// IP" sections (never mixed into one list), each listing every account
-// currently in that cluster so the owner sees the full picture at a glance.
-function sendMultiAccountAlert(deviceAccounts, ipAccounts) {
+// Confidence is explicit so a coarse browser/environment match can never be
+// mistaken for proof that two Telegram accounts are on one physical device.
+function sendMultiAccountAlert(deviceAccounts, browserAccounts, ipAccounts) {
   try {
     let text = `👥 <b>Possible Multi-Account Detected</b>\n\n`;
     if (deviceAccounts) {
-      text += `🔴 <b>Same Device</b> — ${deviceAccounts.length} accounts:\n${_formatAccountList(deviceAccounts)}\n\n`;
+      text += `🔴 <b>Same persistent device ID</b> — HIGH confidence (${deviceAccounts.length} accounts):\n${_formatAccountList(deviceAccounts)}\n\n`;
+    }
+    if (browserAccounts) {
+      text += `🟠 <b>Browser fingerprint + same IP</b> — MEDIUM confidence (${browserAccounts.length} accounts):\n${_formatAccountList(browserAccounts)}\n<i>Browser fingerprints can collide on identical devices, so review manually.</i>\n\n`;
     }
     if (ipAccounts) {
-      text += `🟡 <b>Same IP Address</b> — ${ipAccounts.length} accounts (could be shared WiFi/network):\n${_formatAccountList(ipAccounts)}\n\n`;
+      text += `🟡 <b>Same IP Address</b> — LOW confidence (${ipAccounts.length} accounts):\n${_formatAccountList(ipAccounts)}\n<i>Could be shared WiFi/hostel/college/mobile carrier NAT.</i>\n\n`;
     }
     _bot.sendMessage(OWNER_ID, text.trim(), { parse_mode: "HTML" }).catch(() => {});
   } catch (err) { console.error("Multi-account alert error:", err.message); }
 }
 
-// POST — called once per app session by the frontend with a computed device
-// fingerprint. Records this sighting (userId + fingerprint + real IP) and
-// alerts the owner if it newly links this account to another one on the same
-// device or IP. Always responds 200 even on internal failure — this must
-// never block the app from loading for the user.
+// POST — called once per app session. The persistent random ID is the strongest
+// browser-installation signal. A separate hashed browser/environment fingerprint
+// is stored as supporting evidence and is never treated as proof by itself.
 router.post('/device-check', (req, res) => {
   try {
     const userId = getRequestUserId(req);
     if (!userId) return res.json({ ok: false });
-    const fingerprint = String(req.body?.fingerprint || '').slice(0, 128);
+
+    const rawDeviceId = String(req.body?.fingerprint || '').slice(0, 128);
+    const deviceId = /^dev2_[A-Za-z0-9_-]{16,120}$/.test(rawDeviceId) ? rawDeviceId : '';
+
+    const rawBrowserFp = String(req.body?.browserFingerprint || '').slice(0, 128);
+    const browserFingerprint = /^bfp2_[A-Za-z0-9_-]{8,120}$/.test(rawBrowserFp) ? rawBrowserFp : '';
+
     // req.ip resolves the real client IP from X-Forwarded-For because
     // server.js sets app.set('trust proxy', true).
     const ip = String(req.ip || req.connection?.remoteAddress || '').slice(0, 64);
     const u = db.user.findOne(userId);
-    checkMultiAccount(userId, fingerprint, ip, { id: userId, username: u?.username, first_name: u?.firstName });
+    checkMultiAccount(userId, deviceId, browserFingerprint, ip, { id: userId, username: u?.username, first_name: u?.firstName });
     res.json({ ok: true });
   } catch (e) { res.json({ ok: false }); }
 });

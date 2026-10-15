@@ -56,6 +56,16 @@ function _setupTables(db) {
     }
   } catch (e) { /* table doesn't exist yet — CREATE TABLE below will make it fresh */ }
 
+  // device_sightings is historical security/audit data, so never drop it.
+  // v2 adds a separate browserFingerprint column alongside the persistent
+  // random device ID. Older deployments are upgraded in-place.
+  try {
+    const dsCols = db.prepare(`PRAGMA table_info(device_sightings)`).all().map(c => c.name);
+    if (dsCols.length && !dsCols.includes('browserFingerprint')) {
+      db.exec(`ALTER TABLE device_sightings ADD COLUMN browserFingerprint TEXT DEFAULT ''`);
+    }
+  } catch (e) { /* table doesn't exist yet — CREATE TABLE below will make it fresh */ }
+
   // Same story for auto_lec_session — add lastLectureId to existing deployments
   // instead of dropping the table (which would lose an in-progress session).
   try {
@@ -351,13 +361,15 @@ function _setupTables(db) {
     -- userIds (a heuristic for multi-accounting), never for anything else.
     -- Rows older than the correlation window are pruned periodically.
     CREATE TABLE IF NOT EXISTS device_sightings (
-      id          TEXT PRIMARY KEY,
-      userId      TEXT NOT NULL,
-      fingerprint TEXT DEFAULT '',
-      ip          TEXT DEFAULT '',
-      seenAt      INTEGER DEFAULT 0
+      id                 TEXT PRIMARY KEY,
+      userId             TEXT NOT NULL,
+      fingerprint        TEXT DEFAULT '',
+      browserFingerprint TEXT DEFAULT '',
+      ip                 TEXT DEFAULT '',
+      seenAt             INTEGER DEFAULT 0
     );
     CREATE INDEX IF NOT EXISTS idx_device_sightings_fp ON device_sightings(fingerprint);
+    CREATE INDEX IF NOT EXISTS idx_device_sightings_browser_fp ON device_sightings(browserFingerprint);
     CREATE INDEX IF NOT EXISTS idx_device_sightings_ip ON device_sightings(ip);
     CREATE INDEX IF NOT EXISTS idx_device_sightings_user ON device_sightings(userId);
   `);
@@ -1785,11 +1797,11 @@ const settings = {
 // ── DEVICE SIGHTING Operations (multi-account / shared-device detection) ──────
 
 const deviceSighting = {
-  insert({ id, userId, fingerprint, ip, seenAt }) {
-    getDb().prepare(`INSERT INTO device_sightings(id,userId,fingerprint,ip,seenAt) VALUES(?,?,?,?,?)`)
-      .run(id, String(userId), fingerprint || '', ip || '', seenAt || Date.now());
+  insert({ id, userId, fingerprint, browserFingerprint, ip, seenAt }) {
+    getDb().prepare(`INSERT INTO device_sightings(id,userId,fingerprint,browserFingerprint,ip,seenAt) VALUES(?,?,?,?,?,?)`)
+      .run(id, String(userId), fingerprint || '', browserFingerprint || '', ip || '', seenAt || Date.now());
   },
-  // Distinct userIds seen with this fingerprint within the window, most-recent first.
+  // Distinct userIds seen with this persistent random device ID within the window.
   distinctUsersForFingerprint(fingerprint, windowMs) {
     if (!fingerprint) return [];
     const since = Date.now() - windowMs;
@@ -1797,13 +1809,28 @@ const deviceSighting = {
       WHERE fingerprint=? AND seenAt>=? GROUP BY userId ORDER BY lastSeen DESC`)
       .all(fingerprint, since);
   },
-  // Same, but by IP address instead of fingerprint.
+  // Lower-confidence browser/environment fingerprint. It is deliberately kept
+  // separate from the persistent ID because identical phone models can collide.
+  distinctUsersForBrowserFingerprint(browserFingerprint, windowMs) {
+    if (!browserFingerprint) return [];
+    const since = Date.now() - windowMs;
+    return getDb().prepare(`SELECT userId, MAX(seenAt) as lastSeen FROM device_sightings
+      WHERE browserFingerprint=? AND seenAt>=? GROUP BY userId ORDER BY lastSeen DESC`)
+      .all(browserFingerprint, since);
+  },
+  // Same, but by IP address instead of a device/browser signal.
   distinctUsersForIp(ip, windowMs) {
     if (!ip) return [];
     const since = Date.now() - windowMs;
     return getDb().prepare(`SELECT userId, MAX(seenAt) as lastSeen FROM device_sightings
       WHERE ip=? AND seenAt>=? GROUP BY userId ORDER BY lastSeen DESC`)
       .all(ip, since);
+  },
+  listForUser(userId, windowMs, limit) {
+    const since = Date.now() - (windowMs || 30 * 24 * 60 * 60 * 1000);
+    return getDb().prepare(`SELECT userId,fingerprint,browserFingerprint,ip,seenAt FROM device_sightings
+      WHERE userId=? AND seenAt>=? ORDER BY seenAt DESC LIMIT ?`)
+      .all(String(userId), since, Math.max(1, Math.min(Number(limit) || 200, 1000)));
   },
   pruneOlderThan(ms) {
     getDb().prepare(`DELETE FROM device_sightings WHERE seenAt < ?`).run(Date.now() - ms);

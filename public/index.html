@@ -4884,48 +4884,115 @@ async function checkBanStatus() {
   }
 }
 
-// Computes a lightweight browser fingerprint from stable device/browser
-// signals (no permissions requested, nothing invasive) — used only to help
-// the owner spot the same device being used to run multiple Telegram
-// accounts. Never blocks app load; failures are silently ignored.
-async function _computeDeviceFingerprint() {
+// Generates a persistent random ID for this browser/WebView installation.
+// IMPORTANT: this is intentionally NOT derived from user-agent/screen/canvas.
+// Those "fingerprint" signals are shared by many phones of the same model and
+// were causing false "Same Device" alerts. A random ID stored in localStorage
+// has negligible collision risk. If storage is cleared/reinstalled, the ID
+// changes (possible false-negative), which is safer than accusing two separate
+// devices of being the same device.
+function _getPersistentDeviceId() {
   try {
-    var parts = [
-      navigator.userAgent || '',
-      navigator.language || '',
-      navigator.platform || '',
-      String(navigator.hardwareConcurrency || ''),
-      String(screen.width) + 'x' + String(screen.height),
-      String(screen.colorDepth || ''),
-      (Intl.DateTimeFormat().resolvedOptions().timeZone || ''),
-    ];
+    var key = 'ca_device_id_v2';
+    var existing = localStorage.getItem(key);
+    if (existing && /^dev2_[A-Za-z0-9_-]{16,120}$/.test(existing)) return existing;
+
+    var id = '';
+    if (window.crypto && typeof window.crypto.randomUUID === 'function') {
+      id = window.crypto.randomUUID().replace(/-/g, '');
+    } else if (window.crypto && typeof window.crypto.getRandomValues === 'function') {
+      var bytes = new Uint8Array(24);
+      window.crypto.getRandomValues(bytes);
+      id = Array.from(bytes).map(function(b){ return b.toString(16).padStart(2, '0'); }).join('');
+    } else {
+      // Legacy fallback only. Date + Math.random is still far less collision-prone
+      // than a model/screen/user-agent fingerprint for this non-security identifier.
+      id = Date.now().toString(36) + '_' + Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
+    }
+
+    var value = 'dev2_' + id;
+    localStorage.setItem(key, value);
+    return value;
+  } catch (e) {
+    // If persistent storage is unavailable, skip "Same Device" correlation.
+    // Same-IP detection still works independently on the backend.
+    return '';
+  }
+}
+
+async function _getBrowserFingerprint() {
+  try {
+    var parts = [];
+    var nav = window.navigator || {};
+    var scr = window.screen || {};
+    parts.push(
+      nav.userAgent || '',
+      (nav.languages || []).join(','),
+      nav.language || '',
+      nav.platform || '',
+      String(nav.hardwareConcurrency || ''),
+      String(nav.deviceMemory || ''),
+      String(nav.maxTouchPoints || ''),
+      [scr.width||'', scr.height||'', scr.availWidth||'', scr.availHeight||'', scr.colorDepth||'', scr.pixelDepth||''].join('x'),
+      String(window.devicePixelRatio || ''),
+      (Intl.DateTimeFormat().resolvedOptions().timeZone || '')
+    );
+
+    // Canvas adds rendering characteristics. It is a supporting signal only —
+    // never treated as proof of the same physical device.
     try {
       var canvas = document.createElement('canvas');
-      var cctx = canvas.getContext('2d');
-      cctx.textBaseline = 'top';
-      cctx.font = '14px Arial';
-      cctx.fillText('fp-' + navigator.userAgent, 2, 2);
-      parts.push(canvas.toDataURL());
-    } catch (e) { /* canvas unavailable — fingerprint just has fewer signals */ }
+      canvas.width = 240; canvas.height = 60;
+      var ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.textBaseline = 'top';
+        ctx.font = '14px Arial';
+        ctx.fillText('CA-Inter-device-check-🙂-123', 3, 3);
+        ctx.fillStyle = 'rgba(120,80,200,0.7)';
+        ctx.fillRect(20, 25, 110, 17);
+        parts.push(canvas.toDataURL());
+      }
+    } catch (_) {}
 
-    var raw = parts.join('|');
-    if (window.crypto && window.crypto.subtle) {
-      var enc = new TextEncoder().encode(raw);
-      var hashBuf = await window.crypto.subtle.digest('SHA-256', enc);
-      var hashArr = Array.from(new Uint8Array(hashBuf));
-      return hashArr.map(function(b){ return b.toString(16).padStart(2,'0'); }).join('');
+    // WebGL renderer/vendor can distinguish some devices that otherwise share
+    // the same UA + screen profile. Still low-confidence on its own.
+    try {
+      var glCanvas = document.createElement('canvas');
+      var gl = glCanvas.getContext('webgl') || glCanvas.getContext('experimental-webgl');
+      if (gl) {
+        var dbg = gl.getExtension('WEBGL_debug_renderer_info');
+        if (dbg) {
+          parts.push(String(gl.getParameter(dbg.UNMASKED_VENDOR_WEBGL) || ''));
+          parts.push(String(gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) || ''));
+        }
+        parts.push(String(gl.getParameter(gl.VERSION) || ''));
+        parts.push(String(gl.getParameter(gl.SHADING_LANGUAGE_VERSION) || ''));
+      }
+    } catch (_) {}
+
+    var raw = parts.join('||');
+    if (!raw) return '';
+    if (window.crypto && window.crypto.subtle && window.TextEncoder) {
+      var buf = await window.crypto.subtle.digest('SHA-256', new TextEncoder().encode(raw));
+      var hex = Array.from(new Uint8Array(buf)).map(function(b){ return b.toString(16).padStart(2, '0'); }).join('');
+      return 'bfp2_' + hex.slice(0, 48);
     }
-    var h = 0;
-    for (var i = 0; i < raw.length; i++) { h = ((h << 5) - h + raw.charCodeAt(i)) | 0; }
-    return 'fh_' + Math.abs(h).toString(16);
+
+    // Compact deterministic fallback for older WebViews.
+    var h1 = 2166136261;
+    for (var i=0;i<raw.length;i++) { h1 ^= raw.charCodeAt(i); h1 = Math.imul(h1, 16777619); }
+    return 'bfp2_' + ('00000000' + (h1 >>> 0).toString(16)).slice(-8) + '_' + raw.length.toString(36);
   } catch (e) { return ''; }
 }
 
 async function reportDeviceFingerprint() {
   try {
-    var fp = await _computeDeviceFingerprint();
-    if (!fp) return;
-    await apiFetch('/api/device-check', 'POST', { fingerprint: fp });
+    var deviceId = _getPersistentDeviceId();
+    var browserFingerprint = await _getBrowserFingerprint();
+    await apiFetch('/api/device-check', 'POST', {
+      fingerprint: deviceId,
+      browserFingerprint: browserFingerprint
+    });
   } catch (e) { /* never let this affect the app */ }
 }
 
