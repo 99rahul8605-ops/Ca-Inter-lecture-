@@ -1,3 +1,4 @@
+console.log("[BUILD] MIGRATE-V4-LIVE loaded");
 // Load .env directly — makes the app self-sufficient regardless of whether the
 // launch script (start.sh) exports variables into the shell before running
 // `node server.js`. Wrapped in try/catch so a missing `dotenv` package doesn't
@@ -2584,7 +2585,7 @@ async function startBot() {
         });
       }
 
-      let status = await bot.sendMessage(chatId, `🔄 <b>Migration starting</b>\n\nExact backups: ${knownJobs.length}\nMissing backup IDs: ${missingJobs.length}`, { parse_mode:"HTML" });
+      let status = await bot.sendMessage(chatId, `🔄 <b>Migration starting</b>\n🧩 Build: <code>MIGRATE-V4-LIVE</code>\n\nExact backups: ${knownJobs.length}\nMissing backup IDs: ${missingJobs.length}`, { parse_mode:"HTML" });
       let migrationStatusLastAt = 0;
       const progressBar = (done, total) => {
         if (!total) return `100%`;
