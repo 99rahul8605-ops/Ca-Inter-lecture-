@@ -2584,7 +2584,34 @@ async function startBot() {
         });
       }
 
-      const status = await bot.sendMessage(chatId, `🔄 <b>Migration starting</b>\n\nExact backups: ${knownJobs.length}\nMissing backup IDs: ${missingJobs.length}`, { parse_mode:"HTML" });
+      let status = await bot.sendMessage(chatId, `🔄 <b>Migration starting</b>\n\nExact backups: ${knownJobs.length}\nMissing backup IDs: ${missingJobs.length}`, { parse_mode:"HTML" });
+      let migrationStatusLastAt = 0;
+      const progressBar = (done, total) => {
+        if (!total) return `100%`;
+        const pct = Math.max(0, Math.min(100, Math.round((done / total) * 100)));
+        const filled = Math.round(pct / 10);
+        return `${'█'.repeat(filled)}${'░'.repeat(10-filled)} ${pct}%`;
+      };
+      const updateMigrationStatus = async (text, force = false) => {
+        const now = Date.now();
+        if (!force && now - migrationStatusLastAt < 4500) return;
+        try {
+          await bot.editMessageText(text, { chat_id:chatId, message_id:status.message_id, parse_mode:"HTML" });
+          migrationStatusLastAt = now;
+        } catch (err) {
+          const desc = String(err?.response?.body?.description || err?.message || '');
+          if (/message is not modified/i.test(desc)) {
+            migrationStatusLastAt = now;
+            return;
+          }
+          // If Telegram refuses to edit the old status message, do not hide the
+          // migration progress. Send a fresh status message and continue editing it.
+          try {
+            status = await bot.sendMessage(chatId, text, { parse_mode:"HTML" });
+            migrationStatusLastAt = now;
+          } catch (_) {}
+        }
+      };
       let refreshed = 0, exactFailed = 0, recovered = 0, ambiguous = 0, notFound = 0;
       const failedLabels = [], ambiguousLabels = [], noMatchLabels = [];
       const dirtyBatches = new Set();
@@ -2636,8 +2663,8 @@ async function startBot() {
           exactFailed++;
           failedLabels.push(job.label);
         }
-        if ((i+1)%20===0 || i+1===knownJobs.length) {
-          bot.editMessageText(`🔄 Phase 1/2 — exact backups ${i+1}/${knownJobs.length}\n✅ Refreshed: ${refreshed}  🚫 Failed: ${exactFailed}\nMissing IDs to recover: ${missingJobs.length}`, { chat_id:chatId, message_id:status.message_id }).catch(()=>{});
+        if ((i+1)%10===0 || i+1===knownJobs.length) {
+          await updateMigrationStatus(`🔄 <b>Phase 1/3 — exact backups</b>\n${progressBar(i+1, knownJobs.length)}\nProcessed: <b>${i+1}/${knownJobs.length}</b>\n✅ Refreshed: <b>${refreshed}</b>   🚫 Failed: <b>${exactFailed}</b>\n🧩 Missing IDs queued: <b>${missingJobs.length}</b>`, i+1===knownJobs.length);
         }
         await sleep(180);
       }
@@ -2651,7 +2678,7 @@ async function startBot() {
       const unresolvedMissingJobs = [];
       let remirrored = 0;
       if (missingJobs.length && !migrateStopRequested) {
-        await bot.editMessageText(`🧩 Phase 2A/3 — repairing ${missingJobs.length} missing backup ID(s) from stored file IDs...\nThis works best while the OLD bot token is connected.`, { chat_id:chatId, message_id:status.message_id }).catch(()=>{});
+        await updateMigrationStatus(`🧩 <b>Phase 2A/3 — repairing missing backup IDs</b>\n${progressBar(0, missingJobs.length)}\nProcessed: <b>0/${missingJobs.length}</b>\nThis works best while the OLD bot token is connected.`, true);
         for (let i=0; i<missingJobs.length; i++) {
           if (migrateStopRequested) break;
           const job = missingJobs[i];
@@ -2670,8 +2697,8 @@ async function startBot() {
           } catch (_) {
             unresolvedMissingJobs.push(job);
           }
-          if ((i+1)%20===0 || i+1===missingJobs.length) {
-            bot.editMessageText(`🧩 Phase 2A/3 — stored-ID repair ${i+1}/${missingJobs.length}\n✅ Re-mirrored: ${remirrored}  🔎 Still unresolved: ${unresolvedMissingJobs.length}`, { chat_id:chatId, message_id:status.message_id }).catch(()=>{});
+          if ((i+1)%10===0 || i+1===missingJobs.length) {
+            await updateMigrationStatus(`🧩 <b>Phase 2A/3 — stored-ID repair</b>\n${progressBar(i+1, missingJobs.length)}\nProcessed: <b>${i+1}/${missingJobs.length}</b>\n✅ Re-mirrored: <b>${remirrored}</b>   🔎 Unresolved so far: <b>${unresolvedMissingJobs.length}</b>`, i+1===missingJobs.length);
           }
           await sleep(160);
         }
@@ -2680,7 +2707,7 @@ async function startBot() {
       // Phase 2B: rows whose stored file_id is not usable by the current token.
       // Scan the storage channel and recover only unambiguous matches.
       if (unresolvedMissingJobs.length && !migrateStopRequested) {
-        await bot.editMessageText(`🔎 Phase 2B/3 — scanning storage channel for ${unresolvedMissingJobs.length} unresolved backup ID(s)...\nOnly safe unique matches will be saved.`, { chat_id:chatId, message_id:status.message_id }).catch(()=>{});
+        await updateMigrationStatus(`🔎 <b>Phase 2B/3 — scanning storage channel</b>\nUnresolved records: <b>${unresolvedMissingJobs.length}</b>\nFinding safe unique matches...`, true);
 
         let probe = null;
         try {
@@ -2711,8 +2738,8 @@ async function startBot() {
             } finally {
               if (fwd?.message_id) bot.deleteMessage(chatId, fwd.message_id).catch(()=>{});
             }
-            if (id % 50 === 0 || id === maxId) {
-              bot.editMessageText(`🔎 Phase 2B/3 — scanned ${id}/${maxId} channel messages\nCandidates found: ${channelFiles.length}\nUnresolved records: ${unresolvedMissingJobs.length}`, { chat_id:chatId, message_id:status.message_id }).catch(()=>{});
+            if (id % 25 === 0 || id === maxId) {
+              await updateMigrationStatus(`🔎 <b>Phase 2B/3 — scanning storage channel</b>\n${progressBar(id, maxId)}\nScanned: <b>${id}/${maxId}</b> channel messages\n📦 File candidates found: <b>${channelFiles.length}</b>\n🔎 Records waiting for match: <b>${unresolvedMissingJobs.length}</b>`, id===maxId);
             }
             await sleep(90);
           }
@@ -2743,8 +2770,10 @@ async function startBot() {
           }
           const consumed = new Set();
 
+          let matchProcessed = 0;
           for (const job of unresolvedMissingJobs) {
             if (migrateStopRequested) break;
+            matchProcessed++;
             let candidates = [];
             let method = "";
             if (job.file.file_unique_id) {
@@ -2773,6 +2802,9 @@ async function startBot() {
               notFound++;
               noMatchLabels.push(job.label);
             }
+            if (matchProcessed % 20 === 0 || matchProcessed === unresolvedMissingJobs.length) {
+              await updateMigrationStatus(`🧭 <b>Phase 3/3 — matching recovered files</b>\n${progressBar(matchProcessed, unresolvedMissingJobs.length)}\nMatched records checked: <b>${matchProcessed}/${unresolvedMissingJobs.length}</b>\n✅ Recovered: <b>${recovered}</b>   ⚠️ Ambiguous: <b>${ambiguous}</b>   📛 No match: <b>${notFound}</b>`, matchProcessed===unresolvedMissingJobs.length);
+            }
           }
         } finally {
           if (probe?.message_id) bot.deleteMessage(STORAGE_CHANNEL_ID, probe.message_id).catch(()=>{});
@@ -2798,7 +2830,7 @@ async function startBot() {
       if (ambiguousLabels.length) summary += `\n\n⚠️ <b>Ambiguous — re-upload/manual fix</b>\n${ambiguousLabels.slice(0,25).map(esc).join(", ")}${ambiguousLabels.length>25?"…":""}`;
       if (noMatchLabels.length) summary += `\n\n📛 <b>No safe match — likely no storage backup</b>\n${noMatchLabels.slice(0,25).map(esc).join(", ")}${noMatchLabels.length>25?"…":""}`;
       summary += `\n\nFresh <code>file_id</code> + <code>channel_msg_id</code> are saved in SQLite and MongoDB for every successful item.\n\n💡 Best recovery flow for rows with no channel ID: run <code>/migrate</code> once with the OLD bot token (re-mirror), then switch to the NEW bot token and run <code>/migrate</code> again (rebind).`;
-      await bot.editMessageText(summary, { chat_id:chatId, message_id:status.message_id, parse_mode:"HTML" }).catch(()=>bot.sendMessage(chatId, summary, { parse_mode:"HTML" }));
+      await updateMigrationStatus(summary, true);
     } catch (err) {
       console.error("Migrate error:", err);
       bot.sendMessage(chatId, `❌ Migration failed: ${esc(err.message)}`, { parse_mode:"HTML" }).catch(()=>{});
