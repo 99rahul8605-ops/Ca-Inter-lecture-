@@ -54,6 +54,9 @@ function _setupTables(db) {
     if (frCols.length && !frCols.includes('delivered_at')) {
       db.exec(`ALTER TABLE file_records ADD COLUMN delivered_at TEXT DEFAULT '{}'`);
     }
+    if (frCols.length && !frCols.includes('file_unique_id')) {
+      db.exec(`ALTER TABLE file_records ADD COLUMN file_unique_id TEXT DEFAULT ''`);
+    }
   } catch (e) { /* table doesn't exist yet — CREATE TABLE below will make it fresh */ }
 
   // device_sightings is historical security/audit data, so never drop it.
@@ -172,6 +175,7 @@ function _setupTables(db) {
       id             TEXT PRIMARY KEY,
       code           TEXT NOT NULL UNIQUE,
       file_id        TEXT NOT NULL,
+      file_unique_id TEXT DEFAULT '',
       file_type      TEXT NOT NULL,
       file_name      TEXT DEFAULT 'file',
       uploaded_by    INTEGER,
@@ -540,18 +544,18 @@ async function syncFromMongo(mongoose) {
     const FileRecord = mongoose.models.FileRecord;
     if (FileRecord) {
       const files = await FileRecord.find({}).lean();
-      const upsertFile = db.prepare(`INSERT INTO file_records(id,code,file_id,file_type,file_name,uploaded_by,expires_at,delivered_to,delivered_at,created_at,channel_msg_id)
-        VALUES(?,?,?,?,?,?,?,?,?,?,?)
+      const upsertFile = db.prepare(`INSERT INTO file_records(id,code,file_id,file_unique_id,file_type,file_name,uploaded_by,expires_at,delivered_to,delivered_at,created_at,channel_msg_id)
+        VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
         ON CONFLICT(id) DO UPDATE SET
-          code=excluded.code,file_id=excluded.file_id,delivered_to=excluded.delivered_to,delivered_at=excluded.delivered_at,channel_msg_id=excluded.channel_msg_id
+          code=excluded.code,file_id=excluded.file_id,file_unique_id=excluded.file_unique_id,delivered_to=excluded.delivered_to,delivered_at=excluded.delivered_at,channel_msg_id=excluded.channel_msg_id
         ON CONFLICT(code) DO UPDATE SET
-          id=excluded.id,file_id=excluded.file_id,delivered_to=excluded.delivered_to,delivered_at=excluded.delivered_at,channel_msg_id=excluded.channel_msg_id`);
+          id=excluded.id,file_id=excluded.file_id,file_unique_id=excluded.file_unique_id,delivered_to=excluded.delivered_to,delivered_at=excluded.delivered_at,channel_msg_id=excluded.channel_msg_id`);
       let fileOk = 0, fileFail = 0;
       const fileTx = db.transaction(() => {
         for (const f of files) {
           try {
             upsertFile.run(
-              String(f._id), f.code, f.file_id, f.file_type, f.file_name||'file',
+              String(f._id), f.code, f.file_id, f.file_unique_id||'', f.file_type, f.file_name||'file',
               f.uploaded_by||null,
               f.expires_at ? new Date(f.expires_at).getTime() : null,
               JSON.stringify(f.delivered_to||[]),
@@ -937,7 +941,7 @@ async function syncToMongo(mongoose, getPointsBreakdown) {
         updateOne: {
           filter: { code: f.code },
           update: { $set: {
-            code: f.code, file_id: f.file_id, file_type: f.file_type, file_name: f.file_name||'file',
+            code: f.code, file_id: f.file_id, file_unique_id: f.file_unique_id||'', file_type: f.file_type, file_name: f.file_name||'file',
             uploaded_by: f.uploaded_by||null, expires_at: f.expires_at ? new Date(f.expires_at) : null,
             delivered_to: JSON.parse(f.delivered_to||'[]'), created_at: new Date(f.created_at||0),
             channel_msg_id: f.channel_msg_id||null,
@@ -1357,10 +1361,10 @@ const autoLec = {
 // ── FILE RECORD Operations ────────────────────────────────────────────────────
 
 const fileRecord = {
-  create({ id, code, file_id, file_type, file_name, uploaded_by, channel_msg_id }) {
-    getDb().prepare(`INSERT INTO file_records(id,code,file_id,file_type,file_name,uploaded_by,expires_at,delivered_to,created_at,channel_msg_id)
-      VALUES(?,?,?,?,?,?,NULL,'[]',?,?)`)
-      .run(id, code, file_id, file_type, file_name||'file', uploaded_by||null, Date.now(), channel_msg_id||null);
+  create({ id, code, file_id, file_unique_id, file_type, file_name, uploaded_by, channel_msg_id }) {
+    getDb().prepare(`INSERT INTO file_records(id,code,file_id,file_unique_id,file_type,file_name,uploaded_by,expires_at,delivered_to,created_at,channel_msg_id)
+      VALUES(?,?,?,?,?,?,?,NULL,'[]',?,?)`)
+      .run(id, code, file_id, file_unique_id||'', file_type, file_name||'file', uploaded_by||null, Date.now(), channel_msg_id||null);
   },
   findByCode(code) {
     const r = getDb().prepare(`SELECT * FROM file_records WHERE code=? COLLATE NOCASE`).get(code);
@@ -1421,8 +1425,13 @@ const fileRecord = {
   deleteByCode(code, uploadedBy) {
     return getDb().prepare(`DELETE FROM file_records WHERE code=? COLLATE NOCASE AND uploaded_by=?`).run(code, uploadedBy).changes > 0;
   },
-  // All records that were mirrored into the storage channel — used by /migrate to
-  // re-fetch a fresh, current-bot-valid file_id for every stored file.
+  // All records — /migrate needs both healthy rows and legacy rows that lost
+  // channel_msg_id so it can attempt a safe storage-channel recovery.
+  findAll() {
+    return getDb().prepare(`SELECT * FROM file_records`).all().map(_fileRow);
+  },
+  // All records that were mirrored into the storage channel — used by health
+  // stats and exact migration paths.
   findAllWithChannelMsg() {
     return getDb().prepare(`SELECT * FROM file_records WHERE channel_msg_id IS NOT NULL`).all().map(_fileRow);
   },
@@ -1433,6 +1442,13 @@ const fileRecord = {
     } else {
       getDb().prepare(`UPDATE file_records SET file_id=? WHERE id=?`).run(file_id, id);
     }
+  },
+  // Atomically persist the durable Telegram storage metadata refreshed/recovered
+  // by /migrate. file_unique_id is stable across bot tokens and helps future
+  // recovery when channel_msg_id is missing.
+  updateStorageMeta(id, { file_id, file_unique_id, channel_msg_id }) {
+    getDb().prepare(`UPDATE file_records SET file_id=?, file_unique_id=?, channel_msg_id=? WHERE id=?`)
+      .run(file_id, file_unique_id||'', channel_msg_id||null, id);
   },
 };
 

@@ -273,10 +273,10 @@ function logLectureActivity(bot, fromUser, record, extra) {
 }
 
 // ── MongoDB Schemas (for backup writes only) ──────────────────────────────────
-const fileSchema = new mongoose.Schema({ code: { type: String, required: true, unique: true }, file_id: { type: String, required: true }, file_type: { type: String, required: true }, file_name: { type: String, default: "file" }, uploaded_by: Number, expires_at: { type: Date, default: null }, delivered_to: [Number], delivered_at: { type: String, default: '{}' }, created_at: { type: Date, default: Date.now }, channel_msg_id: { type: Number, default: null } });
+const fileSchema = new mongoose.Schema({ code: { type: String, required: true, unique: true }, file_id: { type: String, required: true }, file_unique_id: { type: String, default: "" }, file_type: { type: String, required: true }, file_name: { type: String, default: "file" }, uploaded_by: Number, expires_at: { type: Date, default: null }, delivered_to: [Number], delivered_at: { type: String, default: '{}' }, created_at: { type: Date, default: Date.now }, channel_msg_id: { type: Number, default: null } });
 const FileRecord = mongoose.model("FileRecord", fileSchema);
 
-const bulkBatchSchema = new mongoose.Schema({ batch_code: { type: String, required: true, unique: true }, user_id: Number, files: [{ file_id: String, file_type: String, file_name: { type: String, default: "file" } }], created_at: { type: Date, default: Date.now } });
+const bulkBatchSchema = new mongoose.Schema({ batch_code: { type: String, required: true, unique: true }, user_id: Number, files: [{ file_id: String, file_unique_id: { type: String, default: "" }, file_type: String, file_name: { type: String, default: "file" }, channel_msg_id: { type: Number, default: null } }], created_at: { type: Date, default: Date.now } });
 const BulkBatch = mongoose.model("BulkBatch", bulkBatchSchema);
 
 const pendingDeleteSchema = new mongoose.Schema({ chat_id: Number, message_id: Number, delete_at: Date });
@@ -654,32 +654,43 @@ function getUniqueBatchCode() { let c; do { c = "B"+generateCode(); } while (db.
 
 function extractFileInfo(msg) {
   const caption = msg.caption || null;
-  if (msg.document)   return { file_id: msg.document.file_id, file_type: "document", file_name: msg.document.file_name||"document", caption };
-  if (msg.photo)      return { file_id: msg.photo[msg.photo.length-1].file_id, file_type: "photo", file_name: "photo.jpg", caption };
-  if (msg.video)      return { file_id: msg.video.file_id, file_type: "video", file_name: msg.video.file_name||"video.mp4", caption };
-  if (msg.audio)      return { file_id: msg.audio.file_id, file_type: "audio", file_name: msg.audio.file_name||"audio.mp3", caption };
-  if (msg.voice)      return { file_id: msg.voice.file_id, file_type: "voice", file_name: "voice.ogg", caption };
-  if (msg.video_note) return { file_id: msg.video_note.file_id, file_type: "video_note", file_name: "video_note.mp4", caption: null };
+  if (msg.document)   return { file_id: msg.document.file_id, file_unique_id: msg.document.file_unique_id||"", file_type: "document", file_name: msg.document.file_name||"document", caption };
+  if (msg.photo) { const p=msg.photo[msg.photo.length-1]; return { file_id: p.file_id, file_unique_id: p.file_unique_id||"", file_type: "photo", file_name: "photo.jpg", caption }; }
+  if (msg.video)      return { file_id: msg.video.file_id, file_unique_id: msg.video.file_unique_id||"", file_type: "video", file_name: msg.video.file_name||"video.mp4", caption };
+  if (msg.audio)      return { file_id: msg.audio.file_id, file_unique_id: msg.audio.file_unique_id||"", file_type: "audio", file_name: msg.audio.file_name||"audio.mp3", caption };
+  if (msg.voice)      return { file_id: msg.voice.file_id, file_unique_id: msg.voice.file_unique_id||"", file_type: "voice", file_name: "voice.ogg", caption };
+  if (msg.video_note) return { file_id: msg.video_note.file_id, file_unique_id: msg.video_note.file_unique_id||"", file_type: "video_note", file_name: "video_note.mp4", caption: null };
   return null;
 }
 
 async function saveToStorageChannel(bot, fileInfo) {
   if (!STORAGE_CHANNEL_ID) return fileInfo;
-  try {
-    let sentMsg;
-    const caption = fileInfo.caption || `📎 ${fileInfo.file_name}`;
-    switch(fileInfo.file_type) {
-      case "photo":      sentMsg = await bot.sendPhoto(STORAGE_CHANNEL_ID, fileInfo.file_id, { caption }); break;
-      case "video":      sentMsg = await bot.sendVideo(STORAGE_CHANNEL_ID, fileInfo.file_id, { caption }); break;
-      case "audio":      sentMsg = await bot.sendAudio(STORAGE_CHANNEL_ID, fileInfo.file_id, { caption }); break;
-      case "voice":      sentMsg = await bot.sendVoice(STORAGE_CHANNEL_ID, fileInfo.file_id, { caption }); break;
-      case "video_note": sentMsg = await bot.sendVideoNote(STORAGE_CHANNEL_ID, fileInfo.file_id); break;
-      default:           sentMsg = await bot.sendDocument(STORAGE_CHANNEL_ID, fileInfo.file_id, { caption }); break;
+  // A configured storage channel is the durable source used after a bot-token
+  // change. Never silently create a fragile DB record when mirroring failed.
+  let lastErr = null;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      let sentMsg;
+      const caption = fileInfo.caption || `📎 ${fileInfo.file_name}`;
+      switch(fileInfo.file_type) {
+        case "photo":      sentMsg = await bot.sendPhoto(STORAGE_CHANNEL_ID, fileInfo.file_id, { caption }); break;
+        case "video":      sentMsg = await bot.sendVideo(STORAGE_CHANNEL_ID, fileInfo.file_id, { caption }); break;
+        case "audio":      sentMsg = await bot.sendAudio(STORAGE_CHANNEL_ID, fileInfo.file_id, { caption }); break;
+        case "voice":      sentMsg = await bot.sendVoice(STORAGE_CHANNEL_ID, fileInfo.file_id, { caption }); break;
+        case "video_note": sentMsg = await bot.sendVideoNote(STORAGE_CHANNEL_ID, fileInfo.file_id); break;
+        default:           sentMsg = await bot.sendDocument(STORAGE_CHANNEL_ID, fileInfo.file_id, { caption }); break;
+      }
+      const channelFileInfo = extractFileInfo(sentMsg);
+      if (!channelFileInfo) throw new Error("storage channel message has no file object");
+      return { ...channelFileInfo, file_name: fileInfo.file_name, channel_msg_id: sentMsg.message_id };
+    } catch (err) {
+      lastErr = err;
+      const retryAfter = Number(err?.response?.body?.parameters?.retry_after || 0);
+      console.error(`saveToStorageChannel attempt ${attempt}/3 failed:`, err.message);
+      if (attempt < 3) await new Promise(r => setTimeout(r, retryAfter ? (retryAfter*1000+500) : attempt*1200));
     }
-    const channelFileInfo = extractFileInfo(sentMsg);
-    if (channelFileInfo) return { ...channelFileInfo, file_name: fileInfo.file_name, channel_msg_id: sentMsg.message_id };
-    return { ...fileInfo, channel_msg_id: sentMsg.message_id };
-  } catch (err) { console.error("saveToStorageChannel failed:", err.message); return fileInfo; }
+  }
+  throw new Error(`Storage channel save failed after 3 attempts: ${lastErr?.message || "unknown error"}`);
 }
 
 async function sendFile(bot, chatId, record) {
@@ -1187,6 +1198,7 @@ const OWNER_BOT_COMMANDS = [
   { command: 'nextunit', description: 'Move auto-save to next unit' },
   { command: 'rmword', description: 'Manage filename auto-filter words' },
   { command: 'migrate', description: 'Migrate old stored files' },
+  { command: 'stopmigrate', description: 'Stop a running file migration' },
   { command: 'sync', description: 'Sync SQLite and MongoDB data' },
   { command: 'ban', description: 'Ban a user by Telegram UID' },
   { command: 'unban', description: 'Unban a user by Telegram UID' },
@@ -2058,6 +2070,7 @@ async function startBot() {
 • /myfiles — List all files you've uploaded, with codes
 • /delete (code) — Delete a file or batch by its code
 • /migrate — Migrate files from the old storage channel
+• /stopmigrate — Safely stop the running migration
 • /sync — Sync SQLite and MongoDB data
 
 <b>🎬 Auto-Save Mode</b> (start/stop from the app)
@@ -2512,92 +2525,286 @@ async function startBot() {
   });
 
   // ── /migrate ──────────────────────────────────────────────────────────────
-  // Fixes files saved by an old bot token: a Telegram file_id only works for the
-  // bot that issued it, so after switching bots, sendFile()'s primary path fails
-  // and falls back to copyMessage from the storage channel — which shows the
-  // channel's original caption instead of the correct file_name. This command
-  // re-forwards every stored file from the storage channel (which the CURRENT
-  // bot can access), grabs a fresh valid file_id, and updates the DB in place.
-  // The original file_name already stored in the DB is preserved — only file_id
-  // is replaced — so nothing about naming needs to be re-typed.
+  // Rebinds old Telegram file_ids to the CURRENT bot token. Exact channel_msg_id
+  // matches are always preferred. If an older record lost channel_msg_id, the
+  // command can safely recover it by scanning STORAGE_CHANNEL_ID and matching a
+  // stable file_unique_id, or (for legacy rows without one) a UNIQUE filename+type.
+  // Ambiguous generic filenames are NEVER guessed, preventing a wrong lecture
+  // from being silently attached to a different code.
   const sleep = (ms) => new Promise((res) => setTimeout(res, ms));
   let migrateRunning = false;
+  let migrateStopRequested = false;
 
-  bot.onText(/\/migrate/, async (msg) => {
+  bot.onText(/\/stopmigrate(?:\s+.*)?$/i, async (msg) => {
+    if (isGroupChat(msg) || !isOwner(msg.from?.id)) return;
+    const chatId = msg.chat.id;
+    if (!migrateRunning) return bot.sendMessage(chatId, `ℹ️ No migration is currently running.`);
+    if (migrateStopRequested) return bot.sendMessage(chatId, `🛑 Migration stop is already requested.`);
+    migrateStopRequested = true;
+    return bot.sendMessage(chatId, `🛑 <b>Stop requested</b>\n\nThe current Telegram operation will finish, then migration will stop safely. Already migrated records will remain saved.`, { parse_mode: "HTML" });
+  });
+
+  function migrationNameKey(fileName, fileType) {
+    const n = String(fileName || "").toLowerCase().trim().replace(/[\s_.\-:]+/g, " ").trim();
+    return `${String(fileType||"").toLowerCase()}|${n}`;
+  }
+  function isGenericMigrationName(fileName) {
+    return new Set(["", "file", "document", "photo.jpg", "video.mp4", "audio.mp3", "voice.ogg", "video_note.mp4"]).has(String(fileName||"").toLowerCase().trim());
+  }
+  function retryAfterMs(err) {
+    const sec = Number(err?.response?.body?.parameters?.retry_after || 0);
+    return sec > 0 ? sec * 1000 + 500 : 0;
+  }
+
+  bot.onText(/\/migrate(?:\s+.*)?$/i, async (msg) => {
     if (isGroupChat(msg) || !isOwner(msg.from?.id)) return;
     const chatId = msg.chat.id;
     if (!STORAGE_CHANNEL_ID) return bot.sendMessage(chatId, `⚠️ STORAGE_CHANNEL_ID not set — nothing to migrate from.`);
     if (migrateRunning) return bot.sendMessage(chatId, `⚠️ A migration is already running.`);
     migrateRunning = true;
+    migrateStopRequested = false;
 
     try {
-      const singleFiles = db.fileRecord.findAllWithChannelMsg();
+      const singles = db.fileRecord.findAll();
       const batches = db.bulkBatch.findAll();
-      const batchJobs = [];
-      const noBackupCodes = []; // files with NO channel_msg_id — can't be auto-fixed, must be re-uploaded
-      for (const b of batches) {
-        b.files.forEach((f, idx) => {
-          if (f.channel_msg_id) batchJobs.push({ batch: b, idx });
-          else noBackupCodes.push(`${b.batch_code} (file ${idx + 1})`);
+      const knownJobs = [];
+      const missingJobs = [];
+      const usedChannelIds = new Set();
+
+      for (const rec of singles) {
+        const job = { kind: "single", rec, label: rec.code, file: rec };
+        if (rec.channel_msg_id) { knownJobs.push(job); usedChannelIds.add(Number(rec.channel_msg_id)); }
+        else missingJobs.push(job);
+      }
+      for (const batch of batches) {
+        (batch.files || []).forEach((f, idx) => {
+          const job = { kind: "bulk", batch, idx, label: `${batch.batch_code}#${idx+1}`, file: f };
+          if (f.channel_msg_id) { knownJobs.push(job); usedChannelIds.add(Number(f.channel_msg_id)); }
+          else missingJobs.push(job);
         });
       }
-      const total = singleFiles.length + batchJobs.length;
-      if (!total && !noBackupCodes.length) return bot.sendMessage(chatId, `Nothing to migrate.`);
-      if (!total) {
-        return bot.sendMessage(chatId, `⚠️ No files have a channel_msg_id to migrate from.\n\nThese ${noBackupCodes.length} file(s) have no channel backup at all and must be re-uploaded:\n${noBackupCodes.slice(0, 30).map(esc).join(", ")}${noBackupCodes.length > 30 ? "…" : ""}`, { parse_mode: "HTML" });
-      }
 
-      const status = await bot.sendMessage(chatId, `🔄 Migrating 0/${total}...`);
-      let done = 0, fixed = 0, failed = 0;
-      const failedCodes = [];
+      const status = await bot.sendMessage(chatId, `🔄 <b>Migration starting</b>\n\nExact backups: ${knownJobs.length}\nMissing backup IDs: ${missingJobs.length}`, { parse_mode:"HTML" });
+      let refreshed = 0, exactFailed = 0, recovered = 0, ambiguous = 0, notFound = 0;
+      const failedLabels = [], ambiguousLabels = [], noMatchLabels = [];
+      const dirtyBatches = new Set();
 
-      const migrateOne = async (channelMsgId) => {
-        // Forward → new valid file_id for THIS bot, then clean up the forwarded copy.
-        const fwd = await bot.forwardMessage(chatId, STORAGE_CHANNEL_ID, channelMsgId);
-        const info = extractFileInfo(fwd);
-        bot.deleteMessage(chatId, fwd.message_id).catch(() => {});
-        if (!info) throw new Error("no file in forwarded message");
-        return info.file_id;
+      const forwardStorageMessage = async (channelMsgId) => {
+        for (let attempt=1; attempt<=3; attempt++) {
+          let fwd = null;
+          try {
+            fwd = await bot.forwardMessage(chatId, STORAGE_CHANNEL_ID, channelMsgId);
+            const info = extractFileInfo(fwd);
+            if (!info) throw new Error("no file in storage message");
+            return info;
+          } catch (err) {
+            const wait = retryAfterMs(err);
+            if (wait && attempt < 3) { await sleep(wait); continue; }
+            throw err;
+          } finally {
+            if (fwd?.message_id) bot.deleteMessage(chatId, fwd.message_id).catch(()=>{});
+          }
+        }
       };
 
-      for (const rec of singleFiles) {
-        try {
-          const file_id = await migrateOne(rec.channel_msg_id);
-          db.fileRecord.updateFileId(rec.id, { file_id });
-          FileRecord.updateOne({ code: rec.code }, { file_id }).catch(() => {});
-          fixed++;
-        } catch (err) { failed++; failedCodes.push(rec.code); }
-        done++;
-        if (done % 20 === 0 || done === total) {
-          bot.editMessageText(`🔄 Migrating ${done}/${total}... (✅ ${fixed} 🚫 ${failed})`, { chat_id: chatId, message_id: status.message_id }).catch(() => {});
+      const persistJob = async (job, info, channelMsgId) => {
+        const patch = {
+          file_id: info.file_id,
+          file_unique_id: info.file_unique_id || job.file.file_unique_id || "",
+          channel_msg_id: Number(channelMsgId),
+        };
+        if (job.kind === "single") {
+          db.fileRecord.updateStorageMeta(job.rec.id, patch);
+          await FileRecord.updateOne({ code: job.rec.code }, { $set: patch }).catch(()=>{});
+          Object.assign(job.rec, patch);
+        } else {
+          Object.assign(job.batch.files[job.idx], patch);
+          dirtyBatches.add(job.batch);
         }
-        await sleep(300); // stay well under Telegram's flood limits
+        Object.assign(job.file, patch);
+      };
+
+      // Phase 1: exact channel message references — zero guessing.
+      for (let i=0; i<knownJobs.length; i++) {
+        if (migrateStopRequested) break;
+        const job = knownJobs[i];
+        try {
+          const info = await forwardStorageMessage(job.file.channel_msg_id);
+          await persistJob(job, info, job.file.channel_msg_id);
+          refreshed++;
+        } catch (err) {
+          exactFailed++;
+          failedLabels.push(job.label);
+        }
+        if ((i+1)%20===0 || i+1===knownJobs.length) {
+          bot.editMessageText(`🔄 Phase 1/2 — exact backups ${i+1}/${knownJobs.length}\n✅ Refreshed: ${refreshed}  🚫 Failed: ${exactFailed}\nMissing IDs to recover: ${missingJobs.length}`, { chat_id:chatId, message_id:status.message_id }).catch(()=>{});
+        }
+        await sleep(180);
       }
 
-      for (const { batch, idx } of batchJobs) {
-        try {
-          const file_id = await migrateOne(batch.files[idx].channel_msg_id);
-          batch.files[idx].file_id = file_id;
-          db.bulkBatch.updateFiles(batch.id, batch.files);
-          BulkBatch.updateOne({ batch_code: batch.batch_code }, { files: batch.files }).catch(() => {});
-          fixed++;
-        } catch (err) { failed++; failedCodes.push(batch.batch_code); }
-        done++;
-        if (done % 20 === 0 || done === total) {
-          bot.editMessageText(`🔄 Migrating ${done}/${total}... (✅ ${fixed} 🚫 ${failed})`, { chat_id: chatId, message_id: status.message_id }).catch(() => {});
+      // Phase 2A: legacy rows that lost channel_msg_id may still have a file_id
+      // that is valid for the CURRENT token. This is especially useful when the
+      // owner temporarily reconnects the OLD bot: re-mirror that known file_id
+      // into the storage channel, then persist the resulting exact message ID.
+      // With a NEW bot token, old file_ids normally fail here; those rows simply
+      // continue to the safe storage-channel matching fallback below.
+      const unresolvedMissingJobs = [];
+      let remirrored = 0;
+      if (missingJobs.length && !migrateStopRequested) {
+        await bot.editMessageText(`🧩 Phase 2A/3 — repairing ${missingJobs.length} missing backup ID(s) from stored file IDs...\nThis works best while the OLD bot token is connected.`, { chat_id:chatId, message_id:status.message_id }).catch(()=>{});
+        for (let i=0; i<missingJobs.length; i++) {
+          if (migrateStopRequested) break;
+          const job = missingJobs[i];
+          try {
+            if (!job.file.file_id) throw new Error("missing stored file_id");
+            const stored = await saveToStorageChannel(bot, {
+              file_id: job.file.file_id,
+              file_unique_id: job.file.file_unique_id || "",
+              file_type: job.file.file_type,
+              file_name: job.file.file_name || "file",
+              caption: `🔄 Migration backup • ${job.label}`,
+            });
+            await persistJob(job, stored, stored.channel_msg_id);
+            usedChannelIds.add(Number(stored.channel_msg_id));
+            remirrored++;
+          } catch (_) {
+            unresolvedMissingJobs.push(job);
+          }
+          if ((i+1)%20===0 || i+1===missingJobs.length) {
+            bot.editMessageText(`🧩 Phase 2A/3 — stored-ID repair ${i+1}/${missingJobs.length}\n✅ Re-mirrored: ${remirrored}  🔎 Still unresolved: ${unresolvedMissingJobs.length}`, { chat_id:chatId, message_id:status.message_id }).catch(()=>{});
+          }
+          await sleep(160);
         }
-        await sleep(300);
       }
 
-      let summary = `✅ <b>Migration done!</b>\n\n📦 Total: ${total}\n✅ Fixed: ${fixed}\n🚫 Failed: ${failed}`;
-      if (failedCodes.length) summary += `\n\n⚠️ Failed codes (message likely deleted from channel):\n${failedCodes.slice(0, 30).map(esc).join(", ")}${failedCodes.length > 30 ? "…" : ""}`;
-      if (noBackupCodes.length) summary += `\n\n📛 No channel backup at all (re-upload needed):\n${noBackupCodes.slice(0, 30).map(esc).join(", ")}${noBackupCodes.length > 30 ? "…" : ""}`;
-      await bot.sendMessage(chatId, summary, { parse_mode: "HTML" });
+      // Phase 2B: rows whose stored file_id is not usable by the current token.
+      // Scan the storage channel and recover only unambiguous matches.
+      if (unresolvedMissingJobs.length && !migrateStopRequested) {
+        await bot.editMessageText(`🔎 Phase 2B/3 — scanning storage channel for ${unresolvedMissingJobs.length} unresolved backup ID(s)...\nOnly safe unique matches will be saved.`, { chat_id:chatId, message_id:status.message_id }).catch(()=>{});
+
+        let probe = null;
+        try {
+          probe = await bot.sendMessage(STORAGE_CHANNEL_ID, "🔄 Migration probe — will be deleted");
+          const maxId = probe.message_id;
+          await bot.deleteMessage(STORAGE_CHANNEL_ID, probe.message_id).catch(()=>{});
+          const channelFiles = [];
+
+          for (let id=1; id<=maxId; id++) {
+            if (migrateStopRequested) break;
+            if (usedChannelIds.has(id)) continue;
+            let fwd = null;
+            try {
+              for (let attempt=1; attempt<=3; attempt++) {
+                try {
+                  fwd = await bot.forwardMessage(chatId, STORAGE_CHANNEL_ID, id);
+                  break;
+                } catch (err) {
+                  const wait = retryAfterMs(err);
+                  if (wait && attempt < 3) { await sleep(wait); continue; }
+                  throw err;
+                }
+              }
+              const info = extractFileInfo(fwd);
+              if (info) channelFiles.push({ ...info, channel_msg_id:id });
+            } catch (_) {
+              // deleted/non-file/inaccessible channel message — skip
+            } finally {
+              if (fwd?.message_id) bot.deleteMessage(chatId, fwd.message_id).catch(()=>{});
+            }
+            if (id % 50 === 0 || id === maxId) {
+              bot.editMessageText(`🔎 Phase 2B/3 — scanned ${id}/${maxId} channel messages\nCandidates found: ${channelFiles.length}\nUnresolved records: ${unresolvedMissingJobs.length}`, { chat_id:chatId, message_id:status.message_id }).catch(()=>{});
+            }
+            await sleep(90);
+          }
+
+          if (migrateStopRequested) {
+            // Stop immediately after the current Telegram operation. Do not try
+            // to infer matches from a partially scanned channel. Exact/recovered
+            // records completed before the stop remain persisted below.
+          }
+
+          const byUnique = new Map();
+          const byName = new Map();
+          for (const cf of channelFiles) {
+            if (migrateStopRequested) break;
+            if (cf.file_unique_id) {
+              if (!byUnique.has(cf.file_unique_id)) byUnique.set(cf.file_unique_id, []);
+              byUnique.get(cf.file_unique_id).push(cf);
+            }
+            const k = migrationNameKey(cf.file_name, cf.file_type);
+            if (!byName.has(k)) byName.set(k, []);
+            byName.get(k).push(cf);
+          }
+          const missingNameCounts = new Map();
+          for (const job of unresolvedMissingJobs) {
+            if (migrateStopRequested) break;
+            const k = migrationNameKey(job.file.file_name, job.file.file_type);
+            missingNameCounts.set(k, (missingNameCounts.get(k)||0)+1);
+          }
+          const consumed = new Set();
+
+          for (const job of unresolvedMissingJobs) {
+            if (migrateStopRequested) break;
+            let candidates = [];
+            let method = "";
+            if (job.file.file_unique_id) {
+              candidates = (byUnique.get(job.file.file_unique_id)||[]).filter(c => !consumed.has(c.channel_msg_id));
+              if (candidates.length === 1) method = "file_unique_id";
+            }
+            if (!method) {
+              const k = migrationNameKey(job.file.file_name, job.file.file_type);
+              const safeName = !isGenericMigrationName(job.file.file_name) && missingNameCounts.get(k) === 1;
+              if (safeName) {
+                candidates = (byName.get(k)||[]).filter(c => !consumed.has(c.channel_msg_id));
+                if (candidates.length === 1) method = "unique filename+type";
+              }
+            }
+
+            if (method && candidates.length === 1) {
+              const cf = candidates[0];
+              await persistJob(job, cf, cf.channel_msg_id);
+              consumed.add(cf.channel_msg_id);
+              usedChannelIds.add(cf.channel_msg_id);
+              recovered++;
+            } else if (candidates.length > 1 || (!isGenericMigrationName(job.file.file_name) && missingNameCounts.get(migrationNameKey(job.file.file_name, job.file.file_type)) > 1)) {
+              ambiguous++;
+              ambiguousLabels.push(job.label);
+            } else {
+              notFound++;
+              noMatchLabels.push(job.label);
+            }
+          }
+        } finally {
+          if (probe?.message_id) bot.deleteMessage(STORAGE_CHANNEL_ID, probe.message_id).catch(()=>{});
+        }
+      }
+
+      // Persist all changed bulk arrays once, preserving channel_msg_id in Mongo too.
+      for (const batch of dirtyBatches) {
+        db.bulkBatch.updateFiles(batch.id, batch.files);
+        await BulkBatch.updateOne({ batch_code: batch.batch_code }, { $set: { files: batch.files } }).catch(()=>{});
+      }
+
+      const wasStopped = migrateStopRequested;
+      let summary = `${wasStopped ? '🛑 <b>Migration stopped safely</b>' : '✅ <b>Migration complete</b>'}\n\n` +
+        `🔁 Exact file IDs refreshed: <b>${refreshed}</b>\n` +
+        `🧩 Missing IDs re-mirrored from stored file_id: <b>${remirrored}</b>\n` +
+        `🛠 Missing channel IDs recovered by channel match: <b>${recovered}</b>\n` +
+        `🚫 Exact references failed: <b>${exactFailed}</b>\n` +
+        `⚠️ Ambiguous (not guessed): <b>${ambiguous}</b>\n` +
+        `📛 No safe channel match: <b>${notFound}</b>`;
+      if (wasStopped) summary += `\n\n✅ Everything successfully migrated before the stop request has been kept. Run <code>/migrate</code> again later to continue remaining records.`;
+      if (failedLabels.length) summary += `\n\n🚫 <b>Broken channel refs</b>\n${failedLabels.slice(0,25).map(esc).join(", ")}${failedLabels.length>25?"…":""}`;
+      if (ambiguousLabels.length) summary += `\n\n⚠️ <b>Ambiguous — re-upload/manual fix</b>\n${ambiguousLabels.slice(0,25).map(esc).join(", ")}${ambiguousLabels.length>25?"…":""}`;
+      if (noMatchLabels.length) summary += `\n\n📛 <b>No safe match — likely no storage backup</b>\n${noMatchLabels.slice(0,25).map(esc).join(", ")}${noMatchLabels.length>25?"…":""}`;
+      summary += `\n\nFresh <code>file_id</code> + <code>channel_msg_id</code> are saved in SQLite and MongoDB for every successful item.\n\n💡 Best recovery flow for rows with no channel ID: run <code>/migrate</code> once with the OLD bot token (re-mirror), then switch to the NEW bot token and run <code>/migrate</code> again (rebind).`;
+      await bot.editMessageText(summary, { chat_id:chatId, message_id:status.message_id, parse_mode:"HTML" }).catch(()=>bot.sendMessage(chatId, summary, { parse_mode:"HTML" }));
     } catch (err) {
-      console.error("Migrate error:", err.message);
-      bot.sendMessage(chatId, `❌ Migration failed: ${esc(err.message)}`, { parse_mode: "HTML" });
+      console.error("Migrate error:", err);
+      bot.sendMessage(chatId, `❌ Migration failed: ${esc(err.message)}`, { parse_mode:"HTML" }).catch(()=>{});
     } finally {
       migrateRunning = false;
+      migrateStopRequested = false;
     }
   });
 
@@ -3072,8 +3279,8 @@ async function startBot() {
         if(session){session.files.push(fileInfo);return bot.editMessageText(`✅ File ${session.files.length} added: ${fileInfo.file_name}\n📦 Total: ${session.files.length}\n\nSend more or /done`,{chat_id:chatId,message_id:processing.message_id});}
         const stored=await saveToStorageChannel(bot,fileInfo); stored.file_name=cleanFileName(stored.file_name);
         const code=getUniqueCode(); const id=db.generateId();
-        db.fileRecord.create({id,code,file_id:stored.file_id,file_type:stored.file_type,file_name:stored.file_name,uploaded_by:userId,channel_msg_id:stored.channel_msg_id||null});
-        FileRecord.create({code,file_id:stored.file_id,file_type:stored.file_type,file_name:stored.file_name,uploaded_by:userId,expires_at:null,channel_msg_id:stored.channel_msg_id||null}).catch(()=>{});
+        db.fileRecord.create({id,code,file_id:stored.file_id,file_unique_id:stored.file_unique_id||"",file_type:stored.file_type,file_name:stored.file_name,uploaded_by:userId,channel_msg_id:stored.channel_msg_id||null});
+        FileRecord.create({code,file_id:stored.file_id,file_unique_id:stored.file_unique_id||"",file_type:stored.file_type,file_name:stored.file_name,uploaded_by:userId,expires_at:null,channel_msg_id:stored.channel_msg_id||null}).catch(()=>{});
         const link=`https://t.me/${BOT_USERNAME}?start=${code}`;
         await bot.deleteMessage(chatId,processing.message_id);
         if(autoLectureSession&&autoLectureSession.active){
@@ -3142,8 +3349,8 @@ async function startBot() {
       try {
         const stored=await saveToStorageChannel(bot,fileInfo); stored.file_name=cleanFileName(stored.file_name);
         const code=getUniqueCode(); const id=db.generateId();
-        db.fileRecord.create({id,code,file_id:stored.file_id,file_type:stored.file_type,file_name:stored.file_name,uploaded_by:userId,channel_msg_id:stored.channel_msg_id||null});
-        FileRecord.create({code,file_id:stored.file_id,file_type:stored.file_type,file_name:stored.file_name,uploaded_by:userId,expires_at:null,channel_msg_id:stored.channel_msg_id||null}).catch(()=>{});
+        db.fileRecord.create({id,code,file_id:stored.file_id,file_unique_id:stored.file_unique_id||"",file_type:stored.file_type,file_name:stored.file_name,uploaded_by:userId,channel_msg_id:stored.channel_msg_id||null});
+        FileRecord.create({code,file_id:stored.file_id,file_unique_id:stored.file_unique_id||"",file_type:stored.file_type,file_name:stored.file_name,uploaded_by:userId,expires_at:null,channel_msg_id:stored.channel_msg_id||null}).catch(()=>{});
         const link=`https://t.me/${BOT_USERNAME}?start=${code}`;
         await bot.deleteMessage(chatId,processing.message_id);
         if(autoLectureSession&&autoLectureSession.active){
