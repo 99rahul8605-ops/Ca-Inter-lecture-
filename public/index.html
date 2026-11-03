@@ -2234,21 +2234,17 @@ function handlePic(input) {
 // Provider is selected by /api/config. The existing Monetag integration is retained.
 var _adProvider = 'adsgram';
 var _adsgramBlockId = '57682';
-var _adsgramDailyAccessBlockId = '57724';
 var _adsgramController = null;
-var _adsgramDailyAccessController = null;
 var _adsgramSdkPromise = null;
-function loadAdsgramSdk(blockId, dailyBlockId) {
+function loadAdsgramSdk(blockId) {
   if (_adsgramSdkPromise) return _adsgramSdkPromise;
-  _adsgramBlockId = String(blockId || '57682').trim().replace(/^int-/i, '');
-  _adsgramDailyAccessBlockId = String(dailyBlockId || '57724').trim().replace(/^int-/i, '');
+  _adsgramBlockId = String(blockId || '57682');
   _adsgramSdkPromise = new Promise(function(resolve) {
     var s = document.createElement('script');
     s.src = 'https://sad.adsgram.ai/js/sad.min.js';
     s.onload = function() {
       try {
         _adsgramController = window.Adsgram.init({blockId: _adsgramBlockId});
-        _adsgramDailyAccessController = window.Adsgram.init({blockId: _adsgramDailyAccessBlockId});
         resolve(true);
       } catch (e) { console.error('AdsGram init failed:', e); resolve(false); }
     };
@@ -2257,19 +2253,18 @@ function loadAdsgramSdk(blockId, dailyBlockId) {
   });
   return _adsgramSdkPromise;
 }
-function _adSdkReady(placement) {
+function _adSdkReady() {
   if (_adProvider === 'none') return false;
-  if (_adProvider === 'adsgram') return !!(placement === 'daily' ? _adsgramDailyAccessController : _adsgramController);
+  if (_adProvider === 'adsgram') return !!_adsgramController;
   return _monetagReady();
 }
 function _adSdkShow(arg) {
   if (window._paymentInProgress) return Promise.reject(new Error('Payment in progress'));
   if (_adProvider === 'adsgram') {
-    var controller = arg === 'daily' ? _adsgramDailyAccessController : _adsgramController;
-    if (!controller) return Promise.reject(new Error('AdsGram SDK is unavailable'));
-    // Interstitials resolve after completion OR close. Keep existing server-side
-    // Daily Access token, cooldown and claim checks unchanged.
-    return controller.show();
+    if (!_adsgramController) return Promise.reject(new Error('AdsGram SDK is unavailable'));
+    // AdsGram only resolves successfully for a completed rewarded placement;
+    // skipped, unavailable or failed ads reject and never grant rewards.
+    return _adsgramController.show();
   }
   if (_adProvider === 'monetag') return _monetagShow(arg);
   return Promise.reject(new Error('Ads disabled'));
@@ -2433,7 +2428,6 @@ async function checkAdminAccess() {
     window._monetagZoneConfig = config.monetagZoneId || '11502469';
     _adProvider = config.adProvider || 'adsgram';
     _adsgramBlockId = config.adsgramBlockId || '57682';
-    _adsgramDailyAccessBlockId = config.adsgramDailyAccessBlockId || '57724';
 
     // Role state comes from a signed Telegram initData check on the server.
     // Never trust a client-side UID comparison for delegated admins.
@@ -4632,7 +4626,7 @@ async function watchAd() {
 
   _adActuallyShown = false;
 
-  if (!_adSdkReady('daily')) {
+  if (!_adSdkReady()) {
     _adToken = null;
     _adWatching = false;
     _setAdBtns(false);
@@ -4644,7 +4638,7 @@ async function watchAd() {
   // Rotate between the 2 genuinely reward-gated Monetag formats (see _nextAdFormat)
   var format = _adProvider === 'monetag' ? _nextAdFormat() : 'reward';
   var adStartedAt = Date.now();
-  var adPromise = _adProvider === 'monetag' && format === 'pop' ? _adSdkShow('pop') : _adSdkShow('daily');
+  var adPromise = _adProvider === 'monetag' && format === 'pop' ? _adSdkShow('pop') : _adSdkShow();
 
   adPromise
     .then(function() {
@@ -5059,7 +5053,7 @@ async function init() {
   // user from inheriting an SDK/session that was initialized before their
   // subscription status was known.
   if (!canBypassRestrictions() && !window._adsFreeActive) {
-    if (_adProvider === 'adsgram') await loadAdsgramSdk(_adsgramBlockId, _adsgramDailyAccessBlockId);
+    if (_adProvider === 'adsgram') await loadAdsgramSdk(_adsgramBlockId);
     else if (_adProvider === 'monetag') await loadMonetagSdk(window._monetagZoneConfig || '11502469');
   }
 
