@@ -66,6 +66,8 @@ const MONETAG_ZONE_ID = process.env.MONETAG_ZONE_ID || "11502469";
 const AD_PROVIDER = ["adsgram", "monetag", "none"].includes((process.env.AD_PROVIDER || "adsgram").toLowerCase())
   ? (process.env.AD_PROVIDER || "adsgram").toLowerCase() : "adsgram";
 const ADSGRAM_BLOCK_ID = String(process.env.ADSGRAM_BLOCK_ID || "57682").trim();
+// Dedicated interstitial placement for Daily Access. Accept int-57724 or 57724.
+const ADSGRAM_DAILY_ACCESS_BLOCK_ID = String(process.env.ADSGRAM_DAILY_ACCESS_BLOCK_ID || "57724").trim().replace(/^int-/i, "");
 const CONTACT_LINK = process.env.CONTACT_LINK || "";
 
 // Ilambit DevPort — used to auto-verify UPI payments by UTR against the BharatPe
@@ -1090,7 +1092,7 @@ app.get("/health", (req, res) => res.json({ status: "ok", uptime: process.uptime
 app.get("/api/config", (req, res) => {
   const fj = (process.env.FORCE_JOIN_CHANNELS||"").split(",").map(s=>s.trim()).filter(Boolean);
   const adsFreePlans = getAdsFreePlans();
-  res.json({ ownerId: OWNER_ID, botUsername: BOT_USERNAME||"", forceJoinRequired: fj.length>0, upiId: UPI_ID||"", upiName: UPI_NAME||"", contactLink: CONTACT_LINK||`https://t.me/${BOT_USERNAME}`, paymentProvider: PAYMENT_PROVIDER, razorpayKeyId: RAZORPAY_KEY_ID||"", monetagZoneId: MONETAG_ZONE_ID, adProvider: AD_PROVIDER, adsgramBlockId: ADSGRAM_BLOCK_ID, adsFreeWeeklyPrice: adsFreePlans.ADSFREEWEEKLY.price, adsFreeMonthlyPrice: adsFreePlans.ADSFREEPLAN.price });
+  res.json({ ownerId: OWNER_ID, botUsername: BOT_USERNAME||"", forceJoinRequired: fj.length>0, upiId: UPI_ID||"", upiName: UPI_NAME||"", contactLink: CONTACT_LINK||`https://t.me/${BOT_USERNAME}`, paymentProvider: PAYMENT_PROVIDER, razorpayKeyId: RAZORPAY_KEY_ID||"", monetagZoneId: MONETAG_ZONE_ID, adProvider: AD_PROVIDER, adsgramBlockId: ADSGRAM_BLOCK_ID, adsgramDailyAccessBlockId: ADSGRAM_DAILY_ACCESS_BLOCK_ID, adsFreeWeeklyPrice: adsFreePlans.ADSFREEWEEKLY.price, adsFreeMonthlyPrice: adsFreePlans.ADSFREEPLAN.price });
 });
 
 // Whether this user currently has an active Ads-Free subscription, and when it
