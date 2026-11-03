@@ -6,10 +6,7 @@
 <title>EduBot</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
-<!-- Monetag SDK is loaded dynamically (see loadMonetagSdk() in the main script)
-     using the zone ID from /api/config (MONETAG_ZONE_ID env var), instead of
-     being hardcoded here — the SDK's global function name is derived from the
-     zone (show_<zone>), so hardcoding it here would break if the zone changes. -->
+<!-- The selected ad SDK (AdsGram or Monetag) loads dynamically after /api/config. -->
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@2.44.0/tabler-icons.min.css">
 <style>
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
@@ -2106,19 +2103,19 @@ async function startSpin() {
     return;
   }
 
-  if (!_monetagReady()) {
+  if (!_adSdkReady()) {
     _spinToken = null;
     _spinInProgress = false;
     renderSpinStatusBar();
     if (!canBypassRestrictions() && await _isAdBlockerActiveForUser()) { document.getElementById('adBlockGate').classList.remove('hidden'); return; }
-    toast('Ad load nahi hua. Ad blocker band karo aur try karo.', 'error');
+    toast(_adProvider === 'adsgram' ? 'AdsGram ad load nahi hua. Thodi der baad try karo.' : 'Ad load nahi hua. Ad blocker band karo aur try karo.', 'error');
     return;
   }
 
   // Rotate between the 2 genuinely reward-gated Monetag formats (see _nextAdFormat)
-  var format = _nextAdFormat();
+  var format = _adProvider === 'monetag' ? _nextAdFormat() : 'reward';
   var adStartedAt = Date.now();
-  var adPromise = format === 'pop' ? _monetagShow('pop') : _monetagShow();
+  var adPromise = _adProvider === 'monetag' && format === 'pop' ? _adSdkShow('pop') : _adSdkShow();
 
   try {
     await adPromise;
@@ -2234,6 +2231,44 @@ function handlePic(input) {
 // systems and suppressing CPM to remnant-tier demand. If CPM recovers over
 // the next few days, this was the cause — if not, switch s.src back to
 // '/mn-sdk.js' to restore ad-blocker resistance without losing anything.
+// Provider is selected by /api/config. The existing Monetag integration is retained.
+var _adProvider = 'adsgram';
+var _adsgramBlockId = '57682';
+var _adsgramController = null;
+var _adsgramSdkPromise = null;
+function loadAdsgramSdk(blockId) {
+  if (_adsgramSdkPromise) return _adsgramSdkPromise;
+  _adsgramBlockId = String(blockId || '57682');
+  _adsgramSdkPromise = new Promise(function(resolve) {
+    var s = document.createElement('script');
+    s.src = 'https://sad.adsgram.ai/js/sad.min.js';
+    s.onload = function() {
+      try {
+        _adsgramController = window.Adsgram.init({blockId: _adsgramBlockId});
+        resolve(true);
+      } catch (e) { console.error('AdsGram init failed:', e); resolve(false); }
+    };
+    s.onerror = function() { resolve(false); };
+    document.head.appendChild(s);
+  });
+  return _adsgramSdkPromise;
+}
+function _adSdkReady() {
+  if (_adProvider === 'none') return false;
+  if (_adProvider === 'adsgram') return !!_adsgramController;
+  return _monetagReady();
+}
+function _adSdkShow(arg) {
+  if (window._paymentInProgress) return Promise.reject(new Error('Payment in progress'));
+  if (_adProvider === 'adsgram') {
+    if (!_adsgramController) return Promise.reject(new Error('AdsGram SDK is unavailable'));
+    // AdsGram only resolves successfully for a completed rewarded placement;
+    // skipped, unavailable or failed ads reject and never grant rewards.
+    return _adsgramController.show();
+  }
+  if (_adProvider === 'monetag') return _monetagShow(arg);
+  return Promise.reject(new Error('Ads disabled'));
+}
 var _monetagZoneId = null;
 var _monetagSdkPromise = null;
 function loadMonetagSdk(zoneId) {
@@ -2298,6 +2333,7 @@ function _probeAdBlocker() {
 // Shared by both the initial check and every periodic re-check below —
 // decides whether THIS user should see the ad-blocker gate right now.
 async function _isAdBlockerActiveForUser() {
+  if (_adProvider !== 'monetag') return false; // Monetag-specific script probe
   if (canBypassRestrictions()) return false;
   if (window._adsFreeActive) return false; // Ads-Free subscribers are never shown the ad-blocker wall — they don't need ads at all
   try {
@@ -2308,6 +2344,7 @@ async function _isAdBlockerActiveForUser() {
 }
 
 async function checkAdBlocker() {
+  if (_adProvider !== 'monetag') return false; // AdsGram uses its own SDK and ad availability
   try {
     var sdkPromise = getMonetagSdkPromise();
     if (!sdkPromise) return false; // config fetch itself failed — don't punish the user for our own issue
@@ -2335,6 +2372,7 @@ async function checkAdBlocker() {
 // can actually confirm a genuine watch before granting a reward).
 var _inAppInterstitialStarted = false;
 function setupInAppInterstitial() {
+  if (_adProvider !== 'monetag') return; // AdsGram has no Monetag ambient format
   if (_inAppInterstitialStarted || !_monetagReady() || window._adsFreeActive) return;
   _inAppInterstitialStarted = true;
   try {
@@ -2356,6 +2394,7 @@ function setupInAppInterstitial() {
 // of the session. Re-shows the gate the moment blocking is detected again.
 var _adBlockerMonitorInterval = null;
 function startAdBlockerMonitoring() {
+  if (_adProvider !== 'monetag') return;
   if (_adBlockerMonitorInterval || canBypassRestrictions()) return;
   var recheck = async function() {
     if (document.getElementById('adBlockGate') && !document.getElementById('adBlockGate').classList.contains('hidden')) return; // already showing
@@ -2387,6 +2426,8 @@ async function checkAdminAccess() {
     window._adsFreeMonthlyPrice = config.adsFreeMonthlyPrice || 60;
     _fjRequired = !!config.forceJoinRequired;
     window._monetagZoneConfig = config.monetagZoneId || '11502469';
+    _adProvider = config.adProvider || 'adsgram';
+    _adsgramBlockId = config.adsgramBlockId || '57682';
 
     // Role state comes from a signed Telegram initData check on the server.
     // Never trust a client-side UID comparison for delegated admins.
@@ -4113,15 +4154,15 @@ async function openLecLink(codeOrLink, type) {
   if (!codeOrLink) return openLink('', type || 'lecture');
 
   if (!window._adsFreeActive && (type || 'lecture') === 'lecture' && _shouldShowAdForLectureClick()) {
-    if (!_monetagReady() && !canBypassRestrictions() && await _isAdBlockerActiveForUser()) {
+    if (!_adSdkReady() && !canBypassRestrictions() && await _isAdBlockerActiveForUser()) {
       document.getElementById('adBlockGate').classList.remove('hidden');
       return;
     }
-    if (_monetagReady()) {
+    if (_adSdkReady()) {
       try {
-        var lecFormat = _nextAdFormat();
-        if (lecFormat === 'pop') await _monetagShow('pop');
-        else await _monetagShow();
+        var lecFormat = _adProvider === 'monetag' ? _nextAdFormat() : 'reward';
+        if (_adProvider === 'monetag' && lecFormat === 'pop') await _adSdkShow('pop');
+        else await _adSdkShow();
       } catch (e) { /* skipped/failed — open the lecture anyway */ }
     }
   }
@@ -4585,19 +4626,19 @@ async function watchAd() {
 
   _adActuallyShown = false;
 
-  if (!_monetagReady()) {
+  if (!_adSdkReady()) {
     _adToken = null;
     _adWatching = false;
     _setAdBtns(false);
     if (!canBypassRestrictions() && await _isAdBlockerActiveForUser()) { document.getElementById('adBlockGate').classList.remove('hidden'); return; }
-    toast('Ad load nahi hua. Ad blocker band karo aur try karo.', 'error');
+    toast(_adProvider === 'adsgram' ? 'AdsGram ad load nahi hua. Thodi der baad try karo.' : 'Ad load nahi hua. Ad blocker band karo aur try karo.', 'error');
     return;
   }
 
   // Rotate between the 2 genuinely reward-gated Monetag formats (see _nextAdFormat)
-  var format = _nextAdFormat();
+  var format = _adProvider === 'monetag' ? _nextAdFormat() : 'reward';
   var adStartedAt = Date.now();
-  var adPromise = format === 'pop' ? _monetagShow('pop') : _monetagShow();
+  var adPromise = _adProvider === 'monetag' && format === 'pop' ? _adSdkShow('pop') : _adSdkShow();
 
   adPromise
     .then(function() {
@@ -5012,7 +5053,8 @@ async function init() {
   // user from inheriting an SDK/session that was initialized before their
   // subscription status was known.
   if (!canBypassRestrictions() && !window._adsFreeActive) {
-    loadMonetagSdk(window._monetagZoneConfig || '11502469');
+    if (_adProvider === 'adsgram') await loadAdsgramSdk(_adsgramBlockId);
+    else if (_adProvider === 'monetag') await loadMonetagSdk(window._monetagZoneConfig || '11502469');
   }
 
   if (!canBypassRestrictions()) {

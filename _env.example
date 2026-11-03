@@ -82,6 +82,12 @@ CONTACT_LINK=
 # Monetag ad zone ID. The frontend loads the Monetag SDK with this zone via
 # /api/config instead of it being hardcoded in index.html, so it can be
 # changed here without touching frontend code.
+# Active ad provider: adsgram (default), monetag, or none.
+# Switch to monetag later to enable the existing Monetag ads again.
+AD_PROVIDER=adsgram
+# AdsGram rewarded ad block ID (editable without source-code changes).
+ADSGRAM_BLOCK_ID=57682
+# Retained for switching back to Monetag when needed.
 MONETAG_ZONE_ID=11502469
 
 # ── Storage backend (optional — auto-detected sensible defaults) ────────────
