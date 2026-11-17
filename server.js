@@ -63,8 +63,10 @@ const LOGS_GROUP_ID = process.env.LOGS_GROUP_ID ? parseInt(process.env.LOGS_GROU
 // dynamically rather than hardcoding it — see _monetagShow() in index.html.
 const MONETAG_ZONE_ID = process.env.MONETAG_ZONE_ID || "11502469";
 // Choose one ad provider via environment variables. Monetag remains available.
-const AD_PROVIDER = ["adsgram", "monetag", "none"].includes((process.env.AD_PROVIDER || "adsgram").toLowerCase())
-  ? (process.env.AD_PROVIDER || "adsgram").toLowerCase() : "adsgram";
+// Temporary moderation pause, default enabled. ADS_PAUSED=false restores configured provider.
+const ADS_PAUSED = String(process.env.ADS_PAUSED || "true").toLowerCase() !== "false";
+const _configuredAdProvider = (process.env.AD_PROVIDER || "adsgram").toLowerCase();
+const AD_PROVIDER = ADS_PAUSED ? "none" : (["adsgram", "monetag", "none"].includes(_configuredAdProvider) ? _configuredAdProvider : "adsgram");
 const ADSGRAM_BLOCK_ID = String(process.env.ADSGRAM_BLOCK_ID || "57682").trim();
 const CONTACT_LINK = process.env.CONTACT_LINK || "";
 
@@ -1090,7 +1092,7 @@ app.get("/health", (req, res) => res.json({ status: "ok", uptime: process.uptime
 app.get("/api/config", (req, res) => {
   const fj = (process.env.FORCE_JOIN_CHANNELS||"").split(",").map(s=>s.trim()).filter(Boolean);
   const adsFreePlans = getAdsFreePlans();
-  res.json({ ownerId: OWNER_ID, botUsername: BOT_USERNAME||"", forceJoinRequired: fj.length>0, upiId: UPI_ID||"", upiName: UPI_NAME||"", contactLink: CONTACT_LINK||`https://t.me/${BOT_USERNAME}`, paymentProvider: PAYMENT_PROVIDER, razorpayKeyId: RAZORPAY_KEY_ID||"", monetagZoneId: MONETAG_ZONE_ID, adProvider: AD_PROVIDER, adsgramBlockId: ADSGRAM_BLOCK_ID, adsFreeWeeklyPrice: adsFreePlans.ADSFREEWEEKLY.price, adsFreeMonthlyPrice: adsFreePlans.ADSFREEPLAN.price });
+  res.json({ ownerId: OWNER_ID, botUsername: BOT_USERNAME||"", forceJoinRequired: fj.length>0, upiId: UPI_ID||"", upiName: UPI_NAME||"", contactLink: CONTACT_LINK||`https://t.me/${BOT_USERNAME}`, paymentProvider: PAYMENT_PROVIDER, razorpayKeyId: RAZORPAY_KEY_ID||"", monetagZoneId: MONETAG_ZONE_ID, adProvider: AD_PROVIDER, adsPaused: ADS_PAUSED, adsgramBlockId: ADSGRAM_BLOCK_ID, adsFreeWeeklyPrice: adsFreePlans.ADSFREEWEEKLY.price, adsFreeMonthlyPrice: adsFreePlans.ADSFREEPLAN.price });
 });
 
 // Whether this user currently has an active Ads-Free subscription, and when it
