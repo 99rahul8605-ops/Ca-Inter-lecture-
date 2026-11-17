@@ -308,6 +308,26 @@ async function autoAddLecture({ batchId, subjectId, chapterId, unitId, name, lin
   return newLec._id;
 }
 
+// Find the earliest existing video lecture without notes in the selected chapter/unit.
+// Returned object is only a snapshot; the caller must pass its ID to autoSetLectureNotes.
+function autoFindFirstMissingNotes({ batchId, subjectId, chapterId, unitId }) {
+  const batchData = db.batch.getOne(batchId);
+  if (!batchData) throw new Error('Batch not found');
+  const subj = (batchData.subjects || []).find(s => String(s._id) === String(subjectId));
+  if (!subj) throw new Error('Subject not found');
+  const chap = (subj.chapters || []).find(c => String(c._id) === String(chapterId));
+  if (!chap) throw new Error('Chapter not found');
+  const unit = unitId ? (chap.units || []).find(u => String(u._id) === String(unitId)) : null;
+  if (unitId && !unit) throw new Error('Unit not found');
+  const lectures = (unit ? unit.lectures : chap.lectures) || [];
+  const ordered = lectures.map((lecture, index) => ({ lecture, index }))
+    .sort((a, b) => (Number(a.lecture.order ?? a.index) - Number(b.lecture.order ?? b.index)) || a.index - b.index);
+  const target = ordered.find(({ lecture }) => String(lecture.link || '').trim() && !String(lecture.notes || '').trim());
+  if (!target) return null;
+  return { lectureId: String(target.lecture._id), lectureName: target.lecture.name || 'Lecture ' + (target.index + 1),
+    lectureNumber: target.index + 1, totalLectures: lectures.length };
+}
+
 // Attaches a notes link to an ALREADY-EXISTING lecture (found by id), instead
 // of creating a new lecture entry. Used by auto-save mode in server.js: when a
 // PDF/document is sent right after a video, it gets paired as that lecture's
@@ -1862,6 +1882,7 @@ router.post('/auto-lecture/stop', verifyPower('autoLecture'), async (req, res) =
 router.autoLectureSession = autoLectureSession;
 router.autoAddLecture = autoAddLecture;
 router.autoSetLectureNotes = autoSetLectureNotes;
+router.autoFindFirstMissingNotes = autoFindFirstMissingNotes;
 router.autoDeleteLecture = autoDeleteLecture;
 router.saveAutoSession = _saveAutoSession;
 
