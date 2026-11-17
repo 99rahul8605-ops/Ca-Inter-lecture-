@@ -2016,6 +2016,11 @@ async function loadSpinStatus() {
 }
 
 function renderSpinStatusBar() {
+  if (_adsPaused) {
+    var pausedBtn = document.getElementById('spinBtn');
+    if (pausedBtn) { pausedBtn.disabled = true; pausedBtn.innerHTML = '<i class="ti ti-clock"></i> Spin temporarily paused'; }
+    return;
+  }
   var leftEl = document.getElementById('spinsLeftText');
   var ptsEl = document.getElementById('spinPointsText');
   var btn = document.getElementById('spinBtn');
@@ -2077,6 +2082,7 @@ function spinWheelTo(number) {
 }
 
 async function startSpin() {
+  if (_adsPaused) { toast('Spin & Earn temporarily paused during ad verification.', 'info'); return; }
   if (_spinInProgress) return;
   if (!spinStatus) { toast('Thoda ruko, loading...', 'error'); return; }
   if (spinStatus.spinsLeft <= 0) { toast('Aaj ke saare ' + (spinStatus.maxSpins || 5) + ' spins ho gaye! Kal wapas aao. 🕐', 'error'); return; }
@@ -2232,7 +2238,8 @@ function handlePic(input) {
 // the next few days, this was the cause — if not, switch s.src back to
 // '/mn-sdk.js' to restore ad-blocker resistance without losing anything.
 // Provider is selected by /api/config. The existing Monetag integration is retained.
-var _adProvider = 'adsgram';
+var _adProvider = 'none'; // fail closed until config loaded
+var _adsPaused = true;
 var _adsgramBlockId = '57682';
 var _adsgramController = null;
 var _adsgramSdkPromise = null;
@@ -2426,7 +2433,10 @@ async function checkAdminAccess() {
     window._adsFreeMonthlyPrice = config.adsFreeMonthlyPrice || 60;
     _fjRequired = !!config.forceJoinRequired;
     window._monetagZoneConfig = config.monetagZoneId || '11502469';
-    _adProvider = config.adProvider || 'adsgram';
+    _adsPaused = config.adsPaused !== false;
+    _adProvider = _adsPaused ? 'none' : (config.adProvider || 'none');
+    var accessHint = document.querySelector('#page-access .topbar [style*="font-size:10px"]');
+    if (accessHint && _adsPaused) accessHint.textContent = 'Free learning — ads paused';
     _adsgramBlockId = config.adsgramBlockId || '57682';
 
     // Role state comes from a signed Telegram initData check on the server.
@@ -4153,7 +4163,7 @@ function _shouldShowAdForLectureClick() {
 async function openLecLink(codeOrLink, type) {
   if (!codeOrLink) return openLink('', type || 'lecture');
 
-  if (!window._adsFreeActive && (type || 'lecture') === 'lecture' && _shouldShowAdForLectureClick()) {
+  if (!_adsPaused && !window._adsFreeActive && (type || 'lecture') === 'lecture' && _shouldShowAdForLectureClick()) {
     if (!_adSdkReady() && !canBypassRestrictions() && await _isAdBlockerActiveForUser()) {
       document.getElementById('adBlockGate').classList.remove('hidden');
       return;
@@ -4205,6 +4215,8 @@ function toggleFavoriteBatch(bid) {
 }
 
 function hasAccess() {
+  // Free learning is accessible without daily ads while moderation is pending.
+  if (_adsPaused) return true;
   if (canBypassRestrictions()) return true;
   if (window._adsFreeActive) return true; // Ads-Free subscribers never need the watch-ad-for-access gate
   if (!accessExpiresAt) return false;
@@ -4469,6 +4481,7 @@ function _claimsDotRow() {
 
 // ── Helper: single Watch Ad button (In-App Interstitial format) ────────────────
 function _adButtonsHTML() {
+  if (_adsPaused) return '<div style="padding:14px;text-align:center;font-size:13px;color:var(--text2)">Ads temporarily paused. Free learning is unlocked.</div>';
   if (claimsToday >= 3) {
     return '<div style="padding:14px 16px;text-align:center;font-size:13px;color:var(--text2)">' +
       '✅ Aaj ke 3/3 claims ho gaye!<br><span style="font-size:11px">Kal wapas aao.</span></div>';
@@ -4495,6 +4508,10 @@ function _setAdBtns(loading) {
 function renderAccessCard() {
   var card = document.getElementById('accessCard');
   if (!card) return;
+  if (_adsPaused) {
+    card.innerHTML = '<div class="access-card-header"><i class="ti ti-shield-check status-unlocked"></i><h2 class="status-unlocked">Free Learning Access Active</h2><p>Ads temporarily paused. Free lectures and notes are available without daily ad unlock. Premium batches still require their usual access.</p></div>';
+    return;
+  }
 
   if (canBypassRestrictions()) {
     card.innerHTML = '<div style="padding:40px;text-align:center;color:var(--text2)"><i class="ti ti-shield-check" style="font-size:48px;color:var(--green);display:block;margin-bottom:12px"></i><div style="font-size:16px;font-weight:600">Admin Access</div><div style="font-size:13px;margin-top:6px">You have permanent access.</div></div>';
@@ -4600,6 +4617,7 @@ var _adToken = null;
 var _adActuallyShown = false;
 
 async function watchAd() {
+  if (_adsPaused) { toast('Ads temporarily paused during verification.', 'info'); return; }
   if (_adWatching) return; // already playing an ad
   if (claimsToday >= 3) {
     toast('Aaj ke 3 claims ho gaye! Kal wapas aao. 🕐', 'error');
@@ -5087,7 +5105,7 @@ async function init() {
   if (hasAccess()) startCountdown();
   _hideVS();
   var giveawayShown = await maybeShowGiveawayAd();
-  if (!giveawayShown) maybeShowAdsFreeAd();
+  if (!giveawayShown && !_adsPaused) maybeShowAdsFreeAd();
 }
 init();
 
