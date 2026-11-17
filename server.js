@@ -3297,25 +3297,11 @@ async function startBot() {
       : `${autoLectureSession.subjectName} › ${autoLectureSession.chapterName}`;
 
     if (stored.file_type === "document") {
-      // Preserve the existing video -> PDF pairing when the previous successful
-      // action created a lecture. In PDF-only mode (or after the first PDF),
-      // always fill the earliest existing lecture whose notes are still blank.
-      let target = null;
-      if (autoLectureSession.lastActionType === "lecture" && autoLectureSession.lastLectureId) {
-        const fresh = autoFindFirstMissingNotes(scope);
-        // A fresh video is always the newest lecture. Only use its own ID if
-        // it still has no notes; never replace notes on an older lecture.
-        const batchData = db.batch.getOne(scope.batchId);
-        const subj = (batchData?.subjects || []).find(x => String(x._id) === String(scope.subjectId));
-        const chap = (subj?.chapters || []).find(x => String(x._id) === String(scope.chapterId));
-        const unit = scope.unitId ? (chap?.units || []).find(x => String(x._id) === String(scope.unitId)) : null;
-        const lectures = (unit ? unit.lectures : chap?.lectures) || [];
-        const idx = lectures.findIndex(x => String(x._id) === String(autoLectureSession.lastLectureId));
-        if (idx !== -1 && !String(lectures[idx].notes || '').trim()) {
-          target = { lectureId: String(lectures[idx]._id), lectureName: lectures[idx].name || 'Lecture ' + (idx + 1), lectureNumber: idx + 1 };
-        }
-      }
-      if (!target) target = autoFindFirstMissingNotes(scope);
+      // Strict sequential PDF fill: ALWAYS choose the first lecture with empty
+      // notes in the selected chapter/unit. Do not prioritize a just-uploaded
+      // video: that previously caused PDF #1 to go to Lecture 2 while Lecture 1
+      // remained empty, reversing the user's intended PDF order.
+      const target = autoFindFirstMissingNotes(scope);
       if (!target) {
         await bot.sendMessage(chatId, `ℹ️ <b>No empty Notes slots found.</b>\nAll existing lectures in this chapter/unit already have notes, or there are no video lectures here.\n\n📁 Saved PDF: ${esc(stored.file_name)}\n🔗 <code>${link}</code>\n\nNo existing lecture was overwritten, and no PDF-only lecture was created.`, { parse_mode: "HTML" });
         return;
@@ -3337,7 +3323,7 @@ async function startBot() {
     autoLectureSession.lastLectureId = lecId;
     autoLectureSession.lastActionType = "lecture";
     courseRoutes.saveAutoSession && courseRoutes.saveAutoSession();
-    await bot.sendMessage(chatId, `✅ <b>Auto-Saved!</b>\n📖 <b>${lName}</b>\n📁 ${esc(stored.file_name)}\n📍 ${esc(loc)}\n🔗 <code>${link}</code>\n\n📎 Send a PDF now to attach notes to this new lecture.\n↩️ /undo — if this was a mistake\n➡️ /nextchapter — move to next chapter\n➡️ /nextunit — move to next unit`, { parse_mode: "HTML" });
+    await bot.sendMessage(chatId, `✅ <b>Auto-Saved!</b>\n📖 <b>${lName}</b>\n📁 ${esc(stored.file_name)}\n📍 ${esc(loc)}\n🔗 <code>${link}</code>\n\n📎 Incoming PDFs fill the FIRST lecture with missing notes in this chapter/unit (Lecture 1 onward).\n↩️ /undo — if this was a mistake\n➡️ /nextchapter — move to next chapter\n➡️ /nextunit — move to next unit`, { parse_mode: "HTML" });
   }
 
   const fileQueues=new Map();
