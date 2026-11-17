@@ -1273,6 +1273,7 @@ app.use("/api", courseRoutes);
 const autoLectureSession = courseRoutes.autoLectureSession;
 const autoAddLecture = courseRoutes.autoAddLecture;
 const autoSetLectureNotes = courseRoutes.autoSetLectureNotes;
+const autoFindFirstMissingNotes = courseRoutes.autoFindFirstMissingNotes;
 const autoDeleteLecture = courseRoutes.autoDeleteLecture;
 
 app.post("/api/pay-request", async (req, res) => {
@@ -2148,7 +2149,7 @@ async function startBot() {
     try {
       if (autoLectureSession.lastActionType === "notes") {
         await autoSetLectureNotes({ batchId: autoLectureSession.batchId, subjectId: autoLectureSession.subjectId, chapterId: autoLectureSession.chapterId, unitId: autoLectureSession.unitId, lectureId: autoLectureSession.lastLectureId, notes: "" });
-        await bot.sendMessage(chatId, `↩️ <b>Undone</b> — notes removed from Lecture ${autoLectureSession.lectureCount}.`, { parse_mode: "HTML" });
+        await bot.sendMessage(chatId, `↩️ <b>Undone</b> — notes removed from the last attached lecture.`, { parse_mode: "HTML" });
       } else {
         const removedName = await autoDeleteLecture({ batchId: autoLectureSession.batchId, subjectId: autoLectureSession.subjectId, chapterId: autoLectureSession.chapterId, unitId: autoLectureSession.unitId, lectureId: autoLectureSession.lastLectureId });
         autoLectureSession.lectureCount = Math.max(0, autoLectureSession.lectureCount - 1);
@@ -3282,21 +3283,61 @@ async function startBot() {
   // lecture, as before. A document (PDF/notes file) is special-cased: if it
   // arrives right after a video in the same session, it's attached as THAT
   // lecture's notes link instead of becoming its own separate lecture entry —
-  // this is what lets "video then PDF" pairs auto-save as one lecture.
+  // PDF-only uploads fill the first existing lecture missing notes; a new video
+  // immediately followed by its PDF still pairs with that video.
   async function handleAutoLectureFile(bot, chatId, stored, code, link) {
-    if (stored.file_type === "document" && autoLectureSession.lastLectureId) {
-      await autoSetLectureNotes({ batchId: autoLectureSession.batchId, subjectId: autoLectureSession.subjectId, chapterId: autoLectureSession.chapterId, unitId: autoLectureSession.unitId, lectureId: autoLectureSession.lastLectureId, notes: code });
-      autoLectureSession.lastActionType = "notes"; courseRoutes.saveAutoSession && courseRoutes.saveAutoSession();
-      const loc = autoLectureSession.unitName ? `${autoLectureSession.subjectName} › ${autoLectureSession.chapterName} › ${autoLectureSession.unitName}` : `${autoLectureSession.subjectName} › ${autoLectureSession.chapterName}`;
-      await bot.sendMessage(chatId, `📎 <b>Notes Attached!</b>\n📖 Lecture ${autoLectureSession.lectureCount}\n📁 ${stored.file_name}\n📍 ${loc}\n🔗 <code>${link}</code>\n\n📨 Send the next video for <b>Lecture ${autoLectureSession.lectureCount + 1}</b>\n↩️ /undo — if this was a mistake\n➡️ /nextchapter — move to next chapter\n➡️ /nextunit — move to next unit`, { parse_mode: "HTML" });
-    } else {
-      const lNum = autoLectureSession.lectureCount + 1; const lName = `Lecture ${lNum}`;
-      const lecId = await autoAddLecture({ batchId: autoLectureSession.batchId, subjectId: autoLectureSession.subjectId, chapterId: autoLectureSession.chapterId, unitId: autoLectureSession.unitId, name: lName, link: code });
-      autoLectureSession.lectureCount = lNum; autoLectureSession.lastLectureId = lecId; autoLectureSession.lastActionType = "lecture"; courseRoutes.saveAutoSession && courseRoutes.saveAutoSession();
-      const loc = autoLectureSession.unitName ? `${autoLectureSession.subjectName} › ${autoLectureSession.chapterName} › ${autoLectureSession.unitName}` : `${autoLectureSession.subjectName} › ${autoLectureSession.chapterName}`;
-      const hint = stored.file_type === "document" ? "" : "📎 Send a PDF next to attach it as this lecture's notes, or ";
-      await bot.sendMessage(chatId, `✅ <b>Auto-Saved!</b>\n📖 <b>${lName}</b>\n📁 ${stored.file_name}\n📍 ${loc}\n🔗 <code>${link}</code>\n\n${hint}📨 Send the next video for <b>Lecture ${lNum + 1}</b>\n↩️ /undo — if this was a mistake\n➡️ /nextchapter — move to next chapter\n➡️ /nextunit — move to next unit`, { parse_mode: "HTML" });
+    const scope = {
+      batchId: autoLectureSession.batchId,
+      subjectId: autoLectureSession.subjectId,
+      chapterId: autoLectureSession.chapterId,
+      unitId: autoLectureSession.unitId
+    };
+    const loc = autoLectureSession.unitName
+      ? `${autoLectureSession.subjectName} › ${autoLectureSession.chapterName} › ${autoLectureSession.unitName}`
+      : `${autoLectureSession.subjectName} › ${autoLectureSession.chapterName}`;
+
+    if (stored.file_type === "document") {
+      // Preserve the existing video -> PDF pairing when the previous successful
+      // action created a lecture. In PDF-only mode (or after the first PDF),
+      // always fill the earliest existing lecture whose notes are still blank.
+      let target = null;
+      if (autoLectureSession.lastActionType === "lecture" && autoLectureSession.lastLectureId) {
+        const fresh = autoFindFirstMissingNotes(scope);
+        // A fresh video is always the newest lecture. Only use its own ID if
+        // it still has no notes; never replace notes on an older lecture.
+        const batchData = db.batch.getOne(scope.batchId);
+        const subj = (batchData?.subjects || []).find(x => String(x._id) === String(scope.subjectId));
+        const chap = (subj?.chapters || []).find(x => String(x._id) === String(scope.chapterId));
+        const unit = scope.unitId ? (chap?.units || []).find(x => String(x._id) === String(scope.unitId)) : null;
+        const lectures = (unit ? unit.lectures : chap?.lectures) || [];
+        const idx = lectures.findIndex(x => String(x._id) === String(autoLectureSession.lastLectureId));
+        if (idx !== -1 && !String(lectures[idx].notes || '').trim()) {
+          target = { lectureId: String(lectures[idx]._id), lectureName: lectures[idx].name || 'Lecture ' + (idx + 1), lectureNumber: idx + 1 };
+        }
+      }
+      if (!target) target = autoFindFirstMissingNotes(scope);
+      if (!target) {
+        await bot.sendMessage(chatId, `ℹ️ <b>No empty Notes slots found.</b>\nAll existing lectures in this chapter/unit already have notes, or there are no video lectures here.\n\n📁 Saved PDF: ${esc(stored.file_name)}\n🔗 <code>${link}</code>\n\nNo existing lecture was overwritten, and no PDF-only lecture was created.`, { parse_mode: "HTML" });
+        return;
+      }
+      await autoSetLectureNotes({ ...scope, lectureId: target.lectureId, notes: code });
+      autoLectureSession.lastLectureId = target.lectureId;
+      autoLectureSession.lastActionType = "notes";
+      courseRoutes.saveAutoSession && courseRoutes.saveAutoSession();
+      const next = autoFindFirstMissingNotes(scope);
+      await bot.sendMessage(chatId, `📎 <b>Notes Attached!</b>\n📖 <b>${esc(target.lectureName)}</b> (#${target.lectureNumber})\n📁 ${esc(stored.file_name)}\n📍 ${esc(loc)}\n🔗 <code>${link}</code>\n\n${next ? '📨 Next PDF → ' + esc(next.lectureName) + ' (#' + next.lectureNumber + ')' : '✅ No more lectures with missing notes in this chapter/unit.'}\n↩️ /undo — remove this notes attachment\n➡️ /nextchapter or /nextunit — change location`, { parse_mode: "HTML" });
+      return;
     }
+
+    // Video (and other non-document media) continue creating new lectures.
+    const lNum = autoLectureSession.lectureCount + 1;
+    const lName = `Lecture ${lNum}`;
+    const lecId = await autoAddLecture({ ...scope, name: lName, link: code });
+    autoLectureSession.lectureCount = lNum;
+    autoLectureSession.lastLectureId = lecId;
+    autoLectureSession.lastActionType = "lecture";
+    courseRoutes.saveAutoSession && courseRoutes.saveAutoSession();
+    await bot.sendMessage(chatId, `✅ <b>Auto-Saved!</b>\n📖 <b>${lName}</b>\n📁 ${esc(stored.file_name)}\n📍 ${esc(loc)}\n🔗 <code>${link}</code>\n\n📎 Send a PDF now to attach notes to this new lecture.\n↩️ /undo — if this was a mistake\n➡️ /nextchapter — move to next chapter\n➡️ /nextunit — move to next unit`, { parse_mode: "HTML" });
   }
 
   const fileQueues=new Map();
