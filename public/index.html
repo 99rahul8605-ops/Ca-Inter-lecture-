@@ -2420,6 +2420,27 @@ function startAdBlockerMonitoring() {
   });
 }
 
+// Moderation preview: focus on actual educational content while ads are paused.
+function applyModerationUI() {
+  if (!_adsPaused) return;
+  ['navEarn', 'navAccess', 'adsFreeBadge', 'adsFreeBanner', 'homeTimerBar'].forEach(function(id) {
+    var el = document.getElementById(id);
+    if (el) el.style.display = 'none';
+  });
+  var homeTitle = document.querySelector('#page-home .topbar [style*="font-size:15px"]');
+  if (homeTitle) homeTitle.textContent = 'CA Inter Learning';
+  var homeSub = document.querySelector('#page-home .topbar [style*="font-size:10px"]');
+  if (homeSub) homeSub.textContent = 'Lectures · Notes · Subjects';
+  var batch = document.getElementById('batchSection');
+  if (batch && !document.getElementById('moderationLearningInfo')) {
+    var intro = document.createElement('div');
+    intro.id = 'moderationLearningInfo';
+    intro.className = 'card';
+    intro.style.cssText = 'margin:12px 0 14px;padding:14px;border:1px solid var(--border);font-size:13px;line-height:1.6';
+    intro.innerHTML = '<strong>📚 Learn CA Intermediate</strong><div style="color:var(--text2);margin-top:5px">Select a free batch to explore subjects, chapters, lectures and PDF notes. Free learning is available without watching ads. Premium batches retain separate permissions.</div>';
+    batch.insertBefore(intro, batch.firstChild);
+  }
+}
 async function checkAdminAccess() {
   try {
     var config = await (await fetch('/api/config')).json();
@@ -2435,6 +2456,7 @@ async function checkAdminAccess() {
     window._monetagZoneConfig = config.monetagZoneId || '11502469';
     _adsPaused = config.adsPaused !== false;
     _adProvider = _adsPaused ? 'none' : (config.adProvider || 'none');
+    applyModerationUI();
     var accessHint = document.querySelector('#page-access .topbar [style*="font-size:10px"]');
     if (accessHint && _adsPaused) accessHint.textContent = 'Free learning — ads paused';
     _adsgramBlockId = config.adsgramBlockId || '57682';
@@ -4298,6 +4320,7 @@ async function _afterAdsFreePurchase() {
 
 function renderAdsFreeBanner() {
   var el = document.getElementById('adsFreeBanner');
+  if (_adsPaused) { if (el) el.innerHTML = ''; return; }
   updateAdsFreeBadge();
   if (!el || canBypassRestrictions()) { if (el) el.innerHTML = ''; return; }
 
@@ -4394,6 +4417,7 @@ function formatCountdown() {
 
 // ── Nav Tab Switch ────────────────────────────────────────────────────────────
 function switchNavTab(tab) {
+  if (_adsPaused && (tab === 'earn' || tab === 'access')) tab = 'home';
   currentTab = tab;
   document.getElementById('navHome').classList.toggle('active', tab === 'home');
   document.getElementById('navAccess').classList.toggle('active', tab === 'access');
@@ -4580,6 +4604,7 @@ function renderAccessCard() {
 
 function updateHomeTimer() {
   var bar = document.getElementById('homeTimerBar');
+  if (_adsPaused) { if (bar) bar.style.display = 'none'; return; }
   var countdown = document.getElementById('homeCountdown');
   var fill = document.getElementById('homeTimerBarFill');
   if (!bar) return;
