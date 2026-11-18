@@ -2060,6 +2060,105 @@ async function startBot() {
     bot.sendMessage(chatId, welcomeText, { parse_mode:"HTML", reply_markup:{ inline_keyboard: startButtons } });
   });
 
+
+  // ── Daily personalized referral reminder ────────────────────────────────────
+  // One optional message per user per India calendar day, distributed across
+  // independently randomized 10:00-20:59 IST slots. A deterministic daily hash
+  // keeps each user's slot stable across restarts, but changes it every day.
+  // SQLite records sent dates, so restarting the bot never repeats a reminder.
+  const REFERRAL_REMINDER_ENABLED =
+    String(process.env.REFERRAL_REMINDER_ENABLED || "true").toLowerCase() !== "false";
+  const REMINDER_PREFIX = "referral_reminder_";
+  const reminderDayAndMinute = () => {
+    const ist = new Date(Date.now() + 330 * 60000);
+    return { day: ist.toISOString().slice(0, 10), minute: ist.getUTCHours() * 60 + ist.getUTCMinutes() };
+  };
+  const reminderSlot = (day, uid) => {
+    const digest = crypto.createHash("sha256").update(day + ":" + uid).digest();
+    return 10 * 60 + digest.readUInt32BE(0) % (11 * 60);
+  };
+  const reminderKey = (uid) => REMINDER_PREFIX + "last_sent_" + uid;
+  const optOutKey = (uid) => REMINDER_PREFIX + "optout_" + uid;
+  let reminderScanRunning = false;
+  async function scanReferralReminders() {
+    if (!REFERRAL_REMINDER_ENABLED || reminderScanRunning || !BOT_USERNAME) return;
+    const { day, minute } = reminderDayAndMinute();
+    // Quiet hours 21:00-10:00 India time; don't send missed reminders at night.
+    if (minute < 600 || minute >= 1260) return;
+    reminderScanRunning = true;
+    try {
+      let delivered = 0;
+      // Existing known Telegram users only, with no added DB collections.
+      for (const row of db.user.listAll()) {
+        if (delivered >= 100) break; // throttle to <= 100 attempts per scan
+        const uid = String(row.userId || "");
+        if (!/^\d+$/.test(uid) || uid === String(OWNER_ID)) continue;
+        if (db.bannedUser.isBanned(uid)) continue;
+        if (db.settings.get(optOutKey(uid), false)) continue;
+        if (db.settings.get(reminderKey(uid), "") === day) continue;
+        if (minute < reminderSlot(day, uid)) continue;
+
+        const inviteLink = `https://t.me/${BOT_USERNAME}?start=ref_${uid}`;
+        const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(inviteLink)}&text=${encodeURIComponent("Join CA Inter Learning for lectures and PDF notes! 📚")}`;
+        const firstName = String(row.firstName || "Friend").trim().slice(0, 60) || "Friend";
+        const message =
+          `📚 <b>CA INTER — SHARE & EARN</b> 🎁\n\n` +
+          `Hey <b>${esc(firstName)}</b>! 👋\n\n` +
+          `Apne CA Inter friends ko free lectures aur PDF notes ke baare mein batao! 🚀\n\n` +
+          `🎓 <b>Doston ko milega:</b>\n✅ CA Inter Lectures\n✅ Chapter-wise PDF Notes\n✅ Free Learning Resources\n\n` +
+          `🎁 <b>Tumhe milega:</b>\n⭐ Har successful referral par <b>5 Points!</b>\n\n` +
+          `💜 <b>Keep Learning, Keep Sharing!</b>\n\n` +
+          `🔕 Daily reminder band karna ho to /reminderoff bhejo.`;
+        try {
+          await bot.sendMessage(Number(uid), message, {
+            parse_mode: "HTML",
+            disable_web_page_preview: true,
+            reply_markup: { inline_keyboard: [[
+              { text: "📤 Share Bot & Earn Points", url: shareUrl }
+            ]] }
+          });
+          // Persist only after Telegram confirms successful delivery.
+          db.settings.set(reminderKey(uid), day);
+        } catch (e) {
+          const err = String(e?.message || "");
+          if (/blocked by the user|user is deactivated|chat not found|Forbidden/i.test(err)) {
+            // Permanent delivery failures are not retried every day.
+            db.settings.set(optOutKey(uid), true);
+          } else {
+            console.error("Referral reminder failed for " + uid + ": " + err);
+          }
+        }
+        delivered++;
+        // Conservatively below Telegram's common broadcast rate limits.
+        await wait(300);
+      }
+    } catch (e) {
+      console.error("Daily referral reminder scan failed:", e?.message || e);
+    } finally {
+      reminderScanRunning = false;
+    }
+  }
+
+  bot.onText(/^\/reminderoff(?:@\w+)?\s*$/i, (msg) => {
+    if (isGroupChat(msg) || !msg.from?.id) return;
+    db.settings.set(optOutKey(String(msg.from.id)), true);
+    bot.sendMessage(msg.chat.id, "🔕 Daily sharing reminders OFF. Dobara chalu karne ke liye /reminderon bhejo.").catch(() => {});
+  });
+  bot.onText(/^\/reminderon(?:@\w+)?\s*$/i, (msg) => {
+    if (isGroupChat(msg) || !msg.from?.id) return;
+    db.settings.set(optOutKey(String(msg.from.id)), false);
+    bot.sendMessage(msg.chat.id, "🔔 Daily sharing reminders ON. Ab din mein maximum ek reminder random time par milega.").catch(() => {});
+  });
+  if (REFERRAL_REMINDER_ENABLED) {
+    // The first scan only delivers messages in the daytime IST window.
+    scanReferralReminders().catch(e => console.error("Reminder startup scan:", e.message));
+    const referralReminderTimer = setInterval(() => {
+      scanReferralReminders().catch(e => console.error("Reminder timer:", e.message));
+    }, 60 * 1000);
+    referralReminderTimer.unref?.();
+    console.log("Daily referral reminder scheduler enabled (10:00-20:59 IST).");
+  }
+
   // ── /admin ────────────────────────────────────────────────────────────────
   // Owner-only reference — lists every admin command, grouped by category, with
   // a one-line description and its arguments. Kept in plain (arg) placeholder
