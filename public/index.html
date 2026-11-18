@@ -4170,34 +4170,10 @@ function _nextAdFormat() {
   } catch (e) { return 'interstitial'; }
 }
 
-// Persistent (never resets) "every 3rd lecture click shows an ad" counter.
-// Skippable/non-mandatory — the ad plays if available, but the lecture opens
-// right after regardless of whether the user watched or skipped it. Only
-// applies to actual lecture (video) clicks, not Notes.
-function _shouldShowAdForLectureClick() {
-  try {
-    var count = parseInt(localStorage.getItem('edubot_lec_click_count') || '0', 10) + 1;
-    localStorage.setItem('edubot_lec_click_count', String(count));
-    return count % 3 === 0;
-  } catch (e) { return false; }
-}
-
+// Lecture and notes buttons always open content directly.
+// No third-click advertisements or ad-related restrictions here.
 async function openLecLink(codeOrLink, type) {
   if (!codeOrLink) return openLink('', type || 'lecture');
-
-  if (!_adsPaused && !window._adsFreeActive && (type || 'lecture') === 'lecture' && _shouldShowAdForLectureClick()) {
-    if (!_adSdkReady() && !canBypassRestrictions() && await _isAdBlockerActiveForUser()) {
-      document.getElementById('adBlockGate').classList.remove('hidden');
-      return;
-    }
-    if (_adSdkReady()) {
-      try {
-        var lecFormat = _adProvider === 'monetag' ? _nextAdFormat() : 'reward';
-        if (_adProvider === 'monetag' && lecFormat === 'pop') await _adSdkShow('pop');
-        else await _adSdkShow();
-      } catch (e) { /* skipped/failed — open the lecture anyway */ }
-    }
-  }
 
   var url;
   if (codeOrLink.startsWith('http')) {
