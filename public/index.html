@@ -439,13 +439,6 @@ body.ready{transition:none}
 .vs-bar{width:148px;height:2px;background:var(--surface2);border-radius:2px;overflow:hidden}
 .vs-fill{height:100%;width:0%;background:linear-gradient(90deg,var(--accent),var(--accent2));border-radius:2px;transition:width 0.4s ease}
 </style>
-<link rel="stylesheet" href="/lecture-picker.css">
-<link rel="stylesheet" href="/study.css">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,800&family=DM+Sans:wght@400;500;600;700;800&display=swap">
-<link rel="stylesheet" href="/theme-focus.css">
-<link rel="stylesheet" href="/home-ui.css">
 </head>
 <body>
 
@@ -542,61 +535,73 @@ body.ready{transition:none}
 
 <!-- PAGE: Home (Batches) -->
 <div class="page active" id="page-home">
-  <div class="page-body" id="homeBody">
-
-    <!-- header: profile · greeting · streak · bell -->
-    <div class="hm-head">
-      <button class="hm-avatar" aria-label="Profile" onclick="switchNavTab('profile')"><i class="ti ti-user"></i></button>
-      <div class="hm-hello">Namaste</div>
+  <div class="topbar">
+    <div style="display:flex;align-items:center;gap:10px;flex:1">
+      <div style="width:34px;height:34px;background:linear-gradient(135deg,#4f8ef7,#7c5cbf);border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:17px">📚</div>
+      <div><div style="font-size:15px;font-weight:700">EduBot</div><div style="font-size:10px;color:var(--text2)">Select Batch</div></div>
       <span id="adsFreeBadge" style="display:none;font-size:9px;font-weight:700;color:#fff;padding:3px 8px;border-radius:20px;cursor:pointer;white-space:nowrap;align-items:center;gap:3px" onclick="openAdsFreePromo()">✨ Ads-Free</span>
-      <div class="hm-streak" id="hmStreak"><svg width="18" height="18" viewBox="0 0 24 24" fill="#FF7A45" aria-hidden="true"><path d="M12 2c1 3.5 5 5.5 5 10a5 5 0 0 1-10 0c0-2 1-3 2-4 0 2 1 3 2 3 0-3-1-6 1-9z"/></svg><span id="hmStreakTxt">Streak</span></div>
-      <button class="bell-btn hm-bell" id="bellBtn" aria-label="Announcements" onclick="openAnnouncements()"><i class="ti ti-bell"></i><span class="bell-badge" id="bellBadge"></span></button>
     </div>
-
-    <h1 class="hm-title">Aaj kya padhna<br>hai, CA Inter?</h1>
-
-    <!-- hero: today's goal -->
-    <div id="homeStudyCard" class="hm-goal" style="display:none" role="button" tabindex="0" onclick="switchNavTab('study')"></div>
-
+    <button class="admin-btn" id="adminBtn" onclick="openAdmin()"><i class="ti ti-settings" style="font-size:13px"></i> Admin</button>
+    <button class="bell-btn" id="bellBtn" onclick="openAnnouncements()"><i class="ti ti-bell"></i><span class="bell-badge" id="bellBadge"></span></button>
+    <div class="theme-toggle">
+      <label class="toggle-switch" title="Toggle light/dark mode">
+        <input type="checkbox" id="themeToggle" onchange="toggleTheme(this.checked)">
+        <span class="toggle-slider"></span>
+      </label>
+    </div>
+  </div>
+  <div class="search-wrap">
+    <div class="search-inner">
+      <i class="ti ti-search search-icon"></i>
+      <input class="search-input" id="searchInput" placeholder="Search batches..." oninput="handleSearch(this.value)">
+    </div>
+  </div>
+  <!-- Home Access Timer Bar -->
+  <div id="homeTimerBar" style="display:none;background:linear-gradient(90deg,#0f2a1a,#0a1f2e);border-bottom:1px solid var(--border);padding:8px 16px;flex-shrink:0;display:flex;align-items:center;justify-content:space-between;gap:10px">
+    <div style="display:flex;align-items:center;gap:8px">
+      <i class="ti ti-shield-check" style="color:var(--green);font-size:16px;flex-shrink:0"></i>
+      <div>
+        <div style="font-size:11px;color:var(--green);font-weight:600">Access Active</div>
+        <div style="font-size:10px;color:var(--text2)">Expires in <span id="homeCountdown" style="color:var(--text);font-weight:600">--:--:--</span></div>
+      </div>
+    </div>
+    <div id="homeTimerBar-progress" style="flex:1;max-width:100px;height:4px;background:var(--surface3);border-radius:2px;overflow:hidden">
+      <div id="homeTimerBarFill" style="height:100%;background:linear-gradient(90deg,var(--green),var(--accent));border-radius:2px;transition:width 1s linear;width:100%"></div>
+    </div>
+  </div>
+  <div class="page-body">
     <div id="accessBanner"></div>
     <div id="lockedMsg" style="display:none;text-align:center;padding:40px 20px;color:var(--text2)">
       <i class="ti ti-lock" style="font-size:40px;color:var(--text3);display:block;margin-bottom:12px"></i>
       <div style="font-size:15px;font-weight:600;margin-bottom:6px">Access Required</div>
       <div style="font-size:13px">Watch an ad to get 8h free access (up to 3 times/day).</div>
     </div>
-
     <div id="batchSection">
-      <!-- chips: search + All / Free / Premium / Saved -->
-      <div class="hm-chips" id="hmChips">
-        <button class="hm-ci" id="hmSearchBtn" aria-label="Search batches" aria-expanded="false" onclick="HomeUI.toggleSearch()"><i class="ti ti-search"></i></button>
-        <button class="hm-chip on" data-f="all" onclick="HomeUI.setFilter('all')">All</button>
-        <button class="hm-chip" data-f="free" onclick="HomeUI.setFilter('free')">Free</button>
-        <button class="hm-chip" data-f="premium" id="hmChipPremium" onclick="HomeUI.setFilter('premium')">Premium</button>
-        <button class="hm-chip" data-f="favorite" onclick="HomeUI.setFilter('favorite')">Saved</button>
+      <!-- Tabs -->
+      <div class="batch-tabs">
+        <button class="batch-tab active-free" id="tabFreeBtn" onclick="switchBatchTab('free')">
+          <i class="ti ti-school"></i> Free
+        </button>
+        <button class="batch-tab" id="tabPremiumBtn" onclick="switchBatchTab('premium')">
+          <i class="ti ti-crown"></i> Premium
+        </button>
+        <button class="batch-tab" id="tabFavoriteBtn" onclick="switchBatchTab('favorite')">
+          <i class="ti ti-heart"></i> Favorites
+        </button>
       </div>
-      <div class="hm-search" id="hmSearch" hidden>
-        <input class="search-input" id="searchInput" placeholder="Search batches..." oninput="handleSearch(this.value)" autocomplete="off">
+      <!-- Free Batches -->
+      <div id="freeBatchSection">
+        <div class="batch-grid" id="freeBatchGrid"><div class="loading" style="grid-column:1/-1"><i class="ti ti-loader-2"></i>Loading...</div></div>
       </div>
-
-      <!-- bento tiles are drawn here by home-ui.js -->
-      <div class="bt" id="batchBento"><div class="loading"><i class="ti ti-loader-2"></i>Loading...</div></div>
-
-      <!-- legacy containers: not shown, kept only so older code that references these ids never hits a null -->
-      <div class="hm-legacy" hidden>
-        <button id="tabFreeBtn"></button><button id="tabPremiumBtn"></button><button id="tabFavoriteBtn"></button>
-        <div id="freeBatchSection"><div class="batch-grid" id="freeBatchGrid"></div></div>
-        <div id="premiumBatchSection"><div class="batch-grid" id="premiumBatchGrid"></div></div>
-        <div id="favoriteBatchSection"><div class="batch-grid" id="favoriteBatchGrid"></div></div>
-        <div id="homeTimerBar"><span id="homeCountdown"></span><div id="homeTimerBar-progress"><div id="homeTimerBarFill"></div></div></div>
+      <!-- Premium Batches -->
+      <div id="premiumBatchSection" style="display:none">
+        <div class="batch-grid" id="premiumBatchGrid"></div>
+      </div>
+      <!-- Favorite Batches -->
+      <div id="favoriteBatchSection" style="display:none">
+        <div class="batch-grid" id="favoriteBatchGrid"></div>
       </div>
     </div>
-
-    <!-- rewards strip: opens Spin & Earn, shows the live access timer -->
-    <button class="hm-strip" id="hmStrip" onclick="HomeUI.openRewards()">
-      <i class="ti ti-clock-hour-3 hm-strip-ic"></i>
-      <span class="hm-strip-t"><b>Spin &amp; earn free access</b><small id="hmStripSub">Watch an ad to unlock lectures</small></span>
-      <i class="ti ti-chevron-right"></i>
-    </button>
   </div>
 </div>
 
@@ -620,7 +625,6 @@ body.ready{transition:none}
     <div style="flex:1;min-width:0"><div class="topbar-title" id="chapPageTitle"></div><div class="topbar-sub" id="chapPageSub"></div></div>
   </div>
   <div class="page-body">
-    <div id="chapSummary"></div>
     <div class="sec-label">Chapters</div>
     <div class="list" id="chapterList"></div>
   </div>
@@ -670,8 +674,6 @@ body.ready{transition:none}
     <div class="modal-handle"></div>
     <button class="modal-close" onclick="closeAdmin()"><i class="ti ti-x"></i></button>
     <div class="modal-title"><i class="ti ti-settings"></i>Admin Panel</div>
-    <div id="adminDash"></div>
-    <div id="adminFormHead" class="ad-head"></div>
     <div class="tabs">
       <button class="tab-btn active" id="adminTabBatch" onclick="switchTab('batch')">+ Batch</button>
       <button class="tab-btn" id="adminTabSubject" onclick="switchTab('subject')">+ Subject</button>
@@ -902,59 +904,19 @@ body.ready{transition:none}
     <i class="ti ti-home"></i>
     Home
   </button>
-  <button class="nav-tab" id="navStudy" onclick="switchNavTab('study')">
-    <i class="ti ti-clock"></i>
-    Study
-  </button>
-  <button class="nav-tab" id="navRewards" onclick="switchNavTab('earn')">
-    <i class="ti ti-gift"></i>
+  <button class="nav-tab" id="navAccess" onclick="switchNavTab('access')">
+    <i class="ti ti-key" style="position:relative"></i>
     <span id="accessDot" class="access-dot locked" style="position:relative;display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--red);margin-left:4px;vertical-align:middle"></span>
-    <span class="nav-label">Rewards</span>
+    Access
   </button>
-  <button class="nav-tab" id="navProfile" onclick="switchNavTab('profile')">
-    <i class="ti ti-user"></i>
-    Profile
+  <button class="nav-tab" id="navRefer" onclick="switchNavTab('refer')">
+    <i class="ti ti-share"></i>
+    Refer
   </button>
-  <!-- Legacy tabs: kept (hidden) because switchNavTab() toggles them by id. Rewards covers all three. -->
-  <button class="nav-tab" id="navAccess" onclick="switchNavTab('access')" hidden><i class="ti ti-key"></i>Access</button>
-  <button class="nav-tab" id="navRefer" onclick="switchNavTab('refer')" hidden><i class="ti ti-share"></i>Refer</button>
-  <button class="nav-tab" id="navEarn" onclick="switchNavTab('earn')" hidden><i class="ti ti-disc"></i>Earn</button>
-</div>
-
-<!-- Profile Page (settings: theme, admin, support) -->
-<div class="page" id="page-profile">
-  <div class="page-header">
-    <div class="page-title"><i class="ti ti-user-circle" style="color:var(--accent)"></i> Profile</div>
-  </div>
-  <div class="page-body">
-    <div class="pf-wrap">
-      <div class="pf-card">
-        <div class="pf-av" id="pfAv">?</div>
-        <div class="pf-info"><div class="pf-name" id="pfName">Student</div><div class="pf-sub" id="pfSub"></div></div>
-      </div>
-      <div class="pf-list">
-        <div class="pf-row" id="pfThemeRow"><i class="ti ti-moon"></i><span>Light mode</span><div class="theme-toggle">
-          <label class="toggle-switch" title="Toggle light/dark mode">
-            <input type="checkbox" id="themeToggle" onchange="toggleTheme(this.checked)">
-            <span class="toggle-slider"></span>
-          </label>
-        </div></div>
-        <div id="pfAdminSlot"><button class="admin-btn" id="adminBtn" onclick="openAdmin()"><i class="ti ti-settings" style="font-size:13px"></i> Admin</button></div>
-        <button class="pf-row pf-access-row" onclick="switchNavTab('access')"><i class="ti ti-key"></i><span>Access &amp; timer</span><i class="ti ti-chevron-right pf-arr"></i></button>
-        <button class="pf-row" onclick="openAnnouncements()"><i class="ti ti-bell"></i><span>Announcements</span><i class="ti ti-chevron-right pf-arr"></i></button>
-        <button class="pf-row" onclick="RewardsUI.contact()"><i class="ti ti-brand-telegram"></i><span>Contact support</span><i class="ti ti-chevron-right pf-arr"></i></button>
-      </div>
-    </div>
-  </div>
-</div>
-
-<!-- Study Page (timer, plan, groups, stats) -->
-<div class="page" id="page-study">
-  <div class="page-header">
-    <div class="page-title"><i class="ti ti-clock" style="color:var(--accent)"></i> Study</div>
-    <div class="st-streak" id="stStreak"></div>
-  </div>
-  <div class="page-body" id="stScroll"></div>
+  <button class="nav-tab" id="navEarn" onclick="switchNavTab('earn')">
+    <i class="ti ti-disc"></i>
+    Earn
+  </button>
 </div>
 
 <!-- Refer Page -->
@@ -1056,13 +1018,12 @@ body.ready{transition:none}
 <!-- Earn Page -->
 <div class="page" id="page-earn">
   <div class="page-header">
-    <div class="rw-head"><div class="rw-sub">Free access banao</div><h1 class="rw-h1">Spin &amp; Earn</h1></div>
-    <div class="rw-timer" id="rwTimer"><i class="ti ti-clock"></i><span id="rwTimerTxt">No access</span></div>
+    <div class="page-title"><i class="ti ti-disc" style="color:var(--accent2)"></i> Spin & Earn</div>
   </div>
   <div class="page-body">
-    <div class="rw-stack">
+    <div style="padding:16px">
 
-      <div class="card sp-card" style="text-align:center">
+      <div class="card" style="text-align:center;border:1px solid rgba(124,92,191,0.3)">
         <div id="spinStatusBar" style="margin-bottom:14px">
           <span class="spin-status-pill">🎯 <b id="spinsLeftText">–</b> spins left</span>
           <span class="spin-status-pill">⭐ <b id="spinPointsText">–</b> points</span>
@@ -1087,18 +1048,7 @@ body.ready{transition:none}
         <div id="spinResultText" style="margin-top:12px;font-size:12px;color:var(--text2);min-height:18px"></div>
       </div>
 
-      <button class="rw-ad" onclick="watchAd()">
-        <i class="ti ti-device-tv"></i>
-        <span><b>Watch an ad</b><small>Extra access time milega</small></span>
-      </button>
-
-      <div class="rw-ref">
-        <div class="rw-ref-t">Dost ko invite karo</div>
-        <div class="rw-ref-s">Har friend ke join hone par free access.</div>
-        <div class="rw-ref-row"><div class="rw-ref-code" id="rwRefCode">&nbsp;</div><button onclick="copyReferLink()">Copy</button></div>
-      </div>
-
-      <div class="card" style="margin-top:0">
+      <div class="card" style="margin-top:14px">
         <div style="font-size:13px;font-weight:600;margin-bottom:10px;color:var(--text)">ℹ️ How It Works</div>
         <div style="display:flex;flex-direction:column;gap:8px">
           <div style="display:flex;align-items:center;gap:10px">
@@ -1295,9 +1245,9 @@ function openBatch(bid) {
     </div>`;
   var list = document.getElementById('subjectList');
   list.innerHTML = !b.subjects.length ? '<div class="empty"><i class="ti ti-books"></i>No subjects yet</div>' :
-    b.subjects.map((s, si) => `
+    b.subjects.map(s => `
       <div class="row" onclick="openSubject('${bid}','${s._id}')">
-        <div class="row-icon" style="background:${_PASTEL[si % _PASTEL.length]}">${s.icon}</div>
+        <div class="row-icon" style="background:${s.color}22;border:1px solid ${s.color}44">${s.icon}</div>
         <div class="row-info">
           <div class="row-name">${s.name}</div>
           <div class="row-sub">${s.chapters.length} chapters</div>
@@ -1308,52 +1258,21 @@ function openBatch(bid) {
 }
 
 // ── Open Subject ──────────────────────────────────────────────────────────────
-// Design palette used for number / icon tiles (peach · mint · lavender · sky)
-var _PASTEL = ['#FFD9C2', '#CDEBDD', '#DCD6F7', '#CFE6F5'];
-// Dark progress card shown at the top of the Chapters page
-function _subjSummaryHtml(s) {
-  var all = [];
-  (s.chapters || []).forEach(function (c) { all = all.concat(_chapLectures(c)); });
-  if (!all.length) return '';
-  var d = all.filter(function (l) { return isLectureWatched(l._id); }).length, pct = Math.round(d / all.length * 100);
-  return '<div class="chp-sum"><div class="chp-sum-top"><b>' + pct + '%</b><span>' + d + ' of ' + all.length + ' lectures \u00b7 ' + s.chapters.length + ' chapters</span></div>' +
-         '<div class="chp-sum-bar"><i style="width:' + pct + '%"></i></div></div>';
-}
-
-// Watched progress for a chapter (counts lectures inside units too)
-function _chapLectures(c) {
-  var all = (c.lectures || []).slice();
-  (c.units || []).forEach(function (u) { all = all.concat(u.lectures || []); });
-  return all.filter(function (l) { return !l.comingSoon; });
-}
-function _chapDoneText(c) {
-  var all = _chapLectures(c); if (!all.length) return '';
-  var d = all.filter(function (l) { return isLectureWatched(l._id); }).length;
-  return d ? ' \u00b7 ' + d + ' done' : '';
-}
-function _chapBarHtml(c) {
-  var all = _chapLectures(c); if (!all.length) return '';
-  var d = all.filter(function (l) { return isLectureWatched(l._id); }).length;
-  return '<div class="chap-bar"><div style="width:' + Math.round(d / all.length * 100) + '%"></div></div>';
-}
-
 function openSubject(bid, sid) {
   _currentOpenBid = bid; _currentOpenSid = sid; _currentOpenCid = null; _currentOpenUid = null;
   var b = batches.find(x => x._id === bid);
   var s = b && b.subjects.find(x => x._id === sid);
   if (!s) return;
   document.getElementById('chapPageTitle').textContent = s.name;
-  document.getElementById('chapPageSub').textContent = b.name;
-  document.getElementById('chapSummary').innerHTML = _subjSummaryHtml(s);
+  document.getElementById('chapPageSub').textContent = s.chapters.length + ' chapters';
   var list = document.getElementById('chapterList');
   list.innerHTML = !s.chapters.length ? '<div class="empty"><i class="ti ti-layers"></i>No chapters yet</div>' :
     s.chapters.map((c,i) => `
       <div class="chap-row" onclick="openChapter('${bid}','${sid}','${c._id}')">
-        <div class="chap-num" style="background:${_PASTEL[i % _PASTEL.length]}">${String(i + 1).padStart(2, '0')}</div>
+        <div class="chap-num" style="background:${s.color}">${i+1}</div>
         <div class="chap-info">
           <div class="chap-name">${c.name}</div>
-          <div class="chap-sub">${c.units.length ? c.units.length+' units' : c.lectures.length+' lectures'}${_chapDoneText(c)}</div>
-          ${_chapBarHtml(c)}
+          <div class="chap-sub">${c.units.length ? c.units.length+' units' : c.lectures.length+' lectures'}</div>
         </div>
         <i class="ti ti-chevron-right row-arrow"></i>
       </div>`).join('');
@@ -1390,14 +1309,14 @@ function openChapter(bid, sid, cid) {
     // Direct lectures also shown in separate section
     if (c.lectures && c.lectures.length > 0) {
       html += `<div style="padding:14px 0 8px;font-size:11px;font-weight:600;color:var(--text2);letter-spacing:1.2px;text-transform:uppercase">OTHER LECTURES</div>`;
-      html += _lecPickerHtml(c.lectures);
+      html += c.lectures.map((l,i) => _lecRowHtml(l, i)).join('');
     }
   } else {
     // No units — show lectures directly
     document.getElementById('unitPageSub').textContent = c.lectures.length + ' lectures';
     document.getElementById('unitSecLabel').textContent = 'LECTURES';
     html = !c.lectures.length ? '<div class="empty"><i class="ti ti-video"></i>No lectures yet</div>' :
-      _lecPickerHtml(c.lectures);
+      c.lectures.map((l,i) => _lecRowHtml(l, i)).join('');
   }
   document.getElementById('unitList').innerHTML = html;
   goTo('units');
@@ -1415,7 +1334,7 @@ function openUnit(bid, sid, cid, uid) {
   document.getElementById('lecPageTitle').textContent = u.name;
   document.getElementById('lecPageSub').textContent = u.lectures.length + ' lectures';
   document.getElementById('lectureList').innerHTML = !u.lectures.length ? '<div class="empty"><i class="ti ti-video"></i>No lectures yet</div>' :
-    _lecPickerHtml(u.lectures);
+    u.lectures.map((l,i) => _lecRowHtml(l, i)).join('');
   goTo('lectures');
 }
 
@@ -2285,7 +2204,7 @@ function toggleTheme(isLight) {
 
 function initTheme() {
   var saved = localStorage.getItem('edubot_theme');
-  if (saved !== 'dark') {                 // new look: cream/light unless the user chose dark
+  if (saved === 'light') {
     document.body.classList.add('light-mode');
     var toggle = document.getElementById('themeToggle');
     if (toggle) toggle.checked = true;
@@ -2503,7 +2422,6 @@ function startAdBlockerMonitoring() {
 
 // Moderation preview: focus on actual educational content while ads are paused.
 function applyModerationUI() {
-  if (window.RewardsUI) RewardsUI.setAdsPaused(!!_adsPaused);
   if (!_adsPaused) return;
   ['navEarn', 'navAccess', 'adsFreeBadge', 'adsFreeBanner', 'homeTimerBar'].forEach(function(id) {
     var el = document.getElementById(id);
@@ -2527,9 +2445,6 @@ async function checkAdminAccess() {
   try {
     var config = await (await fetch('/api/config')).json();
     if (config.botUsername) window._botUsername = config.botUsername;
-    window._maxActiveVideos = config.maxActiveVideos || 3;      // lecture videos allowed in the chat at once
-    window._dailyVideoLimit = config.dailyVideoLimit || 10;
-    try { var _u = Telegram.WebApp.initDataUnsafe && Telegram.WebApp.initDataUnsafe.user; window._isOwnerUser = !!(_u && config.ownerId && Number(_u.id) === Number(config.ownerId)); } catch (_) {}
     if (config.upiId) window._upiId = config.upiId;
     if (config.upiName) window._upiName = config.upiName;
     if (config.contactLink) window._contactLink = config.contactLink;
@@ -4480,9 +4395,6 @@ function formatCountdown() {
 function switchNavTab(tab) {
   if (_adsPaused && (tab === 'earn' || tab === 'access')) tab = 'home';
   currentTab = tab;
-  if (tab !== 'study' && window.Study) Study.leave();
-  if (window.RewardsUI) RewardsUI.onTab(tab);
-  var _ns = document.getElementById('navStudy'); if (_ns) _ns.classList.toggle('active', tab === 'study');
   document.getElementById('navHome').classList.toggle('active', tab === 'home');
   document.getElementById('navAccess').classList.toggle('active', tab === 'access');
   document.getElementById('navRefer').classList.toggle('active', tab === 'refer');
@@ -4520,36 +4432,7 @@ function switchNavTab(tab) {
     return;
   }
 
-  if (tab === 'profile') {
-    document.querySelectorAll('.page').forEach(function(p) {
-      p.style.transition = 'none';
-      p.style.transform = 'translateX(100%)';
-      p.classList.remove('active');
-    });
-    var profEl = document.getElementById('page-profile');
-    profEl.style.transform = '';
-    profEl.classList.add('active');
-    if (tg) tg.BackButton.hide();
-    if (window.RewardsUI) RewardsUI.renderProfile();
-    return;
-  }
-
-  if (tab === 'study') {
-    document.querySelectorAll('.page').forEach(function(p) {
-      p.style.transition = 'none';
-      p.style.transform = 'translateX(100%)';
-      p.classList.remove('active');
-    });
-    var studyEl = document.getElementById('page-study');
-    studyEl.style.transform = '';
-    studyEl.classList.add('active');
-    if (tg) tg.BackButton.hide();
-    if (window.Study) Study.open();
-    return;
-  }
-
   if (tab === 'home') {
-    if (window.Study && Study.homeCard) Study.homeCard();
     var homeEl = document.getElementById('page-home');
     // Deactivate ALL pages instantly, then bring home forward cleanly
     document.querySelectorAll('.page').forEach(function(p) {
@@ -6251,11 +6134,5 @@ async function adminDeleteCoupon(id) {
 }
 </script>
 
-<script src="/lecture-picker.js"></script>
-<script src="/study.js"></script>
-<script src="/study-social.js"></script>
-<script src="/rewards-ui.js"></script>
-<script src="/home-ui.js"></script>
-<script src="/admin-ui.js"></script>
 </body>
 </html>

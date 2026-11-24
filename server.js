@@ -1092,7 +1092,7 @@ app.get("/health", (req, res) => res.json({ status: "ok", uptime: process.uptime
 app.get("/api/config", (req, res) => {
   const fj = (process.env.FORCE_JOIN_CHANNELS||"").split(",").map(s=>s.trim()).filter(Boolean);
   const adsFreePlans = getAdsFreePlans();
-  res.json({ ownerId: OWNER_ID, maxActiveVideos: MAX_ACTIVE_VIDEOS, dailyVideoLimit: DAILY_VIDEO_LIMIT, botUsername: BOT_USERNAME||"", forceJoinRequired: fj.length>0, upiId: UPI_ID||"", upiName: UPI_NAME||"", contactLink: CONTACT_LINK||`https://t.me/${BOT_USERNAME}`, paymentProvider: PAYMENT_PROVIDER, razorpayKeyId: RAZORPAY_KEY_ID||"", monetagZoneId: MONETAG_ZONE_ID, adProvider: AD_PROVIDER, adsPaused: ADS_PAUSED, adsgramBlockId: ADSGRAM_BLOCK_ID, adsFreeWeeklyPrice: adsFreePlans.ADSFREEWEEKLY.price, adsFreeMonthlyPrice: adsFreePlans.ADSFREEPLAN.price });
+  res.json({ ownerId: OWNER_ID, botUsername: BOT_USERNAME||"", forceJoinRequired: fj.length>0, upiId: UPI_ID||"", upiName: UPI_NAME||"", contactLink: CONTACT_LINK||`https://t.me/${BOT_USERNAME}`, paymentProvider: PAYMENT_PROVIDER, razorpayKeyId: RAZORPAY_KEY_ID||"", monetagZoneId: MONETAG_ZONE_ID, adProvider: AD_PROVIDER, adsPaused: ADS_PAUSED, adsgramBlockId: ADSGRAM_BLOCK_ID, adsFreeWeeklyPrice: adsFreePlans.ADSFREEWEEKLY.price, adsFreeMonthlyPrice: adsFreePlans.ADSFREEPLAN.price });
 });
 
 // Whether this user currently has an active Ads-Free subscription, and when it
@@ -1270,8 +1270,6 @@ async function initializeBotCommandMenus() {
 }
 const GiveawayInvite = mongoose.model("GiveawayInvite"); // schema lives in routes/course.js, registered at require-time above
 app.use("/api", courseRoutes);
-const studyRoutes = require("./routes/study");
-app.use("/api/study", studyRoutes);
 const autoLectureSession = courseRoutes.autoLectureSession;
 const autoAddLecture = courseRoutes.autoAddLecture;
 const autoSetLectureNotes = courseRoutes.autoSetLectureNotes;
@@ -1797,9 +1795,6 @@ async function startBot() {
   BOT_USERNAME = me.username;
   console.log(`Bot started: @${BOT_USERNAME}`);
   courseRoutes.setBot(bot);
-  courseRoutes.setLimits({ maxActiveVideos: MAX_ACTIVE_VIDEOS, dailyVideoLimit: DAILY_VIDEO_LIMIT, getTodayIST,
-    isOwner: (id) => isOwner(Number(id)), bypassesDailyVideoLimit: (id) => bypassesDailyVideoLimit(id) });
-  studyRoutes.setBot(bot);
   courseRoutes.setGrantAdsFreeAccess(grantAdsFreeAccess);
   courseRoutes.setNotifyFreeAdsFreeGrant(notifyFreeAdsFreeGrant);
   if (courseRoutes.setBotCommandMenuSync) courseRoutes.setBotCommandMenuSync(syncBotCommandMenu);
@@ -1851,13 +1846,6 @@ async function startBot() {
     }
 
     if (param) {
-      // Study group invite: t.me/<bot>?start=grp_<CODE> -> open the Mini App with ?join=<CODE>
-      if (param.startsWith("grp_")) {
-        const code = param.slice(4).replace(/[^A-Za-z0-9]/g, "").slice(0, 16);
-        const joinUrl = `${WEB_URL}${WEB_URL.includes("?") ? "&" : "?"}join=${encodeURIComponent(code)}`;
-        bot.sendMessage(chatId, `Hello ${msg.from.first_name}!\n\nYou have been invited to a Study Group. Tap below to join.`, { reply_markup:{ inline_keyboard:[[{ text:"Join Study Group", web_app:{ url: joinUrl } }]] } });
-        return;
-      }
       if (param.startsWith("ref_")) {
         const referrerId = param.replace("ref_","");
         bot.sendMessage(chatId, `👋 Hello ${msg.from.first_name}!\n\nTap below to browse all lectures! 📚`, { reply_markup:{ inline_keyboard:[[{ text:"📚 Browse Lectures", web_app:{ url:WEB_URL } }]] } });
@@ -3755,13 +3743,8 @@ async function startBot() {
   });
 
   bot.on("polling_error",(err)=>console.error("Polling error:",err.message));
-  const _shutdown = async () => {
-    try { bot.stopPolling(); await studyRoutes.flushAll(); } catch (_) {}   // save running study timers first
-    try { await mongoose.connection.close(); } catch (_) {}
-    process.exit(0);
-  };
-  process.on("SIGTERM", _shutdown);
-  process.on("SIGINT", _shutdown);
+  process.on("SIGTERM",()=>{bot.stopPolling();mongoose.connection.close();process.exit(0);});
+  process.on("SIGINT",()=>{bot.stopPolling();mongoose.connection.close();process.exit(0);});
 }
 
 startBot().catch((err)=>{console.error("Bot startup error:",err.message);process.exit(1);});

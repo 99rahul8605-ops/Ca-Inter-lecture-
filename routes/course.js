@@ -13,13 +13,7 @@ const LOGS_GROUP_ID = process.env.LOGS_GROUP_ID ? parseInt(process.env.LOGS_GROU
 // Set by server.js once the bot is initialized (bot doesn't exist yet at require-time),
 // so giveaway confirmation/reversal notifications can be sent from here.
 let _bot = null;
-let _botUsername = process.env.BOT_USERNAME || "";
-function setBot(botInstance) {
-  _bot = botInstance;
-  if (!_botUsername && botInstance && typeof botInstance.getMe === "function") {
-    botInstance.getMe().then((me) => { _botUsername = me.username || ""; }).catch(() => {});
-  }
-}
+function setBot(botInstance) { _bot = botInstance; }
 // Injected from server.js after grantAdsFreeAccess is defined there (same
 // setter pattern as setBot above) — lets the referral-based Ads-Free reward
 // below reuse the exact same grant logic Razorpay/Paytm/BharatPe purchases
@@ -2053,148 +2047,10 @@ router.post('/coupons/validate', (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-
-// ── Multi-select: send several lectures / notes in ONE go ────────────────────
-// The Mini App lets a student tick many lectures and notes. We resolve each one
-// server-side (so premium rules are enforced here, not trusted from the client),
-// pack the Telegram files into a short-lived bulk batch and return ONE deep link.
-// The bot's existing batch delivery (/start B…) then sends everything, keeping
-// its daily video limit, 6-hour auto-delete and ban checks untouched.
-const MULTI_SEND_MAX_ITEMS = 30;
-
-// The bot limits videos: at most N lecture videos may sit in a chat at once (the next one deletes the oldest
-// immediately) and D videos per day. server.js injects the real values + helpers via setLimits(); these are
-// only safe fallbacks. Notes (documents) are never counted.
-const _lim = {
-  maxActiveVideos: 3, dailyVideoLimit: 10,
-  getTodayIST: () => new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10),
-  isOwner: (id) => Number(id) === OWNER_ID,
-  bypassesDailyVideoLimit: (id) => Number(id) === OWNER_ID,
-};
-function setLimits(l) { Object.assign(_lim, l || {}); }
-const _isVideoRec = (f) => !!f && (f.file_type === 'video' || f.file_type === 'video_note');
-const _multiSendHits = new Map();   // userId -> [timestamps] (rate limit)
-
-// A stored lecture/notes link can be: a bare code ("RbZUHU", the current format), a full t.me deep link,
-// a legacy link that points at an OLD bot name, or a t.me link without "https://". All map to the same code.
-function _parseStartCode(link) {
-  const v = String(link || '').trim();
-  if (!v) return null;
-  if (/^[A-Za-z0-9_-]{4,64}$/.test(v)) return v;                       // bare code
-  try {
-    const u = new URL(/^https?:\/\//i.test(v) ? v : 'https://' + v);
-    const host = u.hostname.toLowerCase().replace(/^www\./, '');
-    if (host !== 't.me' && host !== 'telegram.me') return null;
-    const c = u.searchParams.get('start');
-    return c && /^[A-Za-z0-9_-]{4,64}$/.test(c) ? c : null;
-  } catch (_) { return null; }
-}
-function _findLectureInBatch(batch, lectureId) {
-  for (const s of (batch.subjects || [])) for (const c of (s.chapters || [])) {
-    for (const l of (c.lectures || [])) if (String(l._id) === lectureId) return l;
-    for (const u of (c.units || [])) for (const l of (u.lectures || [])) if (String(l._id) === lectureId) return l;
-  }
-  return null;
-}
-
-router.post('/lectures/send', async (req, res) => {
-  try {
-    const userId = getRequestUserId(req);
-    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
-    if (!_botUsername) return res.status(503).json({ error: 'Bot not ready, try again in a moment' });
-
-    const now = Date.now();
-    const hits = (_multiSendHits.get(userId) || []).filter((t) => now - t < 60000);
-    if (hits.length >= 10) return res.status(429).json({ error: 'Too many requests. Wait a minute.' });
-    hits.push(now); _multiSendHits.set(userId, hits);
-
-    const { batchId, items } = req.body || {};
-    if (!batchId || !Array.isArray(items) || !items.length) return res.status(400).json({ error: 'Nothing selected' });
-    if (items.length > MULTI_SEND_MAX_ITEMS) return res.status(400).json({ error: `Select at most ${MULTI_SEND_MAX_ITEMS} items at once` });
-
-    const batch = db.batch.getOne(String(batchId));
-    if (!batch) return res.status(404).json({ error: 'Batch not found' });
-    const admin = isAdminRequest(req);
-    const entitled = admin || !batch.isPremium || hasPremiumAccess(userId, batch);
-
-    const files = [], skipped = [], external = [], seen = new Set();
-    const pushRecord = (rec) => { const k = rec.id || rec._id || rec.code || rec.file_id; if (k && seen.has(k)) return false; if (k) seen.add(k); files.push(rec); return true; };
-
-    for (const it of items) {
-      const lectureId = String((it && it.lectureId) || '');
-      const type = it && it.type === 'notes' ? 'notes' : 'lecture';
-      const lec = _findLectureInBatch(batch, lectureId);
-      if (!lec) { skipped.push({ lectureId, type, reason: 'not_found' }); continue; }
-      if (lec.comingSoon) { skipped.push({ lectureId, type, reason: 'coming_soon' }); continue; }
-      if (!entitled && !lec.isDemo) { skipped.push({ lectureId, type, reason: 'no_access' }); continue; }
-
-      const link = type === 'notes' ? lec.notes : lec.link;
-      if (!link) { skipped.push({ lectureId, type, reason: 'no_link' }); continue; }
-      const code = _parseStartCode(link);
-      if (!code) {                                  // e.g. a Drive link for notes: can't be sent by the bot
-        if (type === 'notes' && /^https?:\/\//i.test(String(link))) external.push({ lectureId, type, url: String(link) });
-        else skipped.push({ lectureId, type, reason: 'unsupported_link' });
-        continue;
-      }
-      // Same lookup order as the bot: a single stored file first, then (codes starting with "B") a bulk batch.
-      const rec = db.fileRecord.findByCode(code);
-      if (rec) { pushRecord(rec); continue; }
-      const bb = code.charAt(0) === 'B' ? db.bulkBatch.findByCode(code) : null;
-      if (bb && (bb.files || []).length) { bb.files.forEach(pushRecord); continue; }
-      skipped.push({ lectureId, type, reason: 'not_found' });
-    }
-
-    if (skipped.length) console.warn('[lectures/send] user', userId, 'skipped:', JSON.stringify(skipped.slice(0, 10)));
-    if (!files.length) return res.json({ link: null, count: 0, skipped, external });
-
-    // ── Bot video limits (sending more would just get the extras deleted / waste the daily quota) ──
-    const videos = files.filter(_isVideoRec).length;
-    const max = _lim.maxActiveVideos, owner = !!_lim.isOwner(userId);
-    if (videos && !owner && videos > max) {
-      return res.status(400).json({ code: 'too_many_videos', max, videos,
-        error: `Ek time pe max ${max} lecture videos aa sakte hain. Aapne ${videos} videos chune hain, kam karke dobara try karo.` });
-    }
-    let remaining = null;
-    if (videos && !_lim.bypassesDailyVideoLimit(userId)) {
-      const rec = db.dailyVideoLimit.find(Number(userId));
-      const used = rec && rec.resetDate === _lim.getTodayIST() ? rec.count : 0;
-      remaining = Math.max(0, _lim.dailyVideoLimit - used);
-      if (videos > remaining) {
-        return res.status(400).json({ code: 'daily_limit', remaining, videos,
-          error: remaining ? `Aaj sirf ${remaining} video bache hain (roz ${_lim.dailyVideoLimit}). Aapne ${videos} chune hain.`
-                           : `Aaj ki ${_lim.dailyVideoLimit} videos ki limit khatam ho gayi. Kal dobara try karo.` });
-      }
-    }
-    let replaces = 0;                         // how many videos already in the chat would be pushed out
-    if (videos && !owner) {
-      const active = new Set((db.pendingDelete.getByChatId(Number(userId)) || []).map((x) => x.message_id)).size;
-      replaces = Math.max(0, active + videos - max);
-    }
-
-    const batchCode = 'BS' + crypto.randomBytes(7).toString('hex').toUpperCase();
-    db.bulkBatch.create({ id: db.generateId(), batch_code: batchCode, user_id: 'ms_' + userId, files });
-    res.json({ link: `https://t.me/${_botUsername}?start=${batchCode}`, count: files.length, videos, replaces, max,
-      remaining: remaining == null ? null : remaining - videos, skipped, external });
-  } catch (e) {
-    console.error('lectures/send error:', e.message);
-    res.status(500).json({ error: 'Could not prepare your files' });
-  }
-});
-
-// Temporary multi-send batches are only needed for a few minutes: purge after 24h.
-const _multiPurge = setInterval(() => {
-  try { db.getDb().prepare("DELETE FROM bulk_batches WHERE user_id LIKE 'ms_%' AND created_at < ?").run(Date.now() - 24 * 3600 * 1000); }
-  catch (e) { /* table not ready yet — try again next hour */ }
-  const cutoff = Date.now() - 60000;
-  for (const [u, arr] of _multiSendHits) if (!arr.some((t) => t > cutoff)) _multiSendHits.delete(u);
-}, 3600 * 1000);
-if (_multiPurge.unref) _multiPurge.unref();
-
 module.exports = router;
 module.exports.getPointsBreakdown = getPointsBreakdown;
 module.exports.POINTS_PER_REFERRAL = POINTS_PER_REFERRAL;
 module.exports.setBot = setBot;
-module.exports.setLimits = setLimits;
 module.exports.setGrantAdsFreeAccess = setGrantAdsFreeAccess;
 module.exports.setNotifyFreeAdsFreeGrant = setNotifyFreeAdsFreeGrant;
 module.exports.setBotCommandMenuSync = setBotCommandMenuSync;
