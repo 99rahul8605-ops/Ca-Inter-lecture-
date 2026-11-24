@@ -1,0 +1,48 @@
+/* lecture-picker.css : Lectures / Notes big buttons + multi-select sheet (matches the design boards) */
+.lp-wrap{display:flex;flex-direction:column;gap:16px;padding:4px 0 16px}
+.lp-big{display:flex;align-items:center;gap:16px;width:100%;height:108px;padding:0 20px;border:0;border-radius:28px;text-align:left;cursor:pointer;font-family:inherit;box-sizing:border-box}
+.lp-big-lec{background:#17150F;color:#F4F1EA}
+.lp-big-notes{background:#CDEBDD;color:#17150F}
+.lp-ico{width:56px;height:56px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:22px;flex-shrink:0}
+.lp-big-lec .lp-ico{background:var(--lime,#D4F25C);color:#17150F}
+.lp-big-notes .lp-ico{background:#17150F;color:#F4F1EA}
+.lp-txt{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.lp-txt b{font-family:var(--font-head,inherit);font-size:24px;font-weight:800;letter-spacing:-.5px;line-height:1.1}
+.lp-txt small{font-size:13px;font-weight:500}
+.lp-big-lec .lp-txt small{color:#B5AFA2}
+.lp-big-notes .lp-txt small{color:#4A463D}
+.lp-arr{display:none}
+.lp-badge{min-width:30px;height:30px;padding:0 9px;border-radius:15px;background:var(--lime,#D4F25C);color:#17150F;font-weight:800;font-size:14px;display:flex;align-items:center;justify-content:center}
+.lp-big-notes .lp-badge{background:#17150F;color:#F4F1EA}
+
+.lp-sheet{position:fixed;inset:0;z-index:300;display:none}
+.lp-sheet.lp-open{display:block}
+.lp-dim{position:absolute;inset:0;background:rgba(23,21,15,.5)}
+.lp-panel{position:absolute;left:0;right:0;bottom:0;max-width:480px;margin:0 auto;max-height:88vh;display:flex;flex-direction:column;background:var(--bg);color:var(--text);border-radius:32px 32px 0 0;padding:10px 20px calc(20px + var(--tg-safe-bottom,0px));animation:lpUp .22s ease-out}
+@keyframes lpUp{from{transform:translateY(40px);opacity:.4}to{transform:none;opacity:1}}
+.lp-grab{width:40px;height:4px;border-radius:2px;background:#CFC8B6;margin:0 auto 14px}
+.lp-head{display:flex;align-items:center;gap:12px}
+.lp-head>div:first-child{flex:1;min-width:0}
+.lp-title{font-family:var(--font-head,inherit);font-size:24px;font-weight:800;letter-spacing:-.5px;line-height:1.15}
+.lp-sub{font-size:12px;font-weight:600;color:var(--text2);margin-top:2px}
+.lp-x{width:44px;height:44px;border-radius:50%;border:0;background:var(--surface);color:var(--text);font-size:18px;cursor:pointer;flex-shrink:0;display:flex;align-items:center;justify-content:center}
+.lp-quick{display:flex;gap:8px;margin:14px 0}
+.lp-quick button{height:40px;padding:0 16px;border-radius:20px;border:1.5px solid var(--border);background:var(--surface);color:var(--text);font-size:13px;font-weight:700;cursor:pointer;font-family:inherit}
+.lp-quick .lp-ghost{background:transparent;border-color:transparent;color:var(--text2)}
+.lp-grid{flex:1;overflow-y:auto;display:grid;grid-template-columns:1fr 1fr;gap:10px;align-content:start;padding:2px 0 14px;-webkit-overflow-scrolling:touch}
+.lp-card{display:flex;align-items:center;gap:8px;height:56px;padding:0 10px;border-radius:16px;border:1.5px solid var(--border);background:var(--surface);color:var(--text);text-align:left;cursor:pointer;font-family:inherit;min-width:0}
+.lp-no{width:32px;height:32px;border-radius:10px;background:var(--bg);display:flex;align-items:center;justify-content:center;font-family:var(--font-head,inherit);font-weight:800;font-size:14px;flex-shrink:0}
+.lp-nm{flex:1;min-width:0;font-size:12px;font-weight:600;line-height:1.2;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.lp-card.lp-on{background:var(--text);color:var(--bg);border-color:var(--text)}
+.lp-card.lp-on .lp-no{background:var(--lime,#D4F25C);color:#17150F}
+.lp-card.lp-done{background:#E3F2E9;border-color:#E3F2E9;color:#17150F}
+.lp-card.lp-done .lp-no{background:#fff;color:#17150F}
+.lp-dim-ic{color:#2DB863}
+.lp-card.lp-cs{background:transparent;border-style:dashed;color:#8A8578;cursor:default}
+.lp-card.lp-cs .lp-no{background:#EBE6DA;color:#8A8578}
+.lp-card.lp-lock{opacity:.7}
+.lp-foot{padding-top:2px}
+.lp-count{display:none}                                   /* the count is part of the button label */
+.lp-send{display:flex;align-items:center;justify-content:center;gap:10px;width:100%;height:56px;border:0;border-radius:28px;background:#17150F;color:var(--lime,#D4F25C);font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+body:not(.light-mode) .lp-send{background:var(--lime,#D4F25C);color:#17150F}
+.lp-send:disabled{opacity:.45;cursor:default}

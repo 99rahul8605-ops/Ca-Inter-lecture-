@@ -1,0 +1,241 @@
+/* theme-focus.css — "Focus" look (cream / ink / lime). Loaded AFTER the app CSS so it overrides it.
+   To switch the new look off, remove the <link> to this file in index.html. */
+
+/* ── 1. Tokens ─────────────────────────────────────────────────────────────── */
+:root{                                   /* dark = ink + lime */
+  --bg:#0E0D0B;--surface:#17150F;--surface2:#1E1B15;--surface3:#2A2620;
+  --accent:#D4F25C;--accent2:#B7D93F;--on-accent:#17150F;
+  --text:#F4F1EA;--text2:#A8A196;--text3:#6B665B;--border:#2A2620;--topbar:#0E0D0B;
+  --radius:22px;--radius-sm:16px;
+  --ink:#17150F;--lime:#D4F25C;
+  --font-body:'DM Sans',system-ui,-apple-system,'Segoe UI',sans-serif;
+  --font-head:'Bricolage Grotesque','DM Sans',system-ui,sans-serif;
+}
+body.light-mode{                         /* light = cream + ink */
+  --bg:#F4F1EA;--surface:#FFFFFF;--surface2:#FBF9F4;--surface3:#E7E2D6;
+  --accent:#17150F;--accent2:#3A362B;--on-accent:#FFFFFF;
+  --text:#17150F;--text2:#6B665B;--text3:#9A9385;--border:#E1DBCB;--topbar:#F4F1EA;
+}
+body{font-family:var(--font-body)}
+
+/* Text that sits on an accent-coloured background must flip with the theme (lime needs dark text) */
+.toggle-switch input:checked + .toggle-slider,
+.pay-copy-btn,
+.pay-submit-btn,
+.pay-coupon-btn,
+.demo-badge,
+.tab-btn.active,
+.btn-add,
+.countdown-bar-fill,
+.watch-ad-btn,
+.sending-dot,
+.fj-join-btn,
+.fj-verify-btn,
+.vs-scanline,
+.vs-dot,
+.vs-fill,
+.lec-popup-header,
+.popup-lec-btn-watch,
+.lec-num,
+.lec-mini-watch,
+#contactInner,
+[style*="background:var(--accent)"],[style*="background: var(--accent)"],
+[style*="gradient"][style*="var(--accent)"]{color:var(--on-accent)!important}
+
+/* ── 2. Headers, search, topbar ────────────────────────────────────────────── */
+.topbar,.search-wrap,.page-header{background:transparent;border-bottom:0}
+.page-title,.hero-name,.batch-name,.chap-name,.row-name{font-family:var(--font-head)}
+.page-title{font-size:22px;font-weight:800;letter-spacing:-.4px}
+.back-btn,.bell-btn{width:44px;height:44px;background:var(--surface);border:1px solid var(--border)}
+.admin-btn{min-height:40px;padding:0 14px;background:var(--surface);border-radius:20px}
+.search-input{height:48px;padding-left:44px;border-radius:24px;background:var(--surface);border:1.5px solid var(--border);color:var(--text)}
+.search-input:focus{border-color:var(--text)}
+.search-icon{left:16px}
+/* logo tile + subtitle on Home */
+#page-home .topbar>div:first-child>div:first-child{background:var(--lime)!important;color:var(--ink);border-radius:14px!important;width:44px!important;height:44px!important}
+#page-home .topbar>div:first-child>div:first-child i{font-size:22px}
+#page-home .topbar>div:first-child>div:nth-child(2)>div:first-child{font-family:var(--font-head);font-size:20px!important;font-weight:800!important;letter-spacing:-.4px}
+#homeTimerBar{background:var(--surface)!important;border:1px solid var(--border)!important;border-radius:18px;margin:0 16px 6px}
+
+/* ── 3. Free / Premium / Favorites tabs = segmented pills ──────────────────── */
+.batch-tabs{padding:12px 16px 6px}
+.batch-tab{min-height:44px;border:0;border-radius:16px;background:var(--surface3);color:var(--text2);font-weight:700}
+.batch-tab.active-free,.batch-tab.active-premium,.batch-tab.active-favorite{background:var(--text);color:var(--bg);border:0}
+
+/* ── 4. Batch cards = pastel bento tiles ───────────────────────────────────── */
+.batch-grid{gap:12px;padding:10px 16px 20px}
+.batch-card{border:0!important;border-radius:26px;background:#FFD9C2;color:var(--ink)}
+.batch-grid .batch-card:nth-child(4n+2){background:#CDEBDD}
+.batch-grid .batch-card:nth-child(4n+3){background:#DCD6F7}
+.batch-grid .batch-card:nth-child(4n+4){background:#CFE6F5}
+.batch-grid .batch-card:first-child{grid-column:1/-1}                 /* featured tile */
+.batch-img{height:96px;background:rgba(23,21,15,.07);color:var(--ink)}
+.batch-grid .batch-card:first-child .batch-img{height:140px}
+.batch-body{padding:12px 14px 14px}
+.batch-name,body.light-mode .batch-name{font-size:17px;font-weight:800;letter-spacing:-.3px;color:var(--ink)!important}
+.batch-desc,.batch-meta{color:#4A463D!important}
+.batch-card-premium .batch-meta{color:#7A4B00!important}
+.batch-view-btn{background:rgba(23,21,15,.09);border:0;color:var(--ink);min-height:36px}
+.batch-fav-btn{width:32px;height:32px}
+
+/* ── 5. List rows (subjects / chapters / units) ────────────────────────────── */
+.row,.chap-row,.unit-row{border-radius:22px;padding:14px;background:var(--surface)}
+.row-icon{width:44px;height:44px;border-radius:14px}
+.chap-num{width:44px;height:44px;border-radius:14px;font-family:var(--font-head);font-size:17px;font-weight:800;color:var(--ink)}
+.hero-img{border-radius:0 0 28px 28px}
+
+/* ── 6. Bottom navigation = floating dock ──────────────────────────────────── */
+.bottom-nav{left:14px;right:14px;bottom:calc(12px + var(--tg-safe-bottom,0px));max-width:452px;height:64px;padding:0 10px;border:0;border-radius:32px;background:var(--ink);box-shadow:0 12px 32px rgba(0,0,0,.35);align-items:center;justify-content:space-between}
+.nav-tab{flex:0 0 auto;flex-direction:row;justify-content:center;gap:0;height:48px;min-width:48px;padding:0 12px;border-radius:24px;color:#C9C3B6;font-size:0}
+.nav-tab i{font-size:22px}
+.nav-tab.active{background:var(--lime);color:var(--ink);font-size:12px;font-weight:800;gap:6px;padding:0 16px 0 12px}
+.nav-tab .access-dot{top:6px;right:6px}
+.page-body{padding-bottom:calc(104px + var(--tg-safe-bottom,0px))}
+
+/* ── 7. Home "Today's study" card ──────────────────────────────────────────── */
+.hs-card{display:flex;align-items:center;gap:16px;margin:6px 16px 4px;padding:16px 18px;border-radius:28px;background:var(--ink);color:#F4F1EA;cursor:pointer}
+.hs-ring{position:relative;width:76px;height:76px;flex-shrink:0}
+.hs-ring svg{width:100%;height:100%}
+.hs-ring circle{fill:none;stroke-width:10}
+.hs-ring .bg{stroke:#35322A}.hs-ring .fg{stroke:var(--lime);stroke-linecap:round}
+.hs-ring b{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-family:var(--font-head);font-size:18px}
+.hs-txt{flex:1;min-width:0}
+.hs-eyebrow{font-size:11px;font-weight:800;letter-spacing:1px;color:var(--lime)}
+.hs-big{font-family:var(--font-head);font-size:26px;font-weight:800;letter-spacing:-.5px;line-height:1.15}
+.hs-sub{font-size:12px;color:#B5AFA2;margin-top:2px}
+.hs-btn{min-height:44px;padding:0 18px;border:0;border-radius:22px;background:var(--lime);color:var(--ink);font-family:inherit;font-size:14px;font-weight:800;cursor:pointer;flex-shrink:0}
+
+/* chapter progress */
+.chap-bar{height:4px;border-radius:2px;background:var(--surface3);overflow:hidden;margin-top:8px}
+.chap-bar>div{height:100%;border-radius:2px;background:var(--text)}
+
+/* ══ Update: remaining pages ═══════════════════════════════════════════════════ */
+
+/* ── 9. Bottom nav: Home | Study | Rewards | Profile (legacy tabs stay hidden) ── */
+.nav-tab{position:relative}
+.nav-tab[hidden],#navAccess,#navRefer,#navEarn{display:none!important}
+#navRewards .access-dot{position:absolute!important;top:7px;right:7px;margin:0!important}
+
+/* ── 10. Rewards: segmented switch on Access / Refer / Earn ────────────────── */
+.rw-seg{display:flex;gap:4px;margin:4px 16px 8px;padding:4px;border-radius:16px;background:var(--surface3);flex-shrink:0}
+.rw-seg button{flex:1;min-height:40px;border:0;border-radius:12px;background:transparent;color:var(--text2);font-family:inherit;font-size:13px;font-weight:700;cursor:pointer}
+.rw-seg button.on{background:var(--text);color:var(--bg)}
+.card{border-radius:24px}
+[style*="rgba(124,92,191"]{border-color:var(--border)!important}
+
+/* spin wheel */
+.spin-wheel{background:conic-gradient(#FFD9C2 0deg 72deg,#CDEBDD 72deg 144deg,#DCD6F7 144deg 216deg,#CFE6F5 216deg 288deg,#D4F25C 288deg 360deg)!important;border:6px solid var(--ink)}
+.spin-wheel-label{color:var(--ink)!important;text-shadow:none}
+.spin-wheel-pointer{color:var(--text)}
+.spin-wheel-center{background:var(--ink);border-color:var(--ink);color:var(--lime)}
+.spin-btn,.watch-ad-btn{width:100%;min-height:52px;border-radius:26px;background:var(--accent)}
+.spin-status-pill{background:var(--surface3);color:var(--text2)}
+/* access card */
+.access-card{border-radius:28px}
+
+/* ── 11. Profile page ──────────────────────────────────────────────────────── */
+.pf-wrap{padding:8px 16px 16px;display:flex;flex-direction:column;gap:14px}
+.pf-card{display:flex;align-items:center;gap:14px;padding:18px;border-radius:28px;background:var(--ink);color:#F4F1EA}
+.pf-av{width:64px;height:64px;border-radius:50%;background:var(--lime);color:var(--ink);display:flex;align-items:center;justify-content:center;font-family:var(--font-head);font-size:26px;font-weight:800;overflow:hidden;flex-shrink:0}
+.pf-av img{width:100%;height:100%;object-fit:cover}
+.pf-info{min-width:0}
+.pf-name{font-family:var(--font-head);font-size:22px;font-weight:800;letter-spacing:-.4px}
+.pf-sub{font-size:13px;color:#B5AFA2;margin-top:2px}
+.pf-list{display:flex;flex-direction:column;gap:10px}
+.pf-row{display:flex;align-items:center;gap:12px;width:100%;min-height:58px;padding:0 16px;border:1px solid var(--border);border-radius:20px;background:var(--surface);color:var(--text);font-family:inherit;font-size:15px;font-weight:700;text-align:left;cursor:pointer;box-sizing:border-box}
+.pf-row>span{flex:1}
+.pf-row>i:first-child{font-size:20px;color:var(--text2)}
+.pf-arr{color:var(--text3);font-size:18px}
+#pfAdminSlot .admin-btn.visible{width:100%;min-height:58px;padding:0 16px;border:1px solid var(--border);border-radius:20px;background:var(--surface);color:var(--text);font-size:15px;font-weight:700;gap:12px;box-sizing:border-box}
+#pfAdminSlot .admin-btn i{font-size:20px!important;color:var(--text2)}
+
+/* ── 12. Admin panel + forms + popups ──────────────────────────────────────── */
+.modal-overlay{background:rgba(0,0,0,.55)}
+.modal{border-radius:28px 28px 0 0;background:var(--bg);padding:12px 18px 24px}
+.modal-title{font-family:var(--font-head);font-size:22px;font-weight:800;letter-spacing:-.4px;margin-bottom:16px}
+.modal-close{width:44px;height:44px;background:var(--surface3);color:var(--text)}
+#adminModal .tabs{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;overflow:visible;margin-bottom:18px}
+#adminModal .tab-btn{min-height:44px;padding:0 8px;border:0;border-radius:16px;background:var(--surface3);color:var(--text);font-size:12px;font-weight:700;white-space:normal;text-align:center}
+#adminModal .tab-btn.active{background:var(--text);color:var(--bg)}
+#adminModal #adminTabLecture.tab-btn{background:var(--lime);color:var(--ink)}               /* the most used tile */
+#adminModal #adminTabLecture.tab-btn.active{background:var(--ink);color:var(--lime)}
+.form-label{font-weight:700;color:var(--text2)}
+.form-input,.form-select{height:48px;padding:0 14px;border:1.5px solid var(--border);border-radius:14px;background:var(--surface);font-size:15px}
+textarea.form-input{height:auto;padding:12px 14px}
+.form-input:focus,.form-select:focus{border-color:var(--text)}
+.btn-add{min-height:52px;border-radius:26px;font-weight:800}
+.img-preview{border-radius:20px;background:var(--surface)}
+
+/* text that sits on an accent2 background must flip with the theme too */
+.reward-redeem-btn,.reward-pick-row.selected .reward-pick-check,.spin-btn,.unit-icon,
+[style*="background:var(--accent2)"],[style*="background: var(--accent2)"]{color:var(--on-accent)!important}
+
+/* ads paused (moderation mode): Rewards = Refer only */
+body.ads-paused .rw-seg,body.ads-paused .pf-access-row{display:none}
+
+/* hide the floating support button where it covers the Study chat / timers (Profile has "Contact support") */
+body.no-fab #contactBtn{display:none!important}
+
+/* ══ Sub-pages (subjects · chapters · units · lectures): header = small label above a big title ══ */
+.topbar>div[style*="flex:1"]{display:flex;flex-direction:column;gap:2px}
+.topbar-sub{order:-1;font-size:12px;font-weight:600;color:var(--text2)}
+.topbar-title{font-family:var(--font-head);font-size:24px;font-weight:800;letter-spacing:-.5px;line-height:1.1;color:var(--text)}
+#page-chapters .sec-label{display:none}
+.chp-sum{padding:18px 20px;border-radius:26px;background:var(--ink);color:#F4F1EA;margin-bottom:16px}
+.chp-sum-top{display:flex;justify-content:space-between;align-items:baseline;gap:12px}
+.chp-sum-top b{font-family:var(--font-head);font-size:30px;font-weight:800;letter-spacing:-.5px;color:var(--lime)}
+.chp-sum-top span{font-size:12px;font-weight:600;color:#B5AFA2}
+.chp-sum-bar{margin-top:12px;height:6px;border-radius:3px;background:#35322A;overflow:hidden}
+.chp-sum-bar>i{display:block;height:100%;border-radius:3px;background:var(--lime)}
+.chap-name,.row-name{font-size:15px;font-weight:700}
+.chap-sub,.row-sub{font-weight:600}
+.row-icon{color:#17150F;font-size:20px;border:0}
+
+/* ══ Rewards · Spin & Earn (design) ═════════════════════════════════════════════ */
+#page-earn .page-header{align-items:center;gap:12px}
+.rw-head{flex:1;min-width:0}
+.rw-sub{font-size:12px;font-weight:600;color:var(--text2)}
+.rw-h1{margin:0;font-family:var(--font-head);font-size:30px;font-weight:800;letter-spacing:-.5px;line-height:1.1;color:var(--text)}
+.rw-timer{display:flex;align-items:center;gap:6px;height:40px;padding:0 14px;border-radius:20px;background:var(--surface);font-size:13px;font-weight:700;font-variant-numeric:tabular-nums;white-space:nowrap;flex-shrink:0}
+.rw-stack{padding:8px 16px 16px;display:flex;flex-direction:column;gap:16px}
+.sp-card{padding:28px 20px 20px;border-radius:28px;border:0!important}
+body.light-mode .spin-btn{background:var(--ink);color:var(--lime)!important}
+.rw-ad{display:flex;align-items:center;gap:12px;width:100%;height:68px;padding:0 18px;border:0;border-radius:22px;background:#CFE6F5;color:#17150F;font-family:inherit;text-align:left;cursor:pointer}
+.rw-ad i{font-size:24px}
+.rw-ad span{flex:1}
+.rw-ad b{display:block;font-size:15px;font-weight:700}
+.rw-ad small{display:block;font-size:12px;font-weight:500;color:#4A463D}
+.rw-ref{padding:18px;border-radius:26px;background:var(--ink);color:#F4F1EA}
+.rw-ref-t{font-family:var(--font-head);font-size:20px;font-weight:800}
+.rw-ref-s{margin-top:4px;font-size:13px;color:#B5AFA2}
+.rw-ref-row{margin-top:14px;display:flex;gap:10px}
+.rw-ref-code{flex:1;min-width:0;display:flex;align-items:center;height:44px;padding:0 14px;border-radius:14px;border:1px dashed #5A564B;font-size:14px;font-weight:700;letter-spacing:1px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.rw-ref-row button{height:44px;padding:0 20px;border:0;border-radius:22px;background:var(--lime);color:var(--ink);font-family:inherit;font-size:14px;font-weight:700;cursor:pointer}
+
+/* ══ Admin panel = dashboard (design) in front of the existing forms ═════════════ */
+#adminModal .modal-title{display:none}
+#adminModal .tabs{display:none!important}                 /* kept in the DOM: switchTab() toggles it */
+#adminModal.ad-dash .tab-content{display:none!important}
+#adminModal.ad-form #adminDash,#adminModal.ad-dash #adminFormHead{display:none}
+#adminDash{display:flex;flex-direction:column;gap:12px;padding-top:4px}
+.ad-top{display:flex;align-items:center;gap:12px;margin-bottom:4px;padding-right:52px}
+.ad-h1{flex:1;margin:0;font-family:var(--font-head);font-size:28px;font-weight:800;letter-spacing:-.5px}
+.ad-role{padding:7px 14px;border-radius:18px;background:#17150F;color:var(--lime);font-size:12px;font-weight:700}
+.ad-lbl{margin-top:6px;font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--text2)}
+.ad-p{width:36px;height:36px;border-radius:12px;background:rgba(23,21,15,.1);display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:18px;color:#17150F}
+.ad-p-lg{width:44px;height:44px;border-radius:14px;font-size:22px}
+.ad-big{display:flex;align-items:center;gap:12px;width:100%;height:84px;padding:0 16px;border:0;border-radius:22px;background:var(--lime);color:#17150F;text-align:left;font-family:inherit;cursor:pointer}
+.ad-big-t{flex:1;display:flex;flex-direction:column}
+.ad-big-t b{font-size:17px;font-weight:700}
+.ad-big-t small{font-size:12px;font-weight:500;color:#3F4A12}
+.ad-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.ad-k{display:flex;align-items:center;gap:12px;height:76px;padding:0 16px;border:0;border-radius:22px;color:#17150F;font-family:inherit;font-size:15px;font-weight:700;text-align:left;cursor:pointer}
+.ad-rows{display:flex;flex-direction:column;gap:12px}
+.ad-r{display:flex;align-items:center;gap:12px;width:100%;height:60px;padding:0 16px;border:1px solid var(--border);border-radius:20px;background:var(--surface);color:var(--text);font-family:inherit;font-size:15px;font-weight:700;text-align:left;cursor:pointer;box-sizing:border-box}
+.ad-r .ad-p{background:var(--surface3);color:var(--text)}
+.ad-r-t{flex:1}
+.ad-r>i:last-child{color:var(--text3);font-size:18px}
+.ad-head{display:flex;align-items:center;gap:12px;margin:0 0 14px;padding-right:52px}
+.ad-back{width:44px;height:44px;border:0;border-radius:50%;background:var(--surface);color:var(--text);font-size:20px;display:flex;align-items:center;justify-content:center;flex-shrink:0;cursor:pointer}
+.ad-sub{font-size:12px;font-weight:600;color:var(--text2)}
+.ad-h2{margin:0;font-family:var(--font-head);font-size:24px;font-weight:800;letter-spacing:-.5px;line-height:1.1}
