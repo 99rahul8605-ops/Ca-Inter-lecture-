@@ -1084,7 +1084,7 @@ const app = express();
 // is ever exposed directly to the internet (no proxy in front), this should
 // be removed/changed, since trusting X-Forwarded-For without a proxy lets a
 // client spoof its own IP.
-app.set("trust proxy", true);
+app.set("trust proxy", "loopback");
 app.use(express.json({ limit: "10mb", verify: (req, res, buf) => { req.rawBody = buf; } }));
 app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 
@@ -1098,8 +1098,11 @@ app.get("/api/config", (req, res) => {
 // Whether this user currently has an active Ads-Free subscription, and when it
 // expires. Frontend polls/caches this at init to decide whether to skip ads.
 app.get("/api/adsfree/status", (req, res) => {
-  const userId = req.query.userId;
-  if (!userId) return apiErr(res, 400, "MISSING_FIELDS", "userId is required");
+  const user = getVerifiedTelegramCheckoutUser(req);
+  if (!user) return apiErr(res, 401, "UNAUTHORIZED", "Unauthorized");
+  const userId = String(user.id);
+  if (req.query.userId != null && String(req.query.userId) !== userId) return apiErr(res, 403, "USER_MISMATCH", "User mismatch");
+  res.set("Cache-Control", "no-store");
   const status = getAdsFreeStatus(userId);
   return apiOk(res, status, { service: "adsfree" });
 });
@@ -1111,7 +1114,8 @@ app.get("/api/adsfree/status", (req, res) => {
 // automatically (isAdmin short-circuits client-side before this is even
 // called, but it's double-checked here too in case that ever changes).
 app.get("/api/maintenance/status", (req, res) => {
-  const userId = req.query.userId;
+  const user = getVerifiedTelegramCheckoutUser(req);
+  const userId = user ? String(user.id) : null;
   const active = !!db.settings.get("maintenance_mode", false);
   if (!active || (userId && isOwner(Number(userId)))) return apiOk(res, { show: false }, { service: "maintenance" });
   const allowed = db.settings.get("maintenance_allowlist", []);
@@ -1278,12 +1282,21 @@ const autoDeleteLecture = courseRoutes.autoDeleteLecture;
 
 app.post("/api/pay-request", async (req, res) => {
   try {
-    const { batchId, userId, firstName, lastName, username, txnId, screenshotBase64, couponCode, discountPct, finalAmount } = req.body;
+    const tgUser = getVerifiedTelegramCheckoutUser(req);
+    if (!tgUser) return res.status(401).json({ error: 'Unauthorized' });
+    const userId = String(tgUser.id);
+    const firstName = tgUser.first_name || '', lastName = tgUser.last_name || '', username = tgUser.username || '';
+    if (req.body.userId != null && String(req.body.userId) !== userId) return res.status(403).json({ error: 'User mismatch' });
+    const { batchId, txnId, screenshotBase64 } = req.body;
+    let pricing;
+    try { pricing = resolveTrustedCheckoutAmount(batchId, req.body.couponCode); }
+    catch (_) { return res.status(400).json({ error: 'Invalid product or coupon' }); }
+    const { couponCode, discountPct, amount: finalAmount } = pricing;
     if (!batchId || !txnId) return res.status(400).json({ error: "Missing fields" });
     const info = getProductInfo(batchId);
     const batchName = info.name;
     const origPrice = info.price != null ? `₹${info.price}` : "N/A";
-    const expectedAmount = finalAmount != null ? Number(finalAmount) : (info.price != null ? Number(info.price) : null);
+    const expectedAmount = pricing.amount;
     let priceLine = `💰 Amount: <b>${esc(origPrice)}</b>`;
     if (couponCode && discountPct && finalAmount!=null) priceLine = `💰 Original: <b>${esc(origPrice)}</b>\n🎟 Coupon: <code>${esc(couponCode)}</code> (${esc(String(discountPct))}% off)\n✅ Final: <b>₹${esc(String(finalAmount))}</b>`;
     if (!PAYMENT_GROUP_ID) return res.status(500).json({ error: "PAYMENT_GROUP_ID not configured" });
@@ -1324,7 +1337,7 @@ app.post("/api/pay-request", async (req, res) => {
     if (screenshotBase64) { const buf = Buffer.from(screenshotBase64.replace(/^data:image\/\w+;base64,/,""),"base64"); await bot.sendPhoto(PAYMENT_GROUP_ID, buf, { caption, parse_mode:"HTML", filename:`payment_${userId}.jpg`, reply_markup: kb }); }
     else await bot.sendMessage(PAYMENT_GROUP_ID, caption, { parse_mode:"HTML", reply_markup: kb });
     res.json({ success: true, autoApproved: false });
-  } catch (err) { console.error("Payment request error:", err.message); res.status(500).json({ error: err.message }); }
+  } catch (err) { console.error("Payment request error:", err.message); res.status(500).json({ error: "Internal server error" }); }
 });
 
 // ── DevPort-style response envelope ─────────────────────────────────────────────
@@ -1346,9 +1359,18 @@ app.post("/api/paytm/initiate", async (req, res) => {
   try {
     if (PAYMENT_PROVIDER !== "paytm") return apiErr(res, 400, "SERVICE_DISABLED", "Paytm is not the active payment provider");
     if (!PaytmChecksum || !PAYTM_MID || !PAYTM_MERCHANT_KEY) return apiErr(res, 500, "NOT_CONFIGURED", "Paytm not configured (missing PAYTM_MID/PAYTM_MERCHANT_KEY or paytmchecksum package)");
-    const { batchId, userId, firstName, lastName, username, couponCode, discountPct, finalAmount } = req.body;
+    const tgUser = getVerifiedTelegramCheckoutUser(req);
+    if (!tgUser) return res.status(401).json({ error: 'Unauthorized' });
+    const userId = String(tgUser.id);
+    const firstName = tgUser.first_name || '', lastName = tgUser.last_name || '', username = tgUser.username || '';
+    if (req.body.userId != null && String(req.body.userId) !== userId) return res.status(403).json({ error: 'User mismatch' });
+    const { batchId } = req.body;
+    let pricing;
+    try { pricing = resolveTrustedCheckoutAmount(batchId, req.body.couponCode); }
+    catch (_) { return apiErr(res, 400, 'INVALID_AMOUNT', 'Invalid product or coupon'); }
+    const { couponCode, discountPct, amount: finalAmount } = pricing;
     if (!batchId || !userId) return apiErr(res, 400, "MISSING_FIELDS", "batchId and userId are required");
-    const amount = finalAmount != null ? Number(finalAmount) : getProductInfo(batchId).price;
+    const amount = pricing.amount;
     if (!amount || amount <= 0) return apiErr(res, 400, "INVALID_AMOUNT", "Could not determine a valid amount for this batch");
 
     const orderId = `ORD${Date.now()}${Math.floor(Math.random()*1000)}`;
@@ -1358,7 +1380,7 @@ app.post("/api/paytm/initiate", async (req, res) => {
     if (!result.ok) return apiErr(res, 502, "UPSTREAM_ERROR", result.reason === "not_configured" ? "Paytm not configured" : (result.message || `Paytm rejected the request: ${result.reason}`));
 
     return apiOk(res, { orderId, mid: PAYTM_MID, txnToken: result.txnToken, amount, checkoutUrl: `https://${PAYTM_HOST}/theia/api/v1/showPaymentPage` }, { service: "paytm" });
-  } catch (err) { console.error("Paytm initiate error:", err.message); apiErr(res, 500, "INTERNAL_ERROR", err.message); }
+  } catch (err) { console.error("Paytm initiate error:", err.message); apiErr(res, 500, "INTERNAL_ERROR", "Internal server error"); }
 });
 
 // ── Paytm: checkout callback ──────────────────────────────────────────────────
