@@ -4794,7 +4794,7 @@ async function checkForceJoin() {
   try {
     var r = await fetch('/api/force-join/check', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json' , 'x-tg-init-data': tg ? tg.initData : '' },
       body: JSON.stringify({ userId }),
     });
     var data = await r.json();
@@ -4880,7 +4880,7 @@ async function verifyForceJoin() {
   try {
     var r = await fetch('/api/force-join/check', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json' , 'x-tg-init-data': tg ? tg.initData : '' },
       body: JSON.stringify({ userId }),
     });
     var data = await r.json();
