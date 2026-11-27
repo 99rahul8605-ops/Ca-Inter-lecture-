@@ -1826,8 +1826,10 @@ async function getChannelInfo(chatId, botToken) {
 }
 
 router.post('/force-join/check', async (req, res) => {
-  const { userId } = req.body;
-  if (!userId) return res.status(400).json({ error: 'userId required' });
+  const user = getVerifiedWebAppUser(req);
+  if (!user) return res.status(401).json({ error: 'Unauthorized' });
+  const userId = String(user.id);
+  res.set('Cache-Control', 'no-store');
   const channels = getForceJoinChannels();
   if (!channels.length) return res.json({ allJoined: true, channels: [] });
   const BOT_TOKEN = process.env.BOT_TOKEN;
