@@ -120,10 +120,27 @@ function getVerifiedWebAppUser(req) {
     const dataCheckString = Array.from(params.entries()).sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => `${k}=${v}`).join('\n');
     const secretKey = crypto.createHmac('sha256', 'WebAppData').update(BOT_TOKEN).digest();
     const expectedHash = crypto.createHmac('sha256', secretKey).update(dataCheckString).digest('hex');
-    if (expectedHash !== hash) return null;
+    if (!/^[a-f0-9]{64}$/i.test(hash) || !crypto.timingSafeEqual(Buffer.from(expectedHash, 'hex'), Buffer.from(hash, 'hex'))) return null;
+    const authDate = Number(params.get('auth_date'));
+    const now = Math.floor(Date.now()/1000);
+    if (!Number.isFinite(authDate) || authDate < now - 86400 || authDate > now + 300) return null;
     const user = JSON.parse(params.get('user') || '{}');
     return user && user.id ? user : null;
   } catch (e) { return null; }
+}
+
+function requirePersonalUser(req, res, next) {
+  const user = getVerifiedWebAppUser(req);
+  if (!user) return res.status(401).json({ error: 'Unauthorized' });
+  const uid = String(user.id);
+  const claimed = req.params.userId ?? req.body?.userId;
+  if (claimed != null && String(claimed) !== uid) return res.status(403).json({ error: 'User mismatch' });
+  req.tgUser = user;
+  res.set('Cache-Control', 'no-store');
+  next();
+}
+function sanitizeBatchForUser(batch, uid) {
+  return { ...batch, premiumUsers: uid && (batch.premiumUsers || []).includes(String(uid)) ? [String(uid)] : [] };
 }
 
 function verifyOwner(req, res, next) {
@@ -427,11 +444,8 @@ router.get("/batches", async (req, res) => {
     if (admin) return res.json(batches);
 
     const userId = getRequestUserId(req);
-    res.json(batches.map(b => {
-      if (!b.isPremium) return b;
-      return hasPremiumAccess(userId, b) ? b : stripPremiumLinks(b);
-    }));
-  } catch (e) { res.status(500).json({ error: e.message }); }
+    res.json(batches.filter(b => b.isPublic === true).map(b => sanitizeBatchForUser(!b.isPremium || hasPremiumAccess(userId, b) ? b : stripPremiumLinks(b), userId)));
+  } catch (e) { res.status(500).json({ error: 'Internal server error' }); }
 });
 
 router.get("/batches/:bid", async (req, res) => {
@@ -444,11 +458,12 @@ router.get("/batches/:bid", async (req, res) => {
     const b = db.batch.getOne(req.params.bid);
     if (!b) return res.status(404).json({ error: "Not found" });
     if (admin) return res.json(b);
+    if (b.isPublic !== true) return res.status(404).json({ error: 'Not found' });
 
     const userId = getRequestUserId(req);
     const userHasAccess = hasPremiumAccess(userId, b);
-    res.json(b.isPremium && !userHasAccess ? stripPremiumLinks(b) : b);
-  } catch (e) { res.status(500).json({ error: e.message }); }
+    res.json(sanitizeBatchForUser(b.isPremium && !userHasAccess ? stripPremiumLinks(b) : b, userId));
+  } catch (e) { res.status(500).json({ error: 'Internal server error' }); }
 });
 
 router.post("/batches/migrate-publish", verifyAdmin, async (req, res) => {
@@ -458,7 +473,7 @@ router.post("/batches/migrate-publish", verifyAdmin, async (req, res) => {
     const batches = await Batch.find({}).lean();
     for (const b of batches) db.batch.upsert(b);
     res.json({ success: true, updated: result.modifiedCount });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { res.status(500).json({ error: 'Internal server error' }); }
 });
 
 router.post("/batches", verifyAdmin, async (req, res) => {
@@ -468,7 +483,7 @@ router.post("/batches", verifyAdmin, async (req, res) => {
     const batch = await Batch.create({ name: req.body.name, pic: req.body.pic||"", description: req.body.description||"", order: count, isPublic: false, isPremium: req.body.isPremium===true, premiumUsers: [], price: req.body.price ? Number(req.body.price) : 0, rewardEligible: req.body.rewardEligible !== false, redeemCost24h: (req.body.redeemCost24h !== undefined && req.body.redeemCost24h !== null) ? Number(req.body.redeemCost24h) : null, redeemCost7d: (req.body.redeemCost7d !== undefined && req.body.redeemCost7d !== null) ? Number(req.body.redeemCost7d) : null });
     db.batch.upsert(batch.toObject());
     res.json(batch);
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { res.status(500).json({ error: 'Internal server error' }); }
 });
 
 router.patch("/batches/:bid/publish", verifyAdmin, async (req, res) => {
@@ -479,7 +494,7 @@ router.patch("/batches/:bid/publish", verifyAdmin, async (req, res) => {
     await batch.save();
     db.batch.upsert(batch.toObject());
     res.json({ success: true, isPublic: batch.isPublic });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { res.status(500).json({ error: 'Internal server error' }); }
 });
 
 router.delete("/batches/:bid", verifyAdmin, async (req, res) => {
@@ -487,7 +502,7 @@ router.delete("/batches/:bid", verifyAdmin, async (req, res) => {
     await Batch.findByIdAndDelete(req.params.bid);
     db.batch.delete(req.params.bid);
     res.json({ success: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { res.status(500).json({ error: 'Internal server error' }); }
 });
 
 router.patch("/batches/:bid/edit", verifyAdmin, async (req, res) => {
@@ -505,7 +520,7 @@ router.patch("/batches/:bid/edit", verifyAdmin, async (req, res) => {
     await batch.save();
     db.batch.upsert(batch.toObject());
     res.json(batch);
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { res.status(500).json({ error: 'Internal server error' }); }
 });
 
 // ── Premium Users ─────────────────────────────────────────────────────────────
@@ -515,7 +530,7 @@ router.get("/batches/:bid/premium-users", verifyPower('premium'), async (req, re
     const b = db.batch.getOne(req.params.bid);
     if (!b) return res.status(404).json({ error: "Batch not found" });
     res.json({ premiumUsers: b.premiumUsers||[] });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { res.status(500).json({ error: 'Internal server error' }); }
 });
 
 router.post("/batches/:bid/premium-users", verifyPower('premium'), async (req, res) => {
@@ -528,7 +543,7 @@ router.post("/batches/:bid/premium-users", verifyPower('premium'), async (req, r
     if (!batch.premiumUsers.includes(uid)) { batch.premiumUsers.push(uid); await batch.save(); }
     db.batch.upsert(batch.toObject());
     res.json({ success: true, premiumUsers: batch.premiumUsers });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { res.status(500).json({ error: 'Internal server error' }); }
 });
 
 router.delete("/batches/:bid/premium-users/:uid", verifyPower('premium'), async (req, res) => {
@@ -539,10 +554,10 @@ router.delete("/batches/:bid/premium-users/:uid", verifyPower('premium'), async 
     await batch.save();
     db.batch.upsert(batch.toObject());
     res.json({ success: true, premiumUsers: batch.premiumUsers });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { res.status(500).json({ error: 'Internal server error' }); }
 });
 
-router.get("/batches/:bid/premium-check/:userId", async (req, res) => {
+router.get("/batches/:bid/premium-check/:userId", requirePersonalUser, async (req, res) => {
   try {
     const b = db.batch.getOne(req.params.bid);
     if (!b) return res.status(404).json({ error: "Batch not found" });
@@ -556,7 +571,7 @@ router.get("/batches/:bid/premium-check/:userId", async (req, res) => {
       isPermanent,
       rewardAccessExpiresAt: rewardActive ? rewardAccess.expiresAt : null,
     });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { res.status(500).json({ error: 'Internal server error' }); }
 });
 
 // ── Subjects ──────────────────────────────────────────────────────────────────
@@ -569,7 +584,7 @@ router.post("/batches/:bid/subjects", verifyAdmin, async (req, res) => {
     await batch.save();
     db.batch.upsert(batch.toObject());
     res.json(batch);
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { res.status(500).json({ error: 'Internal server error' }); }
 });
 
 router.delete("/batches/:bid/subjects/:sid", verifyAdmin, async (req, res) => {
@@ -580,7 +595,7 @@ router.delete("/batches/:bid/subjects/:sid", verifyAdmin, async (req, res) => {
     await batch.save();
     db.batch.upsert(batch.toObject());
     res.json({ success: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { res.status(500).json({ error: 'Internal server error' }); }
 });
 
 router.patch("/batches/:bid/subjects/:sid/edit", verifyAdmin, async (req, res) => {
@@ -594,7 +609,7 @@ router.patch("/batches/:bid/subjects/:sid/edit", verifyAdmin, async (req, res) =
     await batch.save();
     db.batch.upsert(batch.toObject());
     res.json(batch);
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { res.status(500).json({ error: 'Internal server error' }); }
 });
 
 // Re-arrange a subject's position within the batch — { direction: 'up' | 'down' }
@@ -626,7 +641,7 @@ router.patch("/batches/:bid/subjects/:sid/move", verifyAdmin, async (req, res) =
     await batch.save();
     db.batch.upsert(batch.toObject());
     res.json(batch);
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { res.status(500).json({ error: 'Internal server error' }); }
 });
 
 // Copy an entire subject (with all its chapters + units + lectures) AS-IS into another batch.
@@ -650,7 +665,7 @@ router.post("/batches/:bid/subjects/:sid/copy-to", verifyAdmin, async (req, res)
     await destBatch.save();
     db.batch.upsert(destBatch.toObject());
     res.json({ success: true, batch: destBatch });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { res.status(500).json({ error: 'Internal server error' }); }
 });
 
 // ── Chapters ──────────────────────────────────────────────────────────────────
@@ -664,7 +679,7 @@ router.post("/batches/:bid/subjects/:sid/chapters", verifyAdmin, async (req, res
     await batch.save();
     db.batch.upsert(batch.toObject());
     res.json(batch);
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { res.status(500).json({ error: 'Internal server error' }); }
 });
 
 router.delete("/batches/:bid/subjects/:sid/chapters/:cid", verifyAdmin, async (req, res) => {
@@ -676,7 +691,7 @@ router.delete("/batches/:bid/subjects/:sid/chapters/:cid", verifyAdmin, async (r
     await batch.save();
     db.batch.upsert(batch.toObject());
     res.json({ success: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { res.status(500).json({ error: 'Internal server error' }); }
 });
 
 router.patch("/batches/:bid/subjects/:sid/chapters/:cid/edit", verifyAdmin, async (req, res) => {
@@ -690,7 +705,7 @@ router.patch("/batches/:bid/subjects/:sid/chapters/:cid/edit", verifyAdmin, asyn
     await batch.save();
     db.batch.upsert(batch.toObject());
     res.json(batch);
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { res.status(500).json({ error: 'Internal server error' }); }
 });
 
 // Re-arrange a chapter's position within the subject — { direction: 'up' | 'down' }
@@ -710,7 +725,7 @@ router.patch("/batches/:bid/subjects/:sid/chapters/:cid/move", verifyAdmin, asyn
     await batch.save();
     db.batch.upsert(batch.toObject());
     res.json(batch);
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { res.status(500).json({ error: 'Internal server error' }); }
 });
 
 // Copy a chapter (with all its units + lectures) AS-IS into another batch/subject.
@@ -739,7 +754,7 @@ router.post("/batches/:bid/subjects/:sid/chapters/:cid/copy-to", verifyAdmin, as
     await destBatch.save();
     db.batch.upsert(destBatch.toObject());
     res.json({ success: true, batch: destBatch });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { res.status(500).json({ error: 'Internal server error' }); }
 });
 
 // ── Units ─────────────────────────────────────────────────────────────────────
@@ -754,7 +769,7 @@ router.post("/batches/:bid/subjects/:sid/chapters/:cid/units", verifyAdmin, asyn
     await batch.save();
     db.batch.upsert(batch.toObject());
     res.json(batch);
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { res.status(500).json({ error: 'Internal server error' }); }
 });
 
 router.delete("/batches/:bid/subjects/:sid/chapters/:cid/units/:uid", verifyAdmin, async (req, res) => {
@@ -767,7 +782,7 @@ router.delete("/batches/:bid/subjects/:sid/chapters/:cid/units/:uid", verifyAdmi
     await batch.save();
     db.batch.upsert(batch.toObject());
     res.json({ success: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { res.status(500).json({ error: 'Internal server error' }); }
 });
 
 router.patch("/batches/:bid/subjects/:sid/chapters/:cid/units/:uid/edit", verifyAdmin, async (req, res) => {
@@ -781,7 +796,7 @@ router.patch("/batches/:bid/subjects/:sid/chapters/:cid/units/:uid/edit", verify
     await batch.save();
     db.batch.upsert(batch.toObject());
     res.json(batch);
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { res.status(500).json({ error: 'Internal server error' }); }
 });
 
 // ── Lectures (chapter-level) ──────────────────────────────────────────────────
@@ -796,7 +811,7 @@ router.post("/batches/:bid/subjects/:sid/chapters/:cid/lectures", verifyAdmin, a
     await batch.save();
     db.batch.upsert(batch.toObject());
     res.json(batch);
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { res.status(500).json({ error: 'Internal server error' }); }
 });
 
 router.delete("/batches/:bid/subjects/:sid/chapters/:cid/lectures/:lid", verifyAdmin, async (req, res) => {
@@ -809,7 +824,7 @@ router.delete("/batches/:bid/subjects/:sid/chapters/:cid/lectures/:lid", verifyA
     await batch.save();
     db.batch.upsert(batch.toObject());
     res.json({ success: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { res.status(500).json({ error: 'Internal server error' }); }
 });
 
 router.patch("/batches/:bid/subjects/:sid/chapters/:cid/lectures/:lid/edit", verifyAdmin, async (req, res) => {
@@ -827,7 +842,7 @@ router.patch("/batches/:bid/subjects/:sid/chapters/:cid/lectures/:lid/edit", ver
     await batch.save();
     db.batch.upsert(batch.toObject());
     res.json(batch);
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { res.status(500).json({ error: 'Internal server error' }); }
 });
 
 // Copy a single chapter-level lecture AS-IS into another batch/subject/chapter (or unit).
@@ -858,7 +873,7 @@ router.post("/batches/:bid/subjects/:sid/chapters/:cid/lectures/:lid/copy-to", v
     await destBatch.save();
     db.batch.upsert(destBatch.toObject());
     res.json({ success: true, batch: destBatch });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { res.status(500).json({ error: 'Internal server error' }); }
 });
 
 // ── Lectures (unit-level) ─────────────────────────────────────────────────────
@@ -874,7 +889,7 @@ router.post("/batches/:bid/subjects/:sid/chapters/:cid/units/:uid/lectures", ver
     await batch.save();
     db.batch.upsert(batch.toObject());
     res.json(batch);
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { res.status(500).json({ error: 'Internal server error' }); }
 });
 
 router.delete("/batches/:bid/subjects/:sid/chapters/:cid/units/:uid/lectures/:lid", verifyAdmin, async (req, res) => {
@@ -888,7 +903,7 @@ router.delete("/batches/:bid/subjects/:sid/chapters/:cid/units/:uid/lectures/:li
     await batch.save();
     db.batch.upsert(batch.toObject());
     res.json({ success: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { res.status(500).json({ error: 'Internal server error' }); }
 });
 
 router.patch("/batches/:bid/subjects/:sid/chapters/:cid/units/:uid/lectures/:lid/edit", verifyAdmin, async (req, res) => {
@@ -907,7 +922,7 @@ router.patch("/batches/:bid/subjects/:sid/chapters/:cid/units/:uid/lectures/:lid
     await batch.save();
     db.batch.upsert(batch.toObject());
     res.json(batch);
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { res.status(500).json({ error: 'Internal server error' }); }
 });
 
 // Copy a single unit-level lecture AS-IS into another batch/subject/chapter (or unit).
@@ -939,7 +954,7 @@ router.post("/batches/:bid/subjects/:sid/chapters/:cid/units/:uid/lectures/:lid/
     await destBatch.save();
     db.batch.upsert(destBatch.toObject());
     res.json({ success: true, batch: destBatch });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { res.status(500).json({ error: 'Internal server error' }); }
 });
 
 // ── Announcements ─────────────────────────────────────────────────────────────
@@ -949,7 +964,7 @@ const Announcement = mongoose.model("Announcement", announcementSchema);
 
 router.get("/announcements", (req, res) => {
   try { res.json(db.announcement.getAll()); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { res.status(500).json({ error: 'Internal server error' }); }
 });
 
 router.post("/announcements", verifyPower('announcements'), async (req, res) => {
@@ -960,7 +975,7 @@ router.post("/announcements", verifyPower('announcements'), async (req, res) => 
     const ann = await Announcement.create({ emoji: emoji||"📢", heading, body });
     db.announcement.insert({ id: String(ann._id), emoji: ann.emoji, heading: ann.heading, body: ann.body, createdAt: ann.createdAt });
     res.json({ ...ann.toObject(), _id: String(ann._id) });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { res.status(500).json({ error: 'Internal server error' }); }
 });
 
 router.delete("/announcements/:id", verifyPower('announcements'), async (req, res) => {
@@ -968,7 +983,7 @@ router.delete("/announcements/:id", verifyPower('announcements'), async (req, re
     await Announcement.findByIdAndDelete(req.params.id);
     db.announcement.delete(req.params.id);
     res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { res.status(500).json({ error: 'Internal server error' }); }
 });
 
 // ── Ad Token + Access ─────────────────────────────────────────────────────────
@@ -980,7 +995,7 @@ const AdToken = mongoose.model("AdToken", adTokenSchema);
 const accessSchema = new mongoose.Schema({ userId: { type: String, required: true, unique: true }, expiresAt: { type: Date, required: true }, claimsToday: { type: Number, default: 0 }, claimDay: { type: String, default: '' } });
 const Access = mongoose.model("Access", accessSchema);
 
-router.get("/access/:userId", (req, res) => {
+router.get("/access/:userId", requirePersonalUser, (req, res) => {
   try {
     const record = db.access.findOne(req.params.userId);
     const today = new Date().toISOString().slice(0, 10);
@@ -988,10 +1003,10 @@ router.get("/access/:userId", (req, res) => {
     const claimsLeft = Math.max(0, 3 - claimsToday);
     if (!record || record.expiresAt < new Date()) return res.json({ hasAccess: false, expiresAt: null, claimsToday, claimsLeft });
     res.json({ hasAccess: true, expiresAt: record.expiresAt, claimsToday, claimsLeft });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { res.status(500).json({ error: 'Internal server error' }); }
 });
 
-router.post("/access/token/:userId", async (req, res) => {
+router.post("/access/token/:userId", requirePersonalUser, async (req, res) => {
   try {
     const userId = req.params.userId;
     const today = new Date().toISOString().slice(0, 10);
@@ -1009,10 +1024,10 @@ router.post("/access/token/:userId", async (req, res) => {
     // MongoDB backup
     AdToken.create({ userId, token, expiresAt: tokenExpiry }).catch(() => {});
     res.json({ token, claimsToday, claimsLeft: 3 - claimsToday });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { res.status(500).json({ error: 'Internal server error' }); }
 });
 
-router.post("/access/claim/:userId", async (req, res) => {
+router.post("/access/claim/:userId", requirePersonalUser, async (req, res) => {
   try {
     const userId = req.params.userId;
     const { token } = req.body;
@@ -1040,7 +1055,7 @@ router.post("/access/claim/:userId", async (req, res) => {
     // MongoDB backup
     Access.findOneAndUpdate({ userId }, { userId, expiresAt, claimsToday: newClaimsToday, claimDay: today }, { upsert: true }).catch(() => {});
     res.json({ hasAccess: true, expiresAt, claimsToday: newClaimsToday, claimsLeft: 3 - newClaimsToday });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { res.status(500).json({ error: 'Internal server error' }); }
 });
 
 // ── Referrals ─────────────────────────────────────────────────────────────────
@@ -1050,41 +1065,15 @@ referralSchema.index({ referrerId: 1 });
 referralSchema.index({ referredId: 1 }, { unique: true });
 const Referral = mongoose.model('Referral', referralSchema);
 
-router.get('/refer/stats/:userId', (req, res) => {
+router.get('/refer/stats/:userId', requirePersonalUser, (req, res) => {
   try {
     const { referrals, spent, points } = getPointsBreakdown(req.params.userId);
     res.json({ referrals, spent, points });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { res.status(500).json({ error: 'Internal server error' }); }
 });
 
-router.post('/refer/record', async (req, res) => {
-  try {
-    const { referrerId, referredId } = req.body;
-    if (!referrerId || !referredId) return res.status(400).json({ error: 'Missing fields' });
-    if (referrerId === referredId) return res.status(400).json({ error: 'Cannot refer yourself' });
-    if (!req.body.isNewUser) return res.json({ success: false, isNew: false, reason: 'Not a new user' });
-
-    const existing = db.referral.findByReferred(referredId);
-    if (existing) return res.json({ success: false, isNew: false, reason: 'Already referred' });
-
-    const id = db.generateId();
-    db.referral.insert({ id, referrerId, referredId });
-    // MongoDB backup
-    Referral.create({ referrerId, referredId }).catch(() => {});
-
-    if (LOGS_GROUP_ID && _bot) {
-      const text = `🎉 <b>New Referral</b>\n\n` +
-        `👤 Referrer: ${esc(formatUserLabel(referrerId))} (<code>${referrerId}</code>)\n` +
-        `➕ Referred: ${esc(formatUserLabel(referredId))} (<code>${referredId}</code>)\n` +
-        `🕐 ${formatIST(new Date())}`;
-      _bot.sendMessage(LOGS_GROUP_ID, text, { parse_mode: "HTML" }).catch(() => {});
-    }
-
-    res.json({ success: true, isNew: true });
-  } catch (e) {
-    if (e.code === 11000) return res.json({ success: false, reason: 'Already referred' });
-    res.status(500).json({ error: e.message });
-  }
+router.post('/refer/record', requirePersonalUser, async (req, res) => {
+  return res.status(403).json({ success: false, reason: 'Use the Telegram bot referral link' });
 });
 
 // ── Rewards (spend referral points on real perks) ──────────────────────────────
@@ -1212,7 +1201,7 @@ function notifyOwnerOfRedemption({ userId, rewardType, catalogEntry, batchDoc, p
 }
 
 // GET summary — powers the Rewards page header (points balance + active perks)
-router.get('/rewards/summary/:userId', (req, res) => {
+router.get('/rewards/summary/:userId', requirePersonalUser, (req, res) => {
   try {
     const userId = req.params.userId;
     const { referrals, spent, points } = getPointsBreakdown(userId);
@@ -1238,12 +1227,12 @@ router.get('/rewards/summary/:userId', (req, res) => {
     };
 
     res.json({ referrals, spent, points, accessPass, activeBatchRewards, referralAdsFree, catalog: REWARD_CATALOG });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { res.status(500).json({ error: 'Internal server error' }); }
 });
 
 // POST — redeem one "5 referrals -> 1 week Ads-Free" reward. Pure referral-
 // count based, costs zero points (separate from REWARD_CATALOG/points above).
-router.post('/rewards/redeem-referral-adsfree', async (req, res) => {
+router.post('/rewards/redeem-referral-adsfree', requirePersonalUser, async (req, res) => {
   try {
     const { userId } = req.body;
     if (!userId) return res.status(400).json({ error: 'userId required' });
@@ -1292,12 +1281,12 @@ router.post('/rewards/redeem-referral-adsfree', async (req, res) => {
     });
 
     res.json({ success: true, redemptionId: id, rewardType: 'referralAdsFree', daysGranted: REFERRAL_ADSFREE_DAYS, adsFreeExpiresAt: expiresAt, referrals });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { res.status(500).json({ error: 'Internal server error' }); }
 });
 
 // GET eligible batches — the picker list shown when redeeming a batch-based reward.
 // Excludes batches the user already permanently owns (no point wasting points on those).
-router.get('/rewards/eligible-batches/:userId', (req, res) => {
+router.get('/rewards/eligible-batches/:userId', requirePersonalUser, (req, res) => {
   try {
     const userId = req.params.userId;
     const all = db.batch.getAll();
@@ -1319,11 +1308,11 @@ router.get('/rewards/eligible-batches/:userId', (req, res) => {
         };
       });
     res.json({ batches: eligible });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { res.status(500).json({ error: 'Internal server error' }); }
 });
 
 // POST redeem — the actual "spend points" action
-router.post('/rewards/redeem', async (req, res) => {
+router.post('/rewards/redeem', requirePersonalUser, async (req, res) => {
   try {
     const { userId, rewardType, batchId } = req.body;
     if (!userId) return res.status(400).json({ error: 'userId required' });
@@ -1419,16 +1408,16 @@ router.post('/rewards/redeem', async (req, res) => {
       batchId: batchDoc ? String(batchId) : null,
       batchName: batchDoc ? batchDoc.name : null,
     });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { res.status(500).json({ error: 'Internal server error' }); }
 });
 
 // GET redemption history — powers a "My Redeemed Rewards" list in the UI
-router.get('/rewards/history/:userId', (req, res) => {
+router.get('/rewards/history/:userId', requirePersonalUser, (req, res) => {
   try {
     const limit = Math.min(50, parseInt(req.query.limit) || 20);
     const history = db.rewardRedemption.history(req.params.userId, limit);
     res.json({ history });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { res.status(500).json({ error: 'Internal server error' }); }
 });
 
 // ── Spin & Earn ───────────────────────────────────────────────────────────────
@@ -1473,13 +1462,13 @@ function getSpinStatus(userId) {
 }
 
 // GET status — powers the Earn tab's UI (spins left, cooldown countdown, spin button enabled/disabled)
-router.get('/spin/status/:userId', (req, res) => {
+router.get('/spin/status/:userId', requirePersonalUser, (req, res) => {
   try { res.json(getSpinStatus(req.params.userId)); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { res.status(500).json({ error: 'Internal server error' }); }
 });
 
 // POST token — issued right before the ad plays; must be redeemed via /spin/claim afterwards
-router.post('/spin/token/:userId', (req, res) => {
+router.post('/spin/token/:userId', requirePersonalUser, (req, res) => {
   try {
     const userId = req.params.userId;
     const status = getSpinStatus(userId);
@@ -1496,13 +1485,13 @@ router.post('/spin/token/:userId', (req, res) => {
     db.spinToken.create({ id: db.generateId(), userId, token, issuedAt, expiresAt });
 
     res.json({ token });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { res.status(500).json({ error: 'Internal server error' }); }
 });
 
 // POST claim — verifies the ad was actually watched (min elapsed time, same as access/claim),
 // re-checks the daily limit + cooldown fresh (defends against races/stale client state),
 // then rolls the wheel server-side and records the spin.
-router.post('/spin/claim/:userId', (req, res) => {
+router.post('/spin/claim/:userId', requirePersonalUser, (req, res) => {
   try {
     const userId = req.params.userId;
     const { token } = req.body;
@@ -1535,7 +1524,7 @@ router.post('/spin/claim/:userId', (req, res) => {
 
     const newStatus = getSpinStatus(userId);
     res.json({ pointsWon, ...newStatus });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { res.status(500).json({ error: 'Internal server error' }); }
 });
 
 // ── Watched Lectures ────────────────────────────────────────────────────────────
@@ -1733,7 +1722,7 @@ router.get('/banned/me', (req, res) => {
     if (!userId) return res.json({ banned: false });
     const banned = db.bannedUser.isBanned(userId);
     res.json({ banned });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { res.status(500).json({ error: 'Internal server error' }); }
 });
 
 // GET — is the current user exempt from the ad-blocker hard-block gate?
@@ -1744,19 +1733,19 @@ router.get('/adblock-exempt/me', (req, res) => {
     const userId = getRequestUserId(req);
     if (!userId) return res.json({ exempt: false });
     res.json({ exempt: db.adblockExempt.isExempt(userId) });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { res.status(500).json({ error: 'Internal server error' }); }
 });
 
 // GET — full list of lectureIds this user has marked watched
-router.get('/watched/:userId', (req, res) => {
+router.get('/watched/:userId', requirePersonalUser, (req, res) => {
   try {
     const watched = db.watchedLecture.listByUser(req.params.userId);
     res.json({ watched });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { res.status(500).json({ error: 'Internal server error' }); }
 });
 
 // POST — mark or unmark a single lecture as watched
-router.post('/watched/:userId', (req, res) => {
+router.post('/watched/:userId', requirePersonalUser, (req, res) => {
   try {
     const userId = req.params.userId;
     const { lectureId, watched } = req.body;
@@ -1772,12 +1761,12 @@ router.post('/watched/:userId', (req, res) => {
       if (!hadWatchedBefore) confirmGiveawayInviteOnFirstWatch(userId);
     }
     res.json({ success: true, lectureId, watched: watched !== false });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { res.status(500).json({ error: 'Internal server error' }); }
 });
 
 // GET — giveaway status for the webapp: whether one is live, and if this user
 // is participating, their invite count/rank (mirrors the bot's /myscore).
-router.get('/giveaway/status/:userId', async (req, res) => {
+router.get('/giveaway/status/:userId', requirePersonalUser, async (req, res) => {
   try {
     const Giveaway = mongoose.model('Giveaway');
     const GiveawayParticipant = mongoose.model('GiveawayParticipant');
@@ -1788,7 +1777,7 @@ router.get('/giveaway/status/:userId', async (req, res) => {
     if (!participant) return res.json({ active: true, participating: false, giveawayId: String(giveaway._id) });
     const higher = await GiveawayParticipant.countDocuments({ giveawayId: giveaway._id, $or: [ { invites: { $gt: participant.invites } }, { invites: participant.invites, joinedAt: { $lt: participant.joinedAt } } ] });
     res.json({ active: true, participating: true, invites: participant.invites, rank: higher + 1, giveawayId: String(giveaway._id) });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { res.status(500).json({ error: 'Internal server error' }); }
 });
 
 // ── Force Join ────────────────────────────────────────────────────────────────
@@ -1917,7 +1906,7 @@ router.post('/auto-lecture/start', verifyPower('autoLecture'), async (req, res) 
     Object.assign(autoLectureSession, { active: true, batchId, subjectId, chapterId, unitId: unitId||null, lectureCount: existingCount, batchName: batchName||'', subjectName: subjectName||'', chapterName: chapterName||'', unitName: unitName||'', lastLectureId: null, lastActionType: null });
     await _saveAutoSession();
     res.json({ success: true, session: autoLectureSession });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { res.status(500).json({ error: 'Internal server error' }); }
 });
 
 router.post('/auto-lecture/stop', verifyPower('autoLecture'), async (req, res) => {
@@ -2034,7 +2023,7 @@ function buildStatsSnapshot() {
 
 router.get('/stats', verifyPower('viewStats'), (req, res) => {
   try { res.json(buildStatsSnapshot()); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { res.status(500).json({ error: 'Internal server error' }); }
 });
 
 
@@ -2045,7 +2034,7 @@ const Coupon = mongoose.model('Coupon', couponSchema);
 
 router.get('/coupons', verifyPower('coupons'), (req, res) => {
   try { res.json(db.coupon.getAll()); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { res.status(500).json({ error: 'Internal server error' }); }
 });
 
 router.post('/coupons', verifyPower('coupons'), async (req, res) => {
@@ -2058,7 +2047,7 @@ router.post('/coupons', verifyPower('coupons'), async (req, res) => {
     res.json(db.coupon.findById(String(c._id)));
   } catch (e) {
     if (e.code === 11000) return res.status(400).json({ error: 'Coupon code already exists' });
-    res.status(500).json({ error: e.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -2067,7 +2056,7 @@ router.delete('/coupons/:id', verifyPower('coupons'), async (req, res) => {
     await Coupon.findByIdAndDelete(req.params.id);
     db.coupon.delete(req.params.id);
     res.json({ success: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { res.status(500).json({ error: 'Internal server error' }); }
 });
 
 router.patch('/coupons/:id/toggle', verifyPower('coupons'), async (req, res) => {
@@ -2077,10 +2066,10 @@ router.patch('/coupons/:id/toggle', verifyPower('coupons'), async (req, res) => 
     // MongoDB backup
     Coupon.findByIdAndUpdate(req.params.id, { isActive: c.isActive }).catch(() => {});
     res.json(c);
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { res.status(500).json({ error: 'Internal server error' }); }
 });
 
-router.post('/coupons/validate', (req, res) => {
+router.post('/coupons/validate', requirePersonalUser, (req, res) => {
   try {
     const { code, batchId } = req.body;
     if (!code) return res.status(400).json({ error: 'code required' });
@@ -2092,7 +2081,7 @@ router.post('/coupons/validate', (req, res) => {
       if (!batchId || !coupon.batchIds.includes(String(batchId))) return res.status(400).json({ error: 'This coupon is not valid for this batch' });
     }
     res.json({ valid: true, discountPct: coupon.discountPct, code: coupon.code });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { res.status(500).json({ error: 'Internal server error' }); }
 });
 
 module.exports = router;
