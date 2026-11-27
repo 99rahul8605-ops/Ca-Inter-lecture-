@@ -1816,14 +1816,8 @@ async function getChannelInfo(chatId, botToken) {
     const chat = chatData.ok ? chatData.result : null;
     const title = chat ? (chat.title||chat.first_name||'') : '';
     const username = chat ? (chat.username||'') : '';
-    let photoUrl = null;
-    if (chat && chat.photo && chat.photo.small_file_id) {
-      try {
-        const fileRes = await fetch(`https://api.telegram.org/bot${botToken}/getFile?file_id=${encodeURIComponent(chat.photo.small_file_id)}`);
-        const fileData = await fileRes.json();
-        if (fileData.ok && fileData.result && fileData.result.file_path) photoUrl = `https://api.telegram.org/file/bot${botToken}/${fileData.result.file_path}`;
-      } catch (_) {}
-    }
+    // Never expose Telegram file URLs: they contain the bot credential.
+    const photoUrl = null;
     const redirectLink = username ? `https://t.me/${username}` : (chat && chat.invite_link ? chat.invite_link : null);
     const info = { title, username, photoUrl, redirectLink, cachedAt: now };
     _channelInfoCache.set(chatId, info);
@@ -1845,7 +1839,7 @@ router.post('/force-join/check', async (req, res) => {
     ]);
     const status = memberData.result && memberData.result.status;
     const joined = ['member','administrator','creator'].includes(status);
-    return { id: ch.id, name: ch.name !== ('Channel '+(channels.indexOf(ch)+1)) ? ch.name : (info.title||ch.name), link: ch.link||info.redirectLink||null, photoUrl: info.photoUrl||null, joined, status: status||'not_member' };
+    return { id: ch.id, name: ch.name !== ('Channel '+(channels.indexOf(ch)+1)) ? ch.name : (info.title||ch.name), link: ch.link||info.redirectLink||null, photoUrl: null, joined, status: status||'not_member' };
   }));
   res.json({ allJoined: results.every(c => c.joined), channels: results });
 });
