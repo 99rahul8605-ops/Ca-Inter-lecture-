@@ -1081,6 +1081,15 @@ body.ready{transition:none}
 <div class="toast" id="toast"></div>
 
 <script>
+function securePersonalFetch(url, options) {
+  var opts = Object.assign({}, options || {});
+  var headers = new Headers(opts.headers || {});
+  var webApp = window.Telegram && window.Telegram.WebApp;
+  if (webApp && webApp.initData) headers.set('x-tg-init-data', webApp.initData);
+  opts.headers = headers;
+  return fetch(url, opts);
+}
+
 var tg = window.Telegram && window.Telegram.WebApp;
 if (tg) {
   tg.ready();
@@ -1636,7 +1645,7 @@ async function loadRewardsSummary() {
   var uid = getUserId();
   if (!uid) return;
   try {
-    var r = await fetch('/api/rewards/summary/' + uid);
+    var r = await securePersonalFetch('/api/rewards/summary/' + uid);
     var data = await r.json();
     if (!r.ok) throw new Error(data.error || 'Failed to load rewards');
     rewardsSummary = data;
@@ -1747,7 +1756,7 @@ async function redeemReferralAdsFree() {
   var uid = getUserId();
   if (!uid) return;
   try {
-    var r = await fetch('/api/rewards/redeem-referral-adsfree', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ userId: uid }) });
+    var r = await securePersonalFetch('/api/rewards/redeem-referral-adsfree', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ userId: uid }) });
     var d = await r.json();
     if (!d.success) { toast(d.error || 'Redeem failed', 'error'); return; }
     toast('✨ ' + d.daysGranted + ' din ka Ads-Free mil gaya! 🎉', 'success');
@@ -1801,7 +1810,7 @@ async function openRewardModal(rewardType) {
   if (rewardType === 'batch24h' || rewardType === 'batch7d') {
     var uid = getUserId();
     try {
-      var r = await fetch('/api/rewards/eligible-batches/' + uid);
+      var r = await securePersonalFetch('/api/rewards/eligible-batches/' + uid);
       var data = await r.json();
       _rewardEligibleBatches = data.batches || [];
     } catch(e) {
@@ -1923,7 +1932,7 @@ async function confirmRedeem() {
     // Raw fetch (not apiFetch) so we can parse the server's clean {error:"..."}
     // JSON message ourselves — apiFetch's error path throws the raw response
     // text instead, which would show ugly unparsed JSON in the toast.
-    var res = await fetch('/api/rewards/redeem', {
+    var res = await securePersonalFetch('/api/rewards/redeem', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
@@ -1965,7 +1974,7 @@ async function openRewardHistory() {
   var uid = getUserId();
   if (!uid) return;
   try {
-    var r = await fetch('/api/rewards/history/' + uid);
+    var r = await securePersonalFetch('/api/rewards/history/' + uid);
     var data = await r.json();
     var history = data.history || [];
     if (!history.length) {
@@ -2005,7 +2014,7 @@ async function loadSpinStatus() {
   var uid = getUserId();
   if (!uid) return;
   try {
-    var r = await fetch('/api/spin/status/' + uid);
+    var r = await securePersonalFetch('/api/spin/status/' + uid);
     var data = await r.json();
     if (!r.ok) throw new Error(data.error || 'Failed to load spin status');
     spinStatus = data;
@@ -2098,7 +2107,7 @@ async function startSpin() {
 
   // 1. Get a fresh spin token
   try {
-    var r = await fetch('/api/spin/token/' + uid, { method: 'POST' });
+    var r = await securePersonalFetch('/api/spin/token/' + uid, { method: 'POST' });
     var data = await r.json();
     if (!r.ok) throw new Error(data.error || 'Could not start spin');
     _spinToken = data.token;
@@ -2154,7 +2163,7 @@ async function startSpin() {
   if (btn) btn.innerHTML = '<i class="ti ti-loader-2" style="animation:spin 0.8s linear infinite;display:inline-block"></i> Spinning...';
 
   try {
-    var r2 = await fetch('/api/spin/claim/' + uid, {
+    var r2 = await securePersonalFetch('/api/spin/claim/' + uid, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ token: _spinToken }),
@@ -3447,7 +3456,7 @@ async function applyCoupon() {
   btn.disabled = true; btn.textContent = '...';
   cs.className = 'pay-coupon-status'; cs.textContent = '';
   try {
-    var r = await fetch('/api/coupons/validate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code, batchId: _payBatchId }) });
+    var r = await securePersonalFetch('/api/coupons/validate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code, batchId: _payBatchId }) });
     var d = await r.json();
     if (!r.ok) {
       _payAppliedCoupon = null;
@@ -3482,7 +3491,7 @@ async function applyCouponPaytm() {
   btn.disabled = true; btn.textContent = '...';
   cs.className = 'pay-coupon-status'; cs.textContent = '';
   try {
-    var r = await fetch('/api/coupons/validate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code, batchId: _payBatchId }) });
+    var r = await securePersonalFetch('/api/coupons/validate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code, batchId: _payBatchId }) });
     var d = await r.json();
     if (!r.ok) {
       _payAppliedCoupon = null;
@@ -3527,7 +3536,7 @@ async function payWithPaytm() {
       discountPct: _payAppliedCoupon ? _payAppliedCoupon.discountPct : null,
       finalAmount: _payAppliedCoupon ? _payAppliedCoupon.finalAmount : null,
     };
-    var r = await fetch('/api/paytm/initiate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+    var r = await securePersonalFetch('/api/paytm/initiate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
     var d = await r.json();
     if (!d.success) throw new Error((d.error && d.error.message) || 'Could not start checkout');
     var data = d.data;
@@ -3557,7 +3566,7 @@ async function applyCouponRazorpay() {
   btn.disabled = true; btn.textContent = '...';
   cs.className = 'pay-coupon-status'; cs.textContent = '';
   try {
-    var r = await fetch('/api/coupons/validate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code, batchId: _payBatchId }) });
+    var r = await securePersonalFetch('/api/coupons/validate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code, batchId: _payBatchId }) });
     var d = await r.json();
     if (!r.ok) {
       _payAppliedCoupon = null;
@@ -3774,7 +3783,7 @@ async function submitPayment() {
       discountPct: _payAppliedCoupon ? _payAppliedCoupon.discountPct : null,
       finalAmount: _payAppliedCoupon ? _payAppliedCoupon.finalAmount : null,
     };
-    var r = await fetch('/api/pay-request', {
+    var r = await securePersonalFetch('/api/pay-request', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
@@ -4046,7 +4055,7 @@ async function _loadWatchedLectures() {
   var uid = getUserId();
   if (!uid) return;
   try {
-    var r = await fetch('/api/watched/' + uid);
+    var r = await securePersonalFetch('/api/watched/' + uid);
     var data = await r.json();
     if (!r.ok) throw new Error(data.error || 'Failed to load watched lectures');
     _watchedLectures = {};
@@ -4081,7 +4090,7 @@ function isLectureWatched(lid) {
 function _syncWatchedToServer(lid, watched) {
   var uid = getUserId();
   if (!uid) return;
-  fetch('/api/watched/' + uid, {
+  securePersonalFetch('/api/watched/' + uid, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ lectureId: lid, watched: watched }),
@@ -4227,7 +4236,7 @@ function hasAccess() {
 // batches, via the ADS_FREE_PLAN_IDS sentinel "batchId"s.
 async function loadAdsFreeStatus() {
   try {
-    var r = await fetch('/api/adsfree/status?userId=' + encodeURIComponent(getUserId()));
+    var r = await securePersonalFetch('/api/adsfree/status?userId=' + encodeURIComponent(getUserId()));
     var d = await r.json();
     if (d.success) {
       window._adsFreeActive = !!d.data.active;
@@ -4353,7 +4362,7 @@ async function loadAccess() {
   // Verify with server in background
   try {
     userId = getUserId();
-    var r = await fetch('/api/access/' + userId);
+    var r = await securePersonalFetch('/api/access/' + userId);
     var data = await r.json();
     if (typeof data.claimsToday === 'number') claimsToday = data.claimsToday;
     if (data.hasAccess && data.expiresAt) {
@@ -4369,7 +4378,7 @@ async function loadAccess() {
 async function grantAccessDB() {
   try {
     userId = getUserId();
-    var r = await fetch('/api/access/' + userId, { method: 'POST' });
+    var r = await securePersonalFetch('/api/access/' + userId, { method: 'POST' });
     var data = await r.json();
     if (data.expiresAt) accessExpiresAt = data.expiresAt;
   } catch(e) {}
@@ -4631,7 +4640,7 @@ async function watchAd() {
   // Get one-time token from server
   try {
     userId = getUserId();
-    var r = await fetch('/api/access/token/' + userId, { method: 'POST' });
+    var r = await securePersonalFetch('/api/access/token/' + userId, { method: 'POST' });
     var data = await r.json();
     if (typeof data.claimsToday === 'number') claimsToday = data.claimsToday;
     if (!data.token) throw new Error(data.error || 'No token');
@@ -4716,7 +4725,7 @@ async function claimAccess() {
   try {
     userId = getUserId();
     // Send claim request to server with token
-    var r = await fetch('/api/access/claim/' + userId, {
+    var r = await securePersonalFetch('/api/access/claim/' + userId, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ token: _adToken })
@@ -5742,7 +5751,7 @@ async function loadReferStats() {
 
   // Fetch stats from server
   try {
-    var r = await fetch('/api/refer/stats/' + uid);
+    var r = await securePersonalFetch('/api/refer/stats/' + uid);
     var data = await r.json();
     if (!r.ok) throw new Error(data.error || 'Failed to load stats');
     var countEl = document.getElementById('referCount');
@@ -5794,7 +5803,7 @@ async function loadGiveawayStatus() {
   var referCard = document.getElementById('referLinkCard');
   if (!uid || !card) return;
   try {
-    var r = await fetch('/api/giveaway/status/' + uid);
+    var r = await securePersonalFetch('/api/giveaway/status/' + uid);
     var data = await r.json();
     if (!data.active) { card.style.display = 'none'; if (referCard) referCard.style.display = ''; return; }
     card.style.display = '';
@@ -5875,7 +5884,7 @@ async function maybeShowGiveawayAd() {
   var uid = getUserId();
   if (!uid) return false;
   try {
-    var r = await fetch('/api/giveaway/status/' + uid);
+    var r = await securePersonalFetch('/api/giveaway/status/' + uid);
     var data = await r.json();
     if (!data.active || data.participating || !data.giveawayId) return false;
     var dismissKey = 'giveawayAdDismissed_' + data.giveawayId;
