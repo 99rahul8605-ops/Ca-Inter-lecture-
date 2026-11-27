@@ -1805,6 +1805,58 @@ router.get('/force-join/channels', (req, res) => {
   res.json({ channels, required: channels.length > 0 });
 });
 
+// Only configured force-join channels may have their photos served.
+const _channelPhotoCache = new Map();
+const _channelPhotoPending = new Map();
+async function loadChannelPhoto(chatId) {
+  const cached = _channelPhotoCache.get(chatId);
+  if (cached && cached.expires > Date.now()) return cached.bytes;
+  if (_channelPhotoPending.has(chatId)) return _channelPhotoPending.get(chatId);
+  const task = (async () => {
+    let bytes = null;
+    try {
+      const opts = () => ({ redirect: 'error', signal: AbortSignal.timeout(8000) });
+      const chat = await (await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/getChat?chat_id=${encodeURIComponent(chatId)}`, opts())).json();
+      const id = chat.ok && chat.result?.photo?.small_file_id;
+      if (id) {
+        const file = await (await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/getFile?file_id=${encodeURIComponent(id)}`, opts())).json();
+        const path = file.ok && file.result?.file_path;
+        if (typeof path === 'string' && /^photos\/[A-Za-z0-9_.-]+\.jpg$/i.test(path)) {
+          const response = await fetch(`https://api.telegram.org/file/bot${BOT_TOKEN}/${path}`, opts());
+          if (response.ok && response.body) {
+            const reader = response.body.getReader();
+            const chunks = [];
+            let size = 0;
+            while (true) {
+              const {done, value} = await reader.read();
+              if (done) break;
+              size += value.length;
+              if (size > 512 * 1024) { await reader.cancel(); throw new Error('Photo too large'); }
+              chunks.push(Buffer.from(value));
+            }
+            const image = Buffer.concat(chunks);
+            if (image.length >= 4 && image[0] === 255 && image[1] === 216 && image[2] === 255) bytes = image;
+          }
+        }
+      }
+    } catch (_) { /* Never log token-bearing upstream URLs. */ }
+    _channelPhotoCache.set(chatId, {bytes, expires: Date.now() + (bytes ? 600000 : 30000)});
+    return bytes;
+  })();
+  _channelPhotoPending.set(chatId, task);
+  try { return await task; } finally { _channelPhotoPending.delete(chatId); }
+}
+
+router.get('/force-join/photo/:chatId', async (req, res) => {
+  const chatId = req.params.chatId;
+  if (!getForceJoinChannels().some(ch => ch.id === chatId) || !BOT_TOKEN)
+    return res.status(404).end();
+  const bytes = await loadChannelPhoto(chatId);
+  if (!bytes) return res.set('Cache-Control', 'no-store').status(404).end();
+  res.set({'Content-Type': 'image/jpeg', 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'public, max-age=300'});
+  return res.send(bytes);
+});
+
 const _channelInfoCache = new Map();
 async function getChannelInfo(chatId, botToken) {
   const now = Date.now();
@@ -1817,7 +1869,7 @@ async function getChannelInfo(chatId, botToken) {
     const title = chat ? (chat.title||chat.first_name||'') : '';
     const username = chat ? (chat.username||'') : '';
     // Never expose Telegram file URLs: they contain the bot credential.
-    const photoUrl = null;
+    const photoUrl = chat?.photo?.small_file_id ? '/api/force-join/photo/' + encodeURIComponent(chatId) : null;
     const redirectLink = username ? `https://t.me/${username}` : (chat && chat.invite_link ? chat.invite_link : null);
     const info = { title, username, photoUrl, redirectLink, cachedAt: now };
     _channelInfoCache.set(chatId, info);
@@ -1841,7 +1893,7 @@ router.post('/force-join/check', async (req, res) => {
     ]);
     const status = memberData.result && memberData.result.status;
     const joined = ['member','administrator','creator'].includes(status);
-    return { id: ch.id, name: ch.name !== ('Channel '+(channels.indexOf(ch)+1)) ? ch.name : (info.title||ch.name), link: ch.link||info.redirectLink||null, photoUrl: null, joined, status: status||'not_member' };
+    return { id: ch.id, name: ch.name !== ('Channel '+(channels.indexOf(ch)+1)) ? ch.name : (info.title||ch.name), link: ch.link||info.redirectLink||null, photoUrl: info.photoUrl || null, joined, status: status||'not_member' };
   }));
   res.json({ allJoined: results.every(c => c.joined), channels: results });
 });
